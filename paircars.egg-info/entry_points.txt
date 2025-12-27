@@ -1,7 +1,0 @@
-[console_scripts]
-create-caltable = paircars.utils.create_caltable:cli
-init-paircars-prefect = paircars.pipeline.prefect_server:cli
-init-paircars-setup = paircars.pipeline.init_data:cli
-kill-paircars-job = paircars.pipeline.kill_job:kill_paircarsjob
-run-mwa-basic-cal = paircars.pipeline.basic_cal:cli
-run-mwa-import-model = paircars.pipeline.import_model:cli
