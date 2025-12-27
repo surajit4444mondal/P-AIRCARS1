@@ -160,6 +160,7 @@ myst-parser==4.0.1
 networkx==3.4.2
 numba==0.60.0
 numcodecs==0.13.1
+numexpr==2.14.1
 numpy==1.26.4
 numpydoc==1.9.0
 oauthlib==3.3.1

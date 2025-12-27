@@ -180,6 +180,7 @@ dependencies = [
     "prefect==3.4.9",
     "prefect-dask==0.3.6",
     "python-dotenv==1.1.1",
+    "numexpr==2.14.1",
 ]
 urls = { "Homepage" = "https://github.com/devojyoti96/P-AIRCARS" }
 
@@ -207,9 +208,12 @@ dev = [
 # Console scripts entry points
 [project.scripts]
 run-mwa-import-model = "paircars.pipeline.import_model:cli"
+run-mwa-basic-cal = "paircars.pipeline.basic_cal:cli"
 init-paircars-setup = "paircars.pipeline.init_data:cli"
 init-paircars-prefect="paircars.pipeline.prefect_server:cli"
 kill-paircars-job = "paircars.pipeline.kill_job:kill_paircarsjob"
+create-caltable = "paircars.utils.create_caltable:cli"
+
 
 [tool.setuptools]
 packages = [

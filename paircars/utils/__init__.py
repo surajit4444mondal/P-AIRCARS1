@@ -5,8 +5,8 @@ from .flagging import *
 from .image_utils import *
 from .imaging import *
 from .logger_utils import *
-from .meer_ploting_utils import *
-from .meer_utils import *
+from .mwa_ploting_utils import *
+from .mwa_utils import *
 from .ms_metadata import *
 from .proc_manage_utils import *
 from .resource_utils import *

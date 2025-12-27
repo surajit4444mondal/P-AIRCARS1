@@ -2,23 +2,78 @@ import os
 import copy
 import time
 import psutil
-import sys
 import warnings
+import argparse
 import numexpr as ne
 import numpy as np
-from casacore.tables import table
+import subprocess
+import traceback
 from datetime import datetime
 from scipy.ndimage import gaussian_filter1d
-from .basic_utils import *
-from .flagging import *
-
+from scipy.interpolate import interp1d
+from casacore.tables import table
+from paircars.pipeline.import_model import suppress_output
 warnings.filterwarnings("ignore")
 
 
-def create_crossphase_table(msname, caltable, freqs, crossphase, flags):
+def get_chans_flags(msname):
+    """
+    Get channels flagged or not
+    
+    Parameters
+    ----------
+    msname : str
+        Name of the measurement set
+        
+    Returns
+    -------
+    numpy.array
+        A boolean array indicating whether the channel is completely flagged or not
+    """
     with suppress_output():
-        nchan = len(freqs)
-        freqres = freqs[1] - freqs[0]
+        tb = table(msname)
+        flag = tb.getcol("FLAG")
+        tb.close()
+    chan_flags = np.all(np.all(flag, axis=-1), axis=0)
+    return chan_flags
+    
+    
+def create_crossphase_table(msname, caltable, freqs, crossphase, flags):
+    """
+    Create cross phase CASA caltable
+    
+    Parameters
+    ----------
+    msname : str
+        Measurement set
+    caltable : str
+        Caltable name
+    freqs : numpy.array
+        Frequency list
+    crossphase : numpy.array
+        Crossphase array
+    flags : numpy.array
+        Flags
+    
+    Returns
+    -------
+    str
+        Caltable name
+    """
+    nchan = len(freqs)
+    cmd = [
+        "create-caltable",
+        "--msname", msname,
+        "--caltable", caltable,
+        "--nchan", str(nchan),
+    ]
+
+    subprocess.run(cmd, check=True)
+    freqres = freqs[1] - freqs[0]
+    if os.path.exists(caltable) is not True:
+        print ("Caltable is not made.")
+        return 
+    with suppress_output():
         tb = table(msname)
         mean_time = np.nanmean(tb.getcol("TIME"))
         tb.close()
@@ -88,6 +143,22 @@ def average_with_padding(array, chanwidth, axis=0, pad_value=np.nan):
     # Use nanmean along the chunk axis for averaging
     averaged_array = np.nanmean(reshaped_array, axis=axis + 1)
     return averaged_array
+
+
+def interpolate_nans(data):
+    """Linearly interpolate NaNs in 1D array."""
+    nans = np.isnan(data)
+    if np.all(nans):
+        raise ValueError("All values are NaN.")
+    x = np.arange(len(data))
+    interp_func = interp1d(
+        x[~nans],
+        data[~nans],
+        kind="linear",
+        bounds_error=False,
+        fill_value="extrapolate",
+    )
+    return interp_func(x)
 
 
 def filter_outliers(data, threshold=5, max_iter=3):
@@ -183,7 +254,7 @@ def fitted_crossphase(freqs, crossphase):
 
 def crossphasecal(
     msname,
-    caltable="",
+    caltable,
     uvrange="",
     gaintable="",
     chanwidth=1,
@@ -197,11 +268,11 @@ def crossphasecal(
             Name of the measurement set
     caltable : str
         Name of the caltable
-    uvrange : str
+    uvrange : str, optional
         UV-range for calibration
-    gaintable : str
+    gaintable : str, optional
             Previous gaintable
-    chanwidth : int
+    chanwidth : int, optional
         Channels to average
 
     Returns
@@ -218,13 +289,6 @@ def crossphasecal(
     if caltable == "":
         caltable = msname.split(".ms")[0] + ".kcross"
     #######################
-    with suppress_output():
-        tb = table(gaintable)
-        if type(gaintable) == list:
-            gaintable = gaintable[0]
-        gain = tb.getcol("CPARAM")
-        tb.close()
-        del tb
     with suppress_output():
         tb = table(msname + "/SPECTRAL_WINDOW")
         freqs = tb.getcol("CHAN_FREQ").flatten()
@@ -244,6 +308,17 @@ def crossphasecal(
         # Col shape, baselines, chans, corrs
         weight = np.repeat(weight[:, np.newaxis, 0], model_data.shape[1], axis=1)
         tb.close()
+    if gaintable=="":
+        gaintable_supplied=False
+    else:
+        gaintable_supplied=True 
+        with suppress_output():
+            tb = table(gaintable)
+            if type(gaintable) == list:
+                gaintable = gaintable[0]
+            gain = tb.getcol("CPARAM")
+            tb.close()
+            del tb
     if uvrange != "":
         uvdist = np.sqrt(uvw[:, 0] ** 2 + uvw[:, 1] ** 2)
         if "~" in uvrange:
@@ -269,97 +344,41 @@ def crossphasecal(
     xy_data = data[..., 1]
     yx_data = data[..., 2]
     xy_model = model_data[..., 1]
-    yx_model = model_data[..., 2]
-    gainX1 = gain[ant1, :, 0]
-    gainY1 = gain[ant1, :, -1]
-    gainX2 = gain[ant2, :, 0]
-    gainY2 = gain[ant2, :, -1]
-    del data, model_data, uvw, flag, gain
+    yx_model = model_data[..., 2]   
+    if gaintable_supplied: 
+        gainX1 = gain[ant1, :, 0]
+        gainY1 = gain[ant1, :, -1]
+        gainX2 = gain[ant2, :, 0]
+        gainY2 = gain[ant2, :, -1]
+        del gain
+    del data, model_data, uvw, flag
     if chanwidth > 1:
         xy_data = average_with_padding(xy_data, chanwidth, axis=1, pad_value=np.nan)
         yx_data = average_with_padding(yx_data, chanwidth, axis=1, pad_value=np.nan)
         xy_model = average_with_padding(xy_model, chanwidth, axis=1, pad_value=np.nan)
         yx_model = average_with_padding(yx_model, chanwidth, axis=1, pad_value=np.nan)
-        gainX1 = average_with_padding(gainX1, chanwidth, axis=1, pad_value=np.nan)
-        gainX2 = average_with_padding(gainX2, chanwidth, axis=1, pad_value=np.nan)
-        gainY1 = average_with_padding(gainY1, chanwidth, axis=1, pad_value=np.nan)
-        gainY2 = average_with_padding(gainY2, chanwidth, axis=1, pad_value=np.nan)
+        if gaintable_supplied:
+            gainX1 = average_with_padding(gainX1, chanwidth, axis=1, pad_value=np.nan)
+            gainX2 = average_with_padding(gainX2, chanwidth, axis=1, pad_value=np.nan)
+            gainY1 = average_with_padding(gainY1, chanwidth, axis=1, pad_value=np.nan)
+            gainY2 = average_with_padding(gainY2, chanwidth, axis=1, pad_value=np.nan)
         weight = average_with_padding(weight, chanwidth, axis=1, pad_value=np.nan)
-    argument = ne.evaluate(
-        "weight * xy_data * conj(xy_model * gainX1) * gainY2 + weight * yx_model * gainY1 * conj(gainX2 * yx_data)"
-    )
+    if gaintable_supplied:
+        argument = ne.evaluate(
+            "weight * xy_data * conj(xy_model * gainX1) * gainY2 + weight * yx_model * gainY1 * conj(gainX2 * yx_data)"
+        )
+    else:
+        argument = ne.evaluate(
+            "weight * xy_data * conj(xy_model) + weight * yx_model * conj(yx_data)"
+        )
     crossphase = np.angle(np.nansum(argument, axis=0), deg=True)
     freqs = average_with_padding(freqs, chanwidth, axis=0, pad_value=np.nan)
     if chanwidth > 1:
         chan_flags = np.array([False] * len(crossphase))
     else:
-        chan_unflags, chan_flags = get_chans_flags(msname)
+        chan_flags = get_chans_flags(msname)
     crossphase[chan_flags] = np.nan
-
     crossphase = fitted_crossphase(freqs, crossphase)
-
-    os.system(
-        "python3 create_caltable.py --msname "
-        + msname
-        + " --caltable "
-        + caltable
-        + " --nchan "
-        + str(len(crossphase))
-        + "> /dev/null 2>&1"
-    )
     create_crossphase_table(msname, caltable, freqs, crossphase, chan_flags)
     return caltable
-
-
-if __name__ == "__main__":
-    usage = "Flag and calibrate"
-    parser = OptionParser(usage=usage)
-    parser.add_option(
-        "--msname",
-        dest="msname",
-        default=None,
-        help="Name of the measurement set",
-        metavar="String",
-    )
-    parser.add_option(
-        "--caltable",
-        dest="caltable",
-        default="",
-        help="Caltable name",
-        metavar="String",
-    )
-    parser.add_option(
-        "--gaintable",
-        dest="gaintable",
-        default="",
-        help="Gaintable name",
-        metavar="String",
-    )
-    parser.add_option(
-        "--uvrange",
-        dest="uvrange",
-        default="",
-        help="UV-range for calibration",
-        metavar="String",
-    )
-    parser.add_option(
-        "--chanwidth",
-        dest="chanwidth",
-        default=11,
-        help="Crosshand channel width to average",
-        metavar="Integer",
-    )
-    (options, args) = parser.parse_args()
-
-    if options.gaintable != "":
-        gaintable = options.gaintable.split(",")
-    else:
-        gaintable = []
-
-    crossphase_table = crossphasecal(
-        options.msname,
-        caltable=options.caltable,
-        uvrange=options.uvrange,
-        gaintable=gaintable,
-        chanwidth=int(options.chanwidth),
-    )
+       
