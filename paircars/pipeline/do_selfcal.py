@@ -9,6 +9,12 @@ import time
 import sys
 import os
 import copy
+from casatasks import casalog
+try:
+    logfile = casalog.logfile()
+    os.remove(logfile)
+except BaseException:
+    pass
 from casatools import msmetadata, table
 from dask import delayed
 from functools import partial

@@ -12,11 +12,26 @@ from datetime import datetime
 from scipy.ndimage import gaussian_filter1d
 from scipy.interpolate import interp1d
 from casacore.tables import table
-from paircars.pipeline.import_model import suppress_output
+from contextlib import contextmanager
 
 warnings.filterwarnings("ignore")
 
-
+@contextmanager
+def suppress_output():
+    """
+    Supress CASA terminal output
+    """
+    with open(os.devnull, "w") as fnull:
+        old_stdout = os.dup(1)
+        old_stderr = os.dup(2)
+        os.dup2(fnull.fileno(), 1)
+        os.dup2(fnull.fileno(), 2)
+        try:
+            yield
+        finally:
+            os.dup2(old_stdout, 1)
+            os.dup2(old_stderr, 2)
+            
 def get_chans_flags(msname):
     """
     Get channels flagged or not

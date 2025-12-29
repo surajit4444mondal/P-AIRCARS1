@@ -8,6 +8,12 @@ import glob
 import sys
 import os
 from casatasks import casalog
+try:
+    logfile = casalog.logfile()
+    os.remove(logfile)
+except BaseException:
+    pass
+from casatasks import casalog
 from casatools import msmetadata
 from dask import delayed
 from paircars.utils import *

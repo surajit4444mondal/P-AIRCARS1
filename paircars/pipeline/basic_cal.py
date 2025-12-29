@@ -7,6 +7,12 @@ import traceback
 import time
 import sys
 import os
+from casatasks import casalog
+try:
+    logfile = casalog.logfile()
+    os.remove(logfile)
+except BaseException:
+    pass
 from casatools import msmetadata
 from dask import delayed
 from paircars.utils import *

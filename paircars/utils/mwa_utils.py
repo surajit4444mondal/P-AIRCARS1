@@ -14,6 +14,12 @@ from astropy.wcs import FITSFixedWarning
 from astropy.io import fits
 from astropy.time import Time
 from astropy.coordinates import SkyCoord
+from casatasks import casalog
+try:
+    logfile = casalog.logfile()
+    os.remove(logfile)
+except BaseException:
+    pass
 from casatools import msmetadata, ms as casamstool, table
 from datetime import datetime as dt, timedelta
 from .basic_utils import *

@@ -8,7 +8,7 @@ import argparse
 import toml
 from pathlib import Path
 from dotenv import load_dotenv
-from paircars.utils.basic_utils import *
+from .basic_utils import *
 
 
 # === CONFIG ===

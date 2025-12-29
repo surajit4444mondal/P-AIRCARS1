@@ -10,6 +10,12 @@ import time
 import glob
 import sys
 import os
+from casatasks import casalog
+try:
+    logfile = casalog.logfile()
+    os.remove(logfile)
+except BaseException:
+    pass
 from casatools import table
 from dask import delayed
 from astropy.io import fits

@@ -18,14 +18,6 @@ from .prefect_setup_utils import *
 from .crossphasecal import *
 from .mwapb_utils import *
 from .ds_utils import *
-
-import os
-
 create_datadir()
 set_udocker_env()
 
-try:
-    logfile = casalog.logfile()
-    os.remove(logfile)
-except BaseException:
-    pass
