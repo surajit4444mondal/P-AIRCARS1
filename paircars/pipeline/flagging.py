@@ -14,7 +14,6 @@ from paircars.utils import *
 
 logging.getLogger("distributed").setLevel(logging.ERROR)
 logging.getLogger("tornado.application").setLevel(logging.CRITICAL)
-datadir = get_datadir()
 
 
 def single_ms_flag(
@@ -57,7 +56,7 @@ def single_ms_flag(
         Number of OpenMP threads
     memory_limit : float, optional
         Memory limit in GB
-        
+
     Returns
     -------
     int
@@ -191,8 +190,8 @@ def single_ms_flag(
                         freqfit="poly",
                         extendflags=True,
                         flagdimension=flagdimension,
-                        timecutoff=max(4.0,threshold-1),
-                        freqcutoff=max(3.0,threshold-2),
+                        timecutoff=max(4.0, threshold - 1),
+                        freqcutoff=max(3.0, threshold - 2),
                         growaround=False,
                         action="apply",
                         flagbackup=False,
@@ -258,6 +257,7 @@ def single_ms_flag(
 
 def do_flagging(
     msname,
+    metafits,
     dask_client,
     workdir,
     outdir,
@@ -279,6 +279,8 @@ def do_flagging(
     ----------
     msname : str
         Name of the ms
+    metafits : str
+        MWA metafits
     dask_client : dask.client
         Dask client
     workdir : str
@@ -331,16 +333,12 @@ def do_flagging(
         print("Restoring all previous flags...")
         with suppress_output():
             flagdata(vis=msname, mode="unflag", spw="0", flagbackup=False)
-        fluxcal_field, fluxcal_scans = get_fluxcals(msname)
-        if len(fluxcal_field) == 0:
-            flag_bad_spw = False
-            flag_bad_ants = False
         if flag_bad_spw:
             badspw = get_bad_chans(msname)
         else:
-            bandspw = ""
+            badspw = ""
         if flag_bad_ants:
-            bad_ants, bad_ants_str = get_bad_ants(msname, fieldnames=fluxcal_field)
+            bad_ants_str = get_mwa_bad_ants(metafits)
         else:
             bad_ants_str = ""
         if os.path.exists(msname + "/SUBMSS"):
@@ -385,8 +383,10 @@ def do_flagging(
         ###############
         # Flag summary
         ###############
-        summary_file=f"{outdir}/{os.path.basename(msname).split('.ms')[0]}_basicflag.summary"
-        print (f"Flag summary: {summary_file}")
+        summary_file = (
+            f"{outdir}/{os.path.basename(msname).split('.ms')[0]}_basicflag.summary"
+        )
+        print(f"Flag summary: {summary_file}")
         flagsummary(msname, summary_file)
         return 0
     except Exception as e:
@@ -396,6 +396,7 @@ def do_flagging(
 
 def main(
     msname,
+    metafits,
     workdir="",
     outdir="",
     datacolumn="DATA",
@@ -420,6 +421,8 @@ def main(
     ----------
     msname : str
         Path to the input measurement set (MS) to be flagged.
+    metafits : str
+        Metafits file
     workdir : str, optional
         Working directory to store logs and temporary files. If empty, defaults to
         `<msname>/workdir`. Default is "".
@@ -466,10 +469,10 @@ def main(
     if workdir == "":
         workdir = os.path.dirname(os.path.abspath(msname)) + "/workdir"
     os.makedirs(workdir, exist_ok=True)
-    if outdir=="":
-        outdir=workdir
-    os.makedirs(outdir,exist_ok=True)
-    
+    if outdir == "":
+        outdir = workdir
+    os.makedirs(outdir, exist_ok=True)
+
     ############
     # Logger
     ############
@@ -505,6 +508,7 @@ def main(
         if msname and os.path.exists(msname):
             msg = do_flagging(
                 msname,
+                metafits,
                 dask_client,
                 workdir,
                 outdir,
@@ -538,7 +542,7 @@ def main(
 
 
 def cli():
-    usage = "Initial flagging of calibrator data"
+    usage = "Initial flagging"
     parser = argparse.ArgumentParser(
         description=usage, formatter_class=SmartDefaultsHelpFormatter
     )

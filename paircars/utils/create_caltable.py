@@ -1,5 +1,5 @@
 import sys
-import numpy as np 
+import numpy as np
 import os
 import argparse
 import traceback
@@ -9,7 +9,7 @@ from multiprocessing import Process
 def create_blank_table(msname, caltable):
     """
     Create a blank bandpass table
-    
+
     Parameters
     ----------
     msname : str
@@ -23,6 +23,7 @@ def create_blank_table(msname, caltable):
         Blank caltable name
     """
     from casatools import calibrater
+
     cb = calibrater()
     cb.open(msname)
     cb.createcaltable(caltable, "Complex", "B Jones", False)
@@ -33,7 +34,7 @@ def create_blank_table(msname, caltable):
 def make_caltable_columns(msname, caltable, nchan):
     """
     Make blank caltable columns
-    
+
     Parameters
     ----------
     ms_file : str
@@ -42,7 +43,7 @@ def make_caltable_columns(msname, caltable, nchan):
         Name of the output calibration table.
     nchan :int
         Number of channels to include in the table
-        
+
     Returns
     -------
     str
@@ -147,7 +148,7 @@ def create_blank_caltable(msname, caltable, nchan):
         ),
     )
     process1.start()
-    process1.join()    
+    process1.join()
     process2 = Process(
         target=make_caltable_columns,
         args=(
@@ -163,9 +164,7 @@ def create_blank_caltable(msname, caltable, nchan):
 
 ################################
 def cli():
-    parser = argparse.ArgumentParser(
-        description="Create blank caltable"
-    )
+    parser = argparse.ArgumentParser(description="Create blank caltable")
     parser.add_argument(
         "--msname",
         required=True,

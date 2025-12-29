@@ -181,6 +181,8 @@ dependencies = [
     "prefect-dask==0.3.6",
     "python-dotenv==1.1.1",
     "numexpr==2.14.1",
+    "mwa_hyperbeam==0.10.4",
+    "skyfield==1.53",
 ]
 urls = { "Homepage" = "https://github.com/devojyoti96/P-AIRCARS" }
 
@@ -207,13 +209,25 @@ dev = [
 
 # Console scripts entry points
 [project.scripts]
-run-mwa-import-model = "paircars.pipeline.import_model:cli"
 run-mwa-basic-cal = "paircars.pipeline.basic_cal:cli"
+run-mwa-apply-basiccal = "paircars.pipeline.do_apply_basiccal:cli"
+run-mwa-apply-selfcal = "paircars.pipeline.do_apply_selfcal:cli"
+run-mwa-split = "paircars.pipeline.do_target_split:cli"
+run-mwa-flag = "paircars.pipeline.flagging:cli"
+run-mwa-import-model = "paircars.pipeline.import_model:cli"
+run-mwa-selfcal = "paircars.pipeline.do_selfcal:cli"
+run-mwa-imaging = "paircars.pipeline.do_imaging:cli"
+run-mwa-singlepbcor ="paircars.pipeline.single_image_mwapbcor:cli"
+run-mwa-pbcor ="paircars.pipeline.mwa_pbcor:cli"
+run-mwa-mwalogger ="paircars.pipeline.viewer:cli"
 init-paircars-setup = "paircars.pipeline.init_data:cli"
 init-paircars-prefect="paircars.pipeline.prefect_server:cli"
-kill-paircars-job = "paircars.pipeline.kill_job:kill_paircarsjob"
+kill-paircars-job = "paircars.pipeline.kill_job:kill_mwajob"
+run-mwa-paircars = "paircars.pipeline.master_flow:cli"
+show-paircars-ms="paircars.pipeline.show_msdetails:cli"
+show-paircars-status = "paircars.pipeline.show_status:cli"
+run-mwa-makeds = "paircars.pipeline.mwa_make_ds:cli"
 create-caltable = "paircars.utils.create_caltable:cli"
-
 
 [tool.setuptools]
 packages = [

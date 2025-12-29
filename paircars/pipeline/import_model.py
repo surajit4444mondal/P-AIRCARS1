@@ -11,6 +11,7 @@ from casacore.tables import table as casacore_table, makecoldesc
 logging.getLogger("distributed").setLevel(logging.ERROR)
 logging.getLogger("tornado.application").setLevel(logging.CRITICAL)
 
+
 @contextmanager
 def suppress_output():
     """
@@ -58,7 +59,8 @@ def get_datadir():
         datadir = f.read().strip()
     os.makedirs(datadir, exist_ok=True)
     return datadir
-    
+
+
 def import_model(msname, metafits, beamfile="", sourcelist="", ncpu=-1):
     """
     Simulate visibilities and import in the measurement set
@@ -78,7 +80,7 @@ def import_model(msname, metafits, beamfile="", sourcelist="", ncpu=-1):
     """
     datadir = get_datadir()
     if datadir is None:
-        print ("Please setup P-AIRCARS first.")
+        print("Please setup P-AIRCARS first.")
         return
     if beamfile == "" or os.path.exists(beamfile) is not True:
         beamfile = f"{datadir}/mwa_full_embedded_element_pattern.h5"

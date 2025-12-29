@@ -194,7 +194,6 @@ def single_ms_cal_and_flag(
         msmd.open(msname)
         npol = msmd.ncorrforpol()[0]
         msmd.close()
-        good_chans = get_good_chans(msname)
         ######################################
         # Removing previous rounds caltables
         ######################################

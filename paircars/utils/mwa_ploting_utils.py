@@ -26,7 +26,7 @@ from PIL import Image
 from .basic_utils import *
 from .proc_manage_utils import *
 from .ms_metadata import *
-from .meer_utils import *
+from .mwa_utils import *
 
 warnings.simplefilter("ignore", category=FITSFixedWarning)
 
@@ -359,16 +359,14 @@ def plot_caltable_diagnostics(caltable, outdir=""):
             os.system(f"rm -rf {png}")
 
 
-def get_meermap(fits_image, band="", do_sharpen=False):
+def get_mwamap(fits_image, do_sharpen=False):
     """
-    Make MeerKAT sunpy map
+    Make MWA sunpy map
 
     Parameters
     ----------
     fits_image : str
-        MeerKAT fits image
-    band : str, optional
-        Band name
+        MWA fits image
     do_sharpen : bool, optional
         Sharpen the image
 
@@ -383,67 +381,60 @@ def get_meermap(fits_image, band="", do_sharpen=False):
 
     logging.getLogger("sunpy").setLevel(logging.ERROR)
 
-    MEERLAT = -30.7133
-    MEERLON = 21.4429
-    MEERALT = 1086.6
-    meer_hdu = fits.open(fits_image)  # Opening MeerKAT fits file
-    meer_header = meer_hdu[0].header  # meer header
-    meer_data = meer_hdu[0].data
-    if len(meer_data.shape) > 2:
-        meer_data = meer_data[0, 0, :, :]  # meer data
-    if meer_header["CTYPE3"] == "FREQ":
-        frequency = meer_header["CRVAL3"] * u.Hz
-    elif meer_header["CTYPE4"] == "FREQ":
-        frequency = meer_header["CRVAL4"] * u.Hz
+    MWALAT = -26.703319  # degrees
+    MWALON = 116.670815  # degrees
+    MWAALT = 377.0  # meters
+    mwa_hdu = fits.open(fits_image)  # Opening MWA fits file
+    mwa_header = mwa_hdu[0].header  # mwa header
+    mwa_data = mwa_hdu[0].data
+    if len(mwa_data.shape) > 2:
+        mwa_data = mwa_data[0, 0, :, :]  # mwa data
+    if mwa_header["CTYPE3"] == "FREQ":
+        frequency = mwa_header["CRVAL3"] * u.Hz
+    elif mwa_header["CTYPE4"] == "FREQ":
+        frequency = mwa_header["CRVAL4"] * u.Hz
     else:
         frequency = ""
-    if band == "":
-        try:
-            band = meer_header["BAND"]
-        except BaseException:
-            band = ""
     try:
-        pixel_unit = meer_header["BUNIT"]
+        pixel_unit = mwa_header["BUNIT"]
     except BaseException:
         pixel_nuit = ""
-    obstime = Time(meer_header["date-obs"])
-    meerpos = EarthLocation(
-        lat=MEERLAT * u.deg, lon=MEERLON * u.deg, height=MEERALT * u.m
-    )
+    obstime = Time(mwa_header["date-obs"])
+    mwapos = EarthLocation(lat=MWALAT * u.deg, lon=MWALON * u.deg, height=MWAALT * u.m)
     # Converting into GCRS coordinate
-    meer_gcrs = SkyCoord(meerpos.get_gcrs(obstime))
+    mwa_gcrs = SkyCoord(mwapos.get_gcrs(obstime))
     reference_coord = SkyCoord(
-        meer_header["crval1"] * u.Unit(meer_header["cunit1"]),
-        meer_header["crval2"] * u.Unit(meer_header["cunit2"]),
+        mwa_header["crval1"] * u.Unit(mwa_header["cunit1"]),
+        mwa_header["crval2"] * u.Unit(mwa_header["cunit2"]),
         frame="gcrs",
         obstime=obstime,
-        obsgeoloc=meer_gcrs.cartesian,
-        obsgeovel=meer_gcrs.velocity.to_cartesian(),
-        distance=meer_gcrs.hcrs.distance,
+        obsgeoloc=mwa_gcrs.cartesian,
+        obsgeovel=mwa_gcrs.velocity.to_cartesian(),
+        distance=mwa_gcrs.hcrs.distance,
     )
     reference_coord_arcsec = reference_coord.transform_to(
-        frames.Helioprojective(observer=meer_gcrs)
+        frames.Helioprojective(observer=mwa_gcrs)
     )
-    cdelt1 = (np.abs(meer_header["cdelt1"]) * u.deg).to(u.arcsec)
-    cdelt2 = (np.abs(meer_header["cdelt2"]) * u.deg).to(u.arcsec)
+    cdelt1 = (np.abs(mwa_header["cdelt1"]) * u.deg).to(u.arcsec)
+    cdelt2 = (np.abs(mwa_header["cdelt2"]) * u.deg).to(u.arcsec)
     P1 = sun.P(obstime)  # Relative rotation angle
-    new_meer_header = make_fitswcs_header(
-        meer_data,
+    new_mwa_header = make_fitswcs_header(
+        mwa_data,
         reference_coord_arcsec,
         reference_pixel=u.Quantity(
-            [meer_header["crpix1"] - 1, meer_header["crpix2"] - 1] * u.pixel
+            [mwa_header["crpix1"] - 1, mwa_header["crpix2"] - 1] * u.pixel
         ),
         scale=u.Quantity([cdelt1, cdelt2] * u.arcsec / u.pix),
         rotation_angle=-P1,
         wavelength=frequency.to(u.MHz).round(2),
-        observatory="MeerKAT",
+        observatory="mwaKAT",
     )
     if do_sharpen:
-        blurred = gaussian_filter(meer_data, sigma=10)
-        meer_data = meer_data + (meer_data - blurred)
-    meer_map = Map(meer_data, new_meer_header)
-    meer_map_rotate = meer_map.rotate()
-    return meer_map_rotate
+        blurred = gaussian_filter(mwa_data, sigma=10)
+        mwa_data = mwa_data + (mwa_data - blurred)
+    mwa_map = Map(mwa_data, new_mwa_header)
+    mwa_map_rotate = mwa_map.rotate()
+    return mwa_map_rotate
 
 
 def save_in_hpc(fits_image, outdir="", xlim=[-1600, 1600], ylim=[-1600, 1600]):
@@ -468,21 +459,21 @@ def save_in_hpc(fits_image, outdir="", xlim=[-1600, 1600], ylim=[-1600, 1600]):
     """
     logging.getLogger("sunpy").setLevel(logging.ERROR)
     fits_header = fits.getheader(fits_image)
-    meermap = get_meermap(fits_image)
+    mwamap = get_mwamap(fits_image)
     if len(xlim) == 2 and len(ylim) == 2:
         top_right = SkyCoord(
-            xlim[1] * u.arcsec, ylim[1] * u.arcsec, frame=meermap.coordinate_frame
+            xlim[1] * u.arcsec, ylim[1] * u.arcsec, frame=mwamap.coordinate_frame
         )
         bottom_left = SkyCoord(
-            xlim[0] * u.arcsec, ylim[0] * u.arcsec, frame=meermap.coordinate_frame
+            xlim[0] * u.arcsec, ylim[0] * u.arcsec, frame=mwamap.coordinate_frame
         )
-        meermap = meermap.submap(bottom_left, top_right=top_right)
+        mwamap = mwamap.submap(bottom_left, top_right=top_right)
     if outdir == "":
         outdir = os.path.dirname(os.path.abspath(fits_image))
     outfile = f"{outdir}/{os.path.basename(fits_image).split('.fits')[0]}_HPC.fits"
     if os.path.exists(outfile):
         os.system(f"rm -rf {outfile}")
-    meermap.save(outfile, filetype="fits")
+    mwamap.save(outfile, filetype="fits")
     data = fits.getdata(outfile)
     data = data[np.newaxis, np.newaxis, ...]
     hpc_header = fits.getheader(outfile)
@@ -533,7 +524,7 @@ def plot_in_hpc(
     showgui=False,
 ):
     """
-    Function to convert MeerKAT image into Helioprojective co-ordinate
+    Function to convert MWA image into Helioprojective co-ordinate
 
     Parameters
     ----------
@@ -565,7 +556,7 @@ def plot_in_hpc(
     outfiles
         Saved plot file names
     sunpy.Map
-        MeerKAT image in helioprojective co-ordinate
+        MWA image in helioprojective co-ordinate
     """
     import matplotlib.ticker as ticker
     from matplotlib.patches import Ellipse, Rectangle
@@ -580,42 +571,42 @@ def plot_in_hpc(
         matplotlib.use("TkAgg")
     matplotlib.rcParams.update({"font.size": 12})
     fits_image = fits_image.rstrip("/")
-    meer_header = fits.getheader(fits_image)  # Opening MeerKAT fits file
-    if meer_header["CTYPE3"] == "FREQ":
-        frequency = meer_header["CRVAL3"] * u.Hz
-    elif meer_header["CTYPE4"] == "FREQ":
-        frequency = meer_header["CRVAL4"] * u.Hz
+    mwa_header = fits.getheader(fits_image)  # Opening mwaKAT fits file
+    if mwa_header["CTYPE3"] == "FREQ":
+        frequency = mwa_header["CRVAL3"] * u.Hz
+    elif mwa_header["CTYPE4"] == "FREQ":
+        frequency = mwa_header["CRVAL4"] * u.Hz
     else:
         frequency = ""
     if band == "":
         try:
-            band = meer_header["BAND"]
+            band = mwa_header["BAND"]
         except BaseException:
             band = ""
     try:
-        pixel_unit = meer_header["BUNIT"]
+        pixel_unit = mwa_header["BUNIT"]
     except BaseException:
         pixel_nuit = ""
-    obstime = Time(meer_header["date-obs"])
-    meer_map_rotate = get_meermap(fits_image, band=band)
+    obstime = Time(mwa_header["date-obs"])
+    mwa_map_rotate = get_mwamap(fits_image, band=band)
     top_right = SkyCoord(
-        xlim[1] * u.arcsec, ylim[1] * u.arcsec, frame=meer_map_rotate.coordinate_frame
+        xlim[1] * u.arcsec, ylim[1] * u.arcsec, frame=mwa_map_rotate.coordinate_frame
     )
     bottom_left = SkyCoord(
-        xlim[0] * u.arcsec, ylim[0] * u.arcsec, frame=meer_map_rotate.coordinate_frame
+        xlim[0] * u.arcsec, ylim[0] * u.arcsec, frame=mwa_map_rotate.coordinate_frame
     )
-    cropped_map = meer_map_rotate.submap(bottom_left, top_right=top_right)
-    meer_data = cropped_map.data
+    cropped_map = mwa_map_rotate.submap(bottom_left, top_right=top_right)
+    mwa_data = cropped_map.data
     if len(plot_range) < 2:
         norm = ImageNormalize(
-            meer_data,
-            vmin=0.03 * np.nanmax(meer_data),
-            vmax=0.99 * np.nanmax(meer_data),
+            mwa_data,
+            vmin=0.03 * np.nanmax(mwa_data),
+            vmax=0.99 * np.nanmax(mwa_data),
             stretch=PowerStretch(power),
         )
     else:
         norm = ImageNormalize(
-            meer_data,
+            mwa_data,
             vmin=np.nanmin(plot_range),
             vmax=np.nanmax(plot_range),
             stretch=PowerStretch(power),
@@ -656,20 +647,20 @@ def plot_in_hpc(
             neg_cont = contour_levels[contour_levels < 0]
             if len(pos_cont) > 0:
                 cropped_map.draw_contours(
-                    np.sort(pos_cont) * np.nanmax(meer_data), colors=pos_color
+                    np.sort(pos_cont) * np.nanmax(mwa_data), colors=pos_color
                 )
             if len(neg_cont) > 0:
                 cropped_map.draw_contours(
-                    np.sort(neg_cont) * np.nanmax(meer_data), colors=neg_color
+                    np.sort(neg_cont) * np.nanmax(mwa_data), colors=neg_color
                 )
         ax.coords.grid(False)
         rgba_vmin = plt.get_cmap(cmap)(norm(norm.vmin))
         ax.set_facecolor(rgba_vmin)
         # Read synthesized beam from header
         try:
-            bmaj = meer_header["BMAJ"] * u.deg.to(u.arcsec)  # in arcsec
-            bmin = meer_header["BMIN"] * u.deg.to(u.arcsec)
-            bpa = meer_header["BPA"] - sun.P(obstime).deg  # in degrees
+            bmaj = mwa_header["BMAJ"] * u.deg.to(u.arcsec)  # in arcsec
+            bmin = mwa_header["BMIN"] * u.deg.to(u.arcsec)
+            bpa = mwa_header["BPA"] - sun.P(obstime).deg  # in degrees
         except KeyError:
             bmaj = bmin = bpa = None
         # Plot PSF ellipse in bottom-left if all values are present
@@ -855,11 +846,11 @@ def enhance_offlimb(sunpy_map, do_sharpen=True):
     return scaled_map
 
 
-def make_meer_overlay(
-    meerkat_image,
+def make_mwa_overlay(
+    mwa_image,
     suvi_wavelength=195,
     plot_file_prefix=None,
-    plot_meer_colormap=True,
+    plot_mwa_colormap=True,
     enhance_offdisk=True,
     contour_levels=[0.05, 0.1, 0.2, 0.4, 0.6, 0.8],
     do_sharpen_suvi=True,
@@ -872,18 +863,18 @@ def make_meer_overlay(
     verbose=False,
 ):
     """
-    Make overlay of MeerKAT image on GOES SUVI image
+    Make overlay of MWA image on GOES SUVI image
 
     Parameters
     ----------
-    meerkat_image : str
-        MeerKAT image
+    mwa_image : str
+        MWA image
     suvi_wavelength : float, optional
         GOES SUVI wavelength, options: 94, 131, 171, 195, 284, 304 Å
     plot_file_prefix : str, optional
         Plot file prefix name
-    plot_meer_colormap : bool, optional
-        Plot MeerKAT map colormap
+    plot_mwa_colormap : bool, optional
+        Plot MWA map colormap
     enhance_offdisk : bool, optional
         Enhance off-disk emission
     contour_levels : list, optional
@@ -930,9 +921,9 @@ def make_meer_overlay(
         matplotlib.use("TkAgg")
     else:
         matplotlib.use("Agg")
-    workdir = os.path.dirname(os.path.abspath(meerkat_image))
-    meermap = get_meermap(meerkat_image)
-    obs_datetime = fits.getheader(meerkat_image)["DATE-OBS"]
+    workdir = os.path.dirname(os.path.abspath(mwa_image))
+    mwamap = get_mwamap(mwa_image)
+    obs_datetime = fits.getheader(mwa_image)["DATE-OBS"]
     obs_date = obs_datetime.split("T")[0]
     obs_time = ":".join(obs_datetime.split("T")[-1].split(":")[:2])
     suvi_map = get_suvi_map(obs_date, obs_time, workdir, wavelength=suvi_wavelength)
@@ -954,23 +945,23 @@ def make_meer_overlay(
         wavelength=suvi_map.wavelength,
     )
     reprojected = [
-        reproject_map(meermap, projected_header),
+        reproject_map(mwamap, projected_header),
         reproject_map(suvi_map, projected_header),
     ]
     if ncpu < 1:
         ncpu = 1
     pool = ThreadPool(processes=ncpu)
     with dask.config.set(pool=pool):
-        meer_reprojected, suvi_reprojected = compute(*reprojected, scheduler="threads")
-    meertime = meermap.meta["date-obs"].split(".")[0]
+        mwa_reprojected, suvi_reprojected = compute(*reprojected, scheduler="threads")
+    mwatime = mwamap.meta["date-obs"].split(".")[0]
     suvitime = suvi_map.meta["date-obs"].split(".")[0]
     try:
-        if plot_meer_colormap and len(contour_levels) > 0:
+        if plot_mwa_colormap and len(contour_levels) > 0:
             matplotlib.rcParams.update({"font.size": 18})
             fig = plt.figure(figsize=(16, 8))
             ax_colormap = fig.add_subplot(1, 2, 1, projection=suvi_reprojected)
             ax_contour = fig.add_subplot(1, 2, 2, projection=suvi_reprojected)
-        elif plot_meer_colormap:
+        elif plot_mwa_colormap:
             matplotlib.rcParams.update({"font.size": 14})
             fig = plt.figure(figsize=(10, 8))
             ax_colormap = fig.add_subplot(projection=suvi_reprojected)
@@ -982,7 +973,7 @@ def make_meer_overlay(
             print("No overlay is plotting.")
             return
 
-        title = f"SUVI time: {suvitime}\n MeerKAT time: {meertime}"
+        title = f"SUVI time: {suvitime}\n MWA time: {mwatime}"
         if "transparent_inferno" not in plt.colormaps():
             cmap = cm.get_cmap("inferno", 256)
             colors = cmap(np.linspace(0, 1, 256))
@@ -991,11 +982,11 @@ def make_meer_overlay(
             colors[:, -1] = alpha  # Update the alpha channel
             transparent_inferno = ListedColormap(colors)
             plt.colormaps.register(name="transparent_inferno", cmap=transparent_inferno)
-        if plot_meer_colormap and len(contour_levels) > 0:
+        if plot_mwa_colormap and len(contour_levels) > 0:
             suptitle = title.replace("\n", ",")
             title = ""
             fig.suptitle(suptitle)
-        if plot_meer_colormap:
+        if plot_mwa_colormap:
             z = 0
             suvi_reprojected.plot(
                 axes=ax_colormap,
@@ -1005,7 +996,7 @@ def make_meer_overlay(
                 zorder=z,
             )
             z += 1
-            meer_reprojected.plot(
+            mwa_reprojected.plot(
                 axes=ax_colormap,
                 title=title,
                 clip_interval=(3, 99.9) * u.percent,
@@ -1022,8 +1013,8 @@ def make_meer_overlay(
                 zorder=z,
             )
             z += 1
-            contour_levels = np.array(contour_levels) * np.nanmax(meer_reprojected.data)
-            meer_reprojected.draw_contours(
+            contour_levels = np.array(contour_levels) * np.nanmax(mwa_reprojected.data)
+            mwa_reprojected.draw_contours(
                 contour_levels, axes=ax_contour, cmap="YlGnBu", zorder=z
             )
             ax_contour.set_facecolor("black")
@@ -1036,10 +1027,10 @@ def make_meer_overlay(
                 )
                 x_pix = suvi_reprojected.world_to_pixel(sky)[0].value
                 x_pix_limits.append(x_pix)
-            if plot_meer_colormap and len(contour_levels) > 0:
+            if plot_mwa_colormap and len(contour_levels) > 0:
                 ax_colormap.set_xlim(x_pix_limits)
                 ax_contour.set_xlim(x_pix_limits)
-            elif plot_meer_colormap:
+            elif plot_mwa_colormap:
                 ax_colormap.set_xlim(x_pix_limits)
             elif len(contour_levels) > 0:
                 ax_contour.set_xlim(x_pix_limits)
@@ -1051,17 +1042,17 @@ def make_meer_overlay(
                 )
                 y_pix = suvi_reprojected.world_to_pixel(sky)[1].value
                 y_pix_limits.append(y_pix)
-            if plot_meer_colormap and len(contour_levels) > 0:
+            if plot_mwa_colormap and len(contour_levels) > 0:
                 ax_colormap.set_ylim(y_pix_limits)
                 ax_contour.set_ylim(y_pix_limits)
-            elif plot_meer_colormap:
+            elif plot_mwa_colormap:
                 ax_colormap.set_ylim(y_pix_limits)
             elif len(contour_levels) > 0:
                 ax_contour.set_ylim(y_pix_limits)
-        if plot_meer_colormap and len(contour_levels) > 0:
+        if plot_mwa_colormap and len(contour_levels) > 0:
             ax_colormap.coords.grid(False)
             ax_contour.coords.grid(False)
-        elif plot_meer_colormap:
+        elif plot_mwa_colormap:
             ax_colormap.coords.grid(False)
         elif len(contour_levels) > 0:
             ax_contour.coords.grid(False)
@@ -1095,257 +1086,6 @@ def make_meer_overlay(
     finally:
         plt.close("all")
     return plot_file_list
-
-
-##############################
-# Extract dynamic spectrum
-##############################
-def make_ds_file_per_scan(msname, save_file, scan, datacolumn):
-    """
-    Extract dynamic spectrum from measurement set
-
-    Parameters
-    ----------
-    msname : str
-        Measurement set name
-    save_file : str
-        File name to save dynamic spectrum
-    scan : int
-        Scan number
-    datacolumn : str
-        Data column name
-
-    Returns
-    -------
-    str
-        Dynamic spectrum file
-    """
-    if os.path.exists(f"{save_file}.npy") == False:
-        mstool = casamstool()
-        try:
-            all_data = []
-            for ant in range(5):
-                mstool.open(msname)
-                mstool.selectpolarization(["I"])
-                mstool.select(
-                    {"antenna1": ant, "antenna2": ant, "scan_number": int(scan)}
-                )
-                data_dic = mstool.getdata(datacolumn)
-                mstool.close()
-                if datacolumn == "CORRECTED_DATA,CORRECTED_DATA-MODEL_DATA":
-                    data = np.abs(
-                        data_dic["CORRECTED_DATA,CORRECTED_DATA-MODEL_DATA"][0, ...]
-                    )
-                else:
-                    data = np.abs(data_dic["data"][0, ...])
-                del data_dic
-                m = np.nanmedian(data, axis=1)
-                data = data / m[:, None]
-                all_data.append(data)
-                del data
-        except Exception as e:
-            print("Auto-corrrelations are not present. Using short baselines.")
-            count = 0
-            all_data = []
-            while count <= 5:
-                for i in range(5):
-                    for j in range(5):
-                        if i != j:
-                            mstool.open(msname)
-                            mstool.selectpolarization(["I"])
-                            mstool.select(
-                                {
-                                    "antenna1": i,
-                                    "antenna2": j,
-                                    "scan_number": int(scan),
-                                }
-                            )
-                            data_dic = mstool.getdata(datacolumn)
-                            mstool.close()
-                            if datacolumn == "CORRECTED_DATA,CORRECTED_DATA-MODEL_DATA":
-                                data = np.abs(
-                                    data_dic[
-                                        "CORRECTED_DATA,CORRECTED_DATA-MODEL_DATA"
-                                    ][0, ...]
-                                )
-                            else:
-                                data = np.abs(data_dic["data"][0, ...])
-                            del data_dic
-                            m = np.nanmedian(data, axis=1)
-                            data = data / m[:, None]
-                            all_data.append(data)
-                            del data
-                            count += 1
-        finally:
-            try:
-                mstool.close()
-            except:
-                pass
-        all_data = np.array(all_data)
-        data = np.nanmedian(all_data, axis=0)
-        bad_chans = get_bad_chans(msname)
-        if bad_chans != "":
-            bad_chans = bad_chans.replace("0:", "").split(";")
-            for bad_chan in bad_chans:
-                s = int(bad_chan.split("~")[0])
-                e = int(bad_chan.split("~")[-1]) + 1
-                data[s:e, :] = np.nan
-        msmd = msmetadata()
-        msmd.open(msname)
-        freqs = msmd.chanfreqs(0, unit="MHz")
-        times = msmd.timesforscans(int(scan))
-        timestamps = [mjdsec_to_timestamp(mjdsec, str_format=0) for mjdsec in times]
-        msmd.close()
-        np.save(
-            save_file,
-            np.array([freqs, times, timestamps, data], dtype="object"),
-        )
-    if ".npy" in save_file:
-        return save_file
-    else:
-        return f"{save_file}.npy"
-
-
-def make_ds_plot(dsfiles, plot_file=None, showgui=False):
-    """
-    Make dynamic spectrum plot
-
-    Parameters
-    ----------
-    dsfile : list
-        DS files list
-    plot_file : str, optional
-        Plot file name to save the plot
-    showgui : bool, optional
-        Show GUI
-
-    Returns
-    -------
-    str
-        Plot name
-    """
-    from matplotlib.gridspec import GridSpec
-
-    if showgui:
-        matplotlib.use("TkAgg")
-    else:
-        matplotlib.use("Agg")
-    matplotlib.rcParams.update({"font.size": 18})
-    if type(dsfiles) == str:
-        dsfiles = [dsfiles]
-    for i, dsfile in enumerate(dsfiles):
-        freqs_i, times_i, timestamps_i, data_i = np.load(dsfile, allow_pickle=True)
-        if i == 0:
-            freqs = freqs_i
-            times = times_i
-            timestamps = timestamps_i
-            data = data_i
-        else:
-            gapsize = int(
-                (np.nanmin(times_i) - np.nanmax(times)) / (times[1] - times[0])
-            )
-            if gapsize < 10:
-                last_time_median = np.nanmedian(data[:, -1], axis=0)
-                new_time_median = np.nanmedian(data_i[:, 0], axis=0)
-                data_i = (data_i / new_time_median) * last_time_median
-            # Insert vertical NaN gap (1 column wide)
-            gap = np.full((data.shape[0], gapsize), np.nan)
-            data = np.concatenate([data, gap, data_i], axis=1)
-            # Insert dummy time and timestamp
-            times = np.append(times, np.nan)
-            timestamps = np.append(timestamps, "GAP")
-            # Append new values
-            times = np.append(times, times_i)
-            timestamps = np.append(timestamps, timestamps_i)
-            # (Optional) Check or merge freqs if needed — assuming same across files
-    # Normalize by median bandshape
-    median_bandshape = np.nanmedian(data, axis=-1)
-    pos = np.where(np.isnan(median_bandshape) == False)[0]
-    data /= median_bandshape[:, None]
-    data = data[min(pos) : max(pos), :]
-    freqs = freqs[min(pos) : max(pos)]
-    temp_times = times[np.isnan(times) == False]
-    maxtimepos = np.argmax(temp_times)
-    mintimepos = np.argmin(temp_times)
-    datestamp = f"{timestamps[mintimepos].split('T')[0]}"
-    tstart = f"{timestamps[mintimepos].split('T')[0]} {':'.join(timestamps[mintimepos].split('T')[-1].split(':')[:2])}"
-    tend = f"{timestamps[maxtimepos].split('T')[0]} {':'.join(timestamps[maxtimepos].split('T')[-1].split(':')[:2])}"
-    print(f"Time range : {tstart}~{tend}")
-    results = Fido.search(
-        a.Time(tstart, tend), a.Instrument("XRS"), a.Resolution("avg1m")
-    )
-    files = Fido.fetch(results, path=os.path.dirname(dsfiles[0]), overwrite=False)
-    goes_tseries = TimeSeries(files, concatenate=True)
-    for goes_f in files:
-        os.system(f"rm -rf {goes_f}")
-    goes_tseries = goes_tseries.truncate(tstart, tend)
-    timeseries = np.nanmean(data, axis=0)
-    # Normalization
-    data_std = np.nanstd(data)
-    data_median = np.nanmedian(data)
-    norm = ImageNormalize(
-        data,
-        stretch=LogStretch(1),
-        vmin=0.99 * np.nanmin(data),
-        vmax=0.99 * np.nanmax(data),
-    )
-    try:
-        # Create figure and GridSpec layout
-        fig = plt.figure(figsize=(18, 10))
-        gs = GridSpec(
-            nrows=3, ncols=2, width_ratios=[1, 0.03], height_ratios=[4, 1.5, 2]
-        )
-        # Axes
-        ax_spec = fig.add_subplot(gs[0, 0])
-        ax_ts = fig.add_subplot(gs[1, 0])
-        ax_goes = fig.add_subplot(gs[2, 0])
-        cax = fig.add_subplot(gs[:, 1])  # colorbar spans both rows
-        # Plot dynamic spectrum
-        im = ax_spec.imshow(
-            data, aspect="auto", origin="lower", norm=norm, cmap="magma"
-        )
-        ax_spec.set_ylabel("Frequency (MHz)")
-        ax_spec.set_xticklabels([])  # Remove x-axis labels from top plot
-        # Y-ticks
-        yticks = ax_spec.get_yticks()
-        yticks = yticks[(yticks >= 0) & (yticks < len(freqs))]
-        ax_spec.set_yticks(yticks)
-        ax_spec.set_yticklabels([f"{freqs[int(i)]:.1f}" for i in yticks])
-        # Plot time series
-        ax_ts.plot(timeseries)
-        ax_ts.set_xlim(0, len(timeseries) - 1)
-        ax_ts.set_ylabel("Mean \n flux density")
-        goes_tseries.plot(axes=ax_goes)
-        goes_times = goes_tseries.time
-        times_dt = goes_times.to_datetime()
-        ax_goes.set_xlim(times_dt[0], times_dt[-1])
-        ax_goes.set_ylabel(r"Flux ($\frac{W}{m^2}$)")
-        ax_goes.legend(ncol=2, loc="upper right")
-        ax_goes.set_title("GOES light curve", fontsize=14)
-        ax_ts.set_title("MeerKAT light curve", fontsize=14)
-        ax_spec.set_title("MeerKAT dynamic spectrum", fontsize=14)
-        ax_goes.set_xlabel("Time (UTC)")
-        # Format x-ticks
-        ax_ts.set_xticks([])
-        ax_ts.set_xticklabels([])
-        # Colorbar
-        cbar = fig.colorbar(im, cax=cax)
-        cbar.set_label("Flux density (arb. unit)")
-        plt.tight_layout()
-        # Save or show
-        if plot_file:
-            plt.savefig(plot_file, bbox_inches="tight")
-            print(f"Plot saved: {plot_file}")
-        if showgui:
-            plt.show()
-            plt.close(fig)
-        else:
-            plt.close(fig)
-    except Exception:
-        traceback.print_exc()
-    finally:
-        plt.close("all")
-    return plot_file
 
 
 def plot_goes_full_timeseries(
@@ -1422,12 +1162,10 @@ def plot_goes_full_timeseries(
     return plot_file
 
 
-def rename_meersolar_image(
+def rename_mwasolar_image(
     imagename,
     imagedir="",
     pol="",
-    band="",
-    attcal="NOINFO",
     cutout_rsun=2.5,
     make_overlay=True,
     make_plots=True,
@@ -1443,10 +1181,6 @@ def rename_meersolar_image(
         Image directory (default given image directory)
     pol : str, optional
         Stokes parameters
-    band : str, optional
-        Observing band
-    attcal : str, optional
-        Solar attenuation calibrated or not
     cutout_rsun : float, optional
         Cutout in solar radii from center (default: 2.5 solar radii)
     make_overlay : bool, optional
@@ -1476,10 +1210,8 @@ def rename_meersolar_image(
     )
     with fits.open(imagename, mode="update") as hdul:
         hdr = hdul[0].header
-        hdr["AUTHOR"] = "DevojyotiKansabanik,DeepanPatra"
-        if band != "":
-            hdr["BAND"] = band
-        hdr["PIPELINE"] = "MeerSOLAR"
+        hdr["AUTHOR"] = "DevojyotiKansabanik"
+        hdr["PIPELINE"] = "P-AIRCARS"
         hdr["CRVAL1"] = sun_coords.ra.deg
         hdr["CRVAL2"] = sun_coords.dec.deg
         hdr["MAX"] = maxval
@@ -1490,7 +1222,6 @@ def rename_meersolar_image(
         hdr["MEDIAN"] = median_val
         hdr["RMSDYN"] = rms_dyn
         hdr["MIMADYN"] = minmax_dyn
-        hdr["ATTCAL"] = str(attcal)
     freq = round(header["CRVAL3"] / 10**6, 2)
     t_str = "".join(time.split("T")[0].split("-")) + (
         "".join(time.split("T")[-1].split(":"))
@@ -1524,10 +1255,10 @@ def rename_meersolar_image(
         try:
             overlay_pngdir = f"{os.path.dirname(imagedir)}/overlays_pngs"
             os.makedirs(overlay_pngdir, exist_ok=True)
-            outimages = make_meer_overlay(
+            outimages = make_mwa_overlay(
                 new_name,
                 plot_file_prefix=os.path.basename(new_name).split(".fits")[0]
-                + "_suvi_meerkat_overlay",
+                + "_suvi_mwa_overlay",
                 extensions=["png"],
                 outdirs=[overlay_pngdir],
                 verbose=False,
@@ -1535,6 +1266,155 @@ def rename_meersolar_image(
         except Exception:
             pass
     return new_name
+
+
+def make_ds_plot(dsfiles, plot_file=None, plot_quantity="TB", showgui=False):
+    """
+    Make dynamic spectrum plot
+
+    Parameters
+    ----------
+    dsfile : list
+        DS files list
+    plot_file : str, optional
+        Plot file name to save the plot
+    plot_quantity : str, optional
+        Plot quantity (TB or flux)
+    showgui : bool, optional
+        Show GUI
+
+    Returns
+    -------
+    str
+        Plot name
+    """
+    from matplotlib.gridspec import GridSpec
+
+    if showgui:
+        matplotlib.use("TkAgg")
+    else:
+        matplotlib.use("Agg")
+    matplotlib.rcParams.update({"font.size": 18})
+    if type(dsfiles) == str:
+        dsfiles = [dsfiles]
+    for i, dsfile in enumerate(dsfiles):
+        freqs_i, times_i, timestamps_i, T_data_i, S_data_i = np.load(
+            dsfile, allow_pickle=True
+        )
+        if plot_quantity == "TB":
+            data_i = T_data_i
+        else:
+            data_i = S_data_i
+        if i == 0:
+            freqs = freqs_i
+            times = times_i
+            timestamps = timestamps_i
+            data = data_i
+        else:
+            gapsize = int(
+                (np.nanmin(times_i) - np.nanmax(times)) / (times[1] - times[0])
+            )
+            if gapsize < 10:
+                last_time_median = np.nanmedian(data[:, -1], axis=0)
+                new_time_median = np.nanmedian(data_i[:, 0], axis=0)
+                data_i = (data_i / new_time_median) * last_time_median
+            # Insert vertical NaN gap (1 column wide)
+            gap = np.full((data.shape[0], gapsize), np.nan)
+            data = np.concatenate([data, gap, data_i], axis=1)
+            # Insert dummy time and timestamp
+            times = np.append(times, np.nan)
+            timestamps = np.append(timestamps, "GAP")
+            # Append new values
+            times = np.append(times, times_i)
+            timestamps = np.append(timestamps, timestamps_i)
+            # (Optional) Check or merge freqs if needed — assuming same across files
+    ########################################
+    # Time and frequency range
+    ########################################
+    data = data[min(pos) : max(pos), :]
+    freqs = freqs[min(pos) : max(pos)]
+    temp_times = times[np.isnan(times) == False]
+    maxtimepos = np.argmax(temp_times)
+    mintimepos = np.argmin(temp_times)
+    datestamp = f"{timestamps[mintimepos].split('T')[0]}"
+    tstart = f"{timestamps[mintimepos].split('T')[0]} {':'.join(timestamps[mintimepos].split('T')[-1].split(':')[:2])}"
+    tend = f"{timestamps[maxtimepos].split('T')[0]} {':'.join(timestamps[maxtimepos].split('T')[-1].split(':')[:2])}"
+    print(f"Time range : {tstart}~{tend}")
+    results = Fido.search(
+        a.Time(tstart, tend), a.Instrument("XRS"), a.Resolution("avg1m")
+    )
+    files = Fido.fetch(results, path=os.path.dirname(dsfiles[0]), overwrite=False)
+    goes_tseries = TimeSeries(files, concatenate=True)
+    for goes_f in files:
+        os.system(f"rm -rf {goes_f}")
+    goes_tseries = goes_tseries.truncate(tstart, tend)
+    timeseries = np.nanmean(data, axis=0)
+    # Normalization
+    data_std = np.nanstd(data)
+    data_median = np.nanmedian(data)
+    norm = ImageNormalize(
+        data,
+        stretch=LogStretch(1),
+        vmin=0.99 * np.nanmin(data),
+        vmax=0.99 * np.nanmax(data),
+    )
+    try:
+        # Create figure and GridSpec layout
+        fig = plt.figure(figsize=(18, 10))
+        gs = GridSpec(
+            nrows=3, ncols=2, width_ratios=[1, 0.03], height_ratios=[4, 1.5, 2]
+        )
+        # Axes
+        ax_spec = fig.add_subplot(gs[0, 0])
+        ax_ts = fig.add_subplot(gs[1, 0])
+        ax_goes = fig.add_subplot(gs[2, 0])
+        cax = fig.add_subplot(gs[:, 1])  # colorbar spans both rows
+        # Plot dynamic spectrum
+        im = ax_spec.imshow(
+            data, aspect="auto", origin="lower", norm=norm, cmap="magma"
+        )
+        ax_spec.set_ylabel("Frequency (MHz)")
+        ax_spec.set_xticklabels([])  # Remove x-axis labels from top plot
+        # Y-ticks
+        yticks = ax_spec.get_yticks()
+        yticks = yticks[(yticks >= 0) & (yticks < len(freqs))]
+        ax_spec.set_yticks(yticks)
+        ax_spec.set_yticklabels([f"{freqs[int(i)]:.1f}" for i in yticks])
+        # Plot time series
+        ax_ts.plot(timeseries)
+        ax_ts.set_xlim(0, len(timeseries) - 1)
+        ax_ts.set_ylabel("Mean \n flux density")
+        goes_tseries.plot(axes=ax_goes)
+        goes_times = goes_tseries.time
+        times_dt = goes_times.to_datetime()
+        ax_goes.set_xlim(times_dt[0], times_dt[-1])
+        ax_goes.set_ylabel(r"Flux ($\frac{W}{m^2}$)")
+        ax_goes.legend(ncol=2, loc="upper right")
+        ax_goes.set_title("GOES light curve", fontsize=14)
+        ax_ts.set_title("MWA light curve", fontsize=14)
+        ax_spec.set_title("MWA dynamic spectrum", fontsize=14)
+        ax_goes.set_xlabel("Time (UTC)")
+        # Format x-ticks
+        ax_ts.set_xticks([])
+        ax_ts.set_xticklabels([])
+        # Colorbar
+        cbar = fig.colorbar(im, cax=cax)
+        cbar.set_label("Flux density (arb. unit)")
+        plt.tight_layout()
+        # Save or show
+        if plot_file:
+            plt.savefig(plot_file, bbox_inches="tight")
+            print(f"Plot saved: {plot_file}")
+        if showgui:
+            plt.show()
+            plt.close(fig)
+        else:
+            plt.close(fig)
+    except Exception:
+        traceback.print_exc()
+    finally:
+        plt.close("all")
+    return plot_file
 
 
 # Expose functions and classes

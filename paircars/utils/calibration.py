@@ -83,7 +83,7 @@ def get_psf_size(msname, chan_number=-1):
 
 def calc_bw_smearing_freqwidth(msname, full_FoV=False, FWHM=True):
     """
-    Function to calculate spectral width to procude bandwidth smearing
+    Function to calculate spectral width to produce bandwidth smearing
 
     Parameters
     ----------
@@ -174,6 +174,131 @@ def max_time_solar_smearing(msname):
     psf = get_psf_size(msname)
     t_max = 0.5 * (psf / omega_sun)  # seconds
     return t_max
+
+
+def get_caltable_metadata(caltable):
+    """
+    Function to get caltable metadata.
+
+    Parameters
+    ----------
+    caltable : str
+        Name of the caltable
+
+    Returns
+    -------
+    dict
+        A python dictionary with keywords MSNAME, JonesType, Channel 0 frequency (MHz), Central channel frequency (MHz), Channel width (kHz), Bandwidth (MHz), Start time, End time
+    """
+    tb = table()
+    tb.open(caltable)
+    caltype = tb.getkeywords()["VisCal"]
+    msname = tb.getkeywords()["MSName"]
+    tb.close()
+    tb.open(caltable + " / SPECTRAL_WINDOW")
+    ch0 = (tb.getcol("REF_FREQUENCY")[0]) / 10**6  # In MHz
+    chanwidth = (tb.getcol("CHAN_WIDTH")[0] / 10**3)[0]  # In kHz
+    freqlist = tb.getcol("CHAN_FREQ")
+    chm = (freqlist[int(len(freqlist) / 2)] / 10**6)[0]  # In MHz
+    bw = tb.getcol("TOTAL_BANDWIDTH")[0] / 10**6  # In MHz
+    tb.close()
+    tb.open(caltable)
+    timerange = tb.getcol("TIME")
+    start_time = mjdsec_to_timestamp(
+        int(np.min(timerange)), includedate=True, date_format=0
+    )
+    end_time = mjdsec_to_timestamp(
+        int(np.max(timerange)), includedate=True, date_format=0
+    )
+    tb.close()
+    result = {
+        "MSNAME": msname,
+        "JonesType": caltype,
+        "Channel 0 frequency (MHz)": ch0,
+        "Central channel frequency (MHz)": chm,
+        "Channel width (kHz)": chanwidth,
+        "Bandwidth (MHz)": bw,
+        "Start time": start_time,
+        "End time": end_time,
+    }
+    os.system("rm - rf casa * log")
+    return result
+
+
+def get_nearest_bandpass_table(caltable_list, freq):
+    """
+    Function to get nearest bandpass table of a given frequency
+
+    Parameters
+    ----------
+    caltable_list : list
+        List of bandpass table
+    freq : float
+        Frequency in MHz
+
+    Returns
+    -------
+    str
+        Name of the nearest bandpass table
+    """
+    if len(caltable_list) == 0:
+        print("No caltable is provided.")
+        return
+    if freq == None:
+        print("No frequency information is given.")
+        return
+    caltable_list = np.array(caltable_list)
+    freq_list = []
+    for caltable in caltable_list:
+        result = get_caltable_metadata(caltable)
+        freq_list.append(float(result["Central channel frequency (MHz)"]))
+    freq_list = np.array(freq_list)
+    pos = np.argmin(np.abs(freq - freq_list))
+    nearest_caltable = caltable_list[pos]
+    return nearest_caltable
+
+
+def get_nearest_gaincal_table(caltable_list, timestamp):
+    """
+    Function to get nearest gaincal table of a given time
+
+    Parameters
+    ----------
+    caltable_list : list
+        List of gaincal table
+    timestamp : str
+        Timestamp (format : 'YYYY / MM / DD / hh: mm:ss')
+
+    Returns
+    -------
+    str
+        Name of the nearest gaincal table
+    """
+    if len(caltable_list) == 0:
+        print("No caltable is provided.\n")
+        return None
+    if timestamp == None:
+        print("No time information is given.\n")
+        return None
+    try:
+        caltable_list = np.array(caltable_list)
+        time_list = []
+        for caltable in caltable_list:
+            result = get_caltable_metadata(caltable)
+            starttime = result["Start time"]
+            endtime = result["End time"]
+            startime_mjd = timestamp_to_mjdsec(starttime, date_format=0)
+            endtime_mjd = timestamp_to_mjdsec(endtime, date_format=0)
+            time_list.append((startime_mjd + endtime_mjd) / 2.0)
+        time_list = np.array(time_list)
+        time_mjd = timestamp_to_mjdsec(timestamp, date_format=0)
+        pos = np.argmin(np.abs(time_mjd - time_list))
+        nearest_caltable = caltable_list[pos]
+        return nearest_caltable
+    except Exception as e:
+        print("Nearest caltable could not be found.\n")
+        return None
+
 
 # Expose functions and classes
 __all__ = [

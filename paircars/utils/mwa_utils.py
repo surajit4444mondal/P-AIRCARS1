@@ -28,25 +28,83 @@ warnings.simplefilter("ignore", category=FITSFixedWarning)
 def get_MWA_OBSID(msname):
     """
     Get MWA OBSID from ms
-    
+
     Parameters
     ----------
     msname : str
         Measurement set
-        
+
     Returns
     -------
     int
         OBSid
     """
-    msmd=msmetadata()
+    msmd = msmetadata()
     msmd.open(msname)
-    start_time=msmd.timerangeforobs(0)['begin']['m0']['value']*86400
+    start_time = msmd.timerangeforobs(0)["begin"]["m0"]["value"] * 86400
     msmd.close()
     t = Time(start_time * u.s, format="mjd", scale="utc")
     gps = t.gps
-    obsid = int((gps//8)*8)
+    obsid = int((gps // 8) * 8)
     return obsid
+
+
+def freq_to_MWA_coarse(freq):
+    """
+    Frequency to MWA coarse channel conversion.
+
+    Parameters
+    ----------
+    freq : float
+        Frequency in MHz
+
+    Returns
+    -------
+    int
+        MWA coarse channel number
+    """
+    return int(freq // 1.28)
+
+
+def get_MWA_bad_freqs():
+    """
+    Get bad frequencies of the MWA band
+
+    Returns
+    -------
+    list
+        Bad frequency range in MHz
+    """
+    coarse_channels = np.arange(55, 235)
+    bad_freqs = []
+    for coarse_chan in coarse_channels:
+        cent_freq = coarse_chan * 1.28
+        start_freq = cent_freq - 0.64
+        end_freq = end_freq + 0.64
+        bad_freqs.append([start_freq, start_freq + 0.16])
+        bad_freqs.append([cent_freq])
+        bad_freqs.append([end_freq - 0.16, end_freq])
+    return bad_freqs
+
+
+def get_MWA_good_freqs():
+    """
+    Get good frequencies of the MWA band
+
+    Returns
+    -------
+    list
+        Good frequency range in MHz
+    """
+    coarse_channels = np.arange(55, 235)
+    good_freqs = []
+    for coarse_chan in coarse_channels:
+        cent_freq = coarse_chan * 1.28
+        start_freq = cent_freq - 0.64
+        end_freq = end_freq + 0.64
+        good_freqs.append([start_freq + 0.16, cent_freq - 0.01])
+        good_freqs.append([cent_freq + 0.01, end_freq - 0.16])
+    return good_freqs
 
 
 def get_bad_chans(msname):
@@ -68,27 +126,7 @@ def get_bad_chans(msname):
     chanfreqs = msmd.chanfreqs(0) / 10**6
     msmd.close()
     msmd.done()
-    bandname = get_band_name(msname)
-    if bandname == "U":
-        bad_freqs = [
-            (-1, 580),
-            (925, 960),
-            (1010, -1),
-        ]
-    elif bandname == "L":
-        bad_freqs = [
-            (-1, 879),
-            (925, 960),
-            (1166, 1186),
-            (1217, 1237),
-            (1242, 1249),
-            (1375, 1387),
-            (1526, 1626),
-            (1681, -1),
-        ]
-    else:
-        print("MeerKAT data is not in UHF or L-band.")
-        bad_freqs = []
+    bad_freqs = get_MWA_bad_freqs()
     if min(chanfreqs) <= bad_freqs[0][1] and max(chanfreqs) >= bad_freqs[-1][0]:
         spw = "0:"
         count = 0
@@ -118,7 +156,7 @@ def get_bad_chans(msname):
 
 def get_good_chans(msname):
     """
-    Get good channel range to perform gaincal
+    Get good channel range of MWA
 
     Parameters
     ----------
@@ -136,13 +174,7 @@ def get_good_chans(msname):
     meanfreq = msmd.meanfreq(0) / 10**6
     msmd.close()
     msmd.done()
-    bandname = get_band_name(msname)
-    if bandname == "U":
-        good_freqs = [(580, 620)]  # For UHF band
-    elif bandname == "L":
-        good_freqs = [(890, 920)]  # For L band
-    else:
-        good_freqs = []  # For S band
+    bad_freqs = get_MWA_good_freqs()
     if min(chanfreqs) <= good_freqs[0][1] and max(chanfreqs) >= good_freqs[-1][0]:
         spw = "0:"
         for freq_range in good_freqs:
@@ -156,6 +188,35 @@ def get_good_chans(msname):
         spw = f"0:0~{len(chanfreqs)-1}"
     return spw
 
+
+def get_mwa_bad_ants(metafits):
+    """
+    Function to determine non-working MWA tiles for a observation
+
+    Parameters
+    ----------
+    metafits : str
+        Name of the metafits file
+
+    Returns
+    -------
+    str
+        Non-working antenna names
+    """
+    data = fits.getdata(metafits)
+    flags = np.array(data["Flag"])
+    tiles = np.array(data["TileName"])
+    pos = np.where(flags == 1)
+    bad_tiles = tiles[pos]
+    bad_tiles = np.unique(bad_tiles)
+    bad_antennas = ""
+    if len(bad_tiles) > 0:
+        for ant in bad_tiles:
+            bad_antennas += str(ant) + ","
+        bad_antennas = bad_antennas[:-1]
+    return bad_antennas
+
+
 # Expose functions and classes
 __all__ = [
     name
@@ -165,4 +226,3 @@ __all__ = [
         and obj.__module__ == __name__
     )
 ]
-

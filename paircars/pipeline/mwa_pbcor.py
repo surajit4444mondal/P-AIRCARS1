@@ -1,0 +1,537 @@
+import logging
+import dask
+import numpy as np
+import argparse
+import warnings
+import traceback
+import time
+import glob
+import sys
+import os
+import subprocess
+from astropy.io import fits
+from astropy.wcs import FITSFixedWarning
+from dask import delayed
+from paircars.pipeline.single_image_mwapbcor import get_pbcor_image
+from paircars.utils import *
+
+logging.getLogger("distributed").setLevel(logging.ERROR)
+logging.getLogger("tornado.application").setLevel(logging.CRITICAL)
+datadir = get_datadir()
+warnings.simplefilter("ignore", FITSFixedWarning)
+
+
+def get_fits_freq(image_file):
+    hdr = fits.getheader(image_file)
+    keys = hdr.keys()
+    if "CTYPE3" in keys and hdr["CTYPE3"] == "FREQ":
+        freq = hdr["CRVAL3"]
+        return freq
+    elif "CTYPE4" in keys and hdr["CTYPE4"] == "FREQ":
+        freq = hdr["CRVAL4"]
+        return freq
+    else:
+        print(f"No frequency axis in image: {image_file}.")
+        return
+
+
+def run_pbcor(
+    imagename,
+    metafits,
+    pbdir,
+    pbcor_dir,
+    restore=False,
+    jobid=0,
+    ncpu=8,
+    verbose=False,
+):
+    """
+    Run single image orimary beam correction
+
+    Parameters
+    ----------
+    imagename : str
+        Imagename
+    metafits : str
+        Metafits file
+    pbdir : str
+        Primary beam directory
+    pbcor_dir : str
+        Primary beam corrected image directory
+    restore : bool, optional
+        Restore primary beam correction
+    jobid : int, optional
+        Job ID
+    ncpu : int, optional
+        Number of CPU threads to use
+    verbose : bool, optional
+        Verbose output
+
+    Returns
+    -------
+    int
+        Success message
+    """
+    freq = get_fits_freq(imagename)
+    outfile = f"{pbcor_dir}/{os.path.basename(imagename).split('fits')[0]}_pbcor.fits"
+    pbfile = f"{pbdir}/freq_{freq}.npy"
+    cmd = [
+        "run-mwa-singlepbcor",
+        "--imagename",
+        str(imagename),
+        "--metafits",
+        str(metafits),
+        "--num_threads",
+        str(ncpu),
+        "--outfile",
+        str(outfile),
+        "--interpolated",
+    ]
+    if os.path.exists(pbfile):
+        cmd.append("--pb_jones_file", pbfile)
+    else:
+        cmd.append("--save_pb", pbfile)
+    if restore:
+        cmd.append("--restore")
+
+    if verbose:
+        print("Executing:", " ".join(cmd))
+
+    try:
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            check=False,  # Set to True if you want to raise on error
+        )
+        if verbose or result.returncode != 0:
+            print(result.stdout)
+        return result.returncode
+    except Exception as e:
+        print(f"Exception during primary beam correction: {e}")
+        return 1
+
+
+def pbcor_all_images(
+    imagedir,
+    metafits,
+    dask_client,
+    make_TB=True,
+    make_plots=True,
+    restore=False,
+    jobid=0,
+    cpu_frac=0.8,
+    mem_frac=0.8,
+):
+    """
+    Correct primary beam of MeerKAT for images in a directory
+
+    Parameters
+    ----------
+    imagedir : str
+        Name of the image directory
+    metafits : str
+        Metafits file
+    dask_client : dask.client
+        Dask client
+    make_TB : bool, optional
+        Make brightness temperature map
+    make_plots : bool, optional
+        Make plots
+    restore : bool, optional
+        Restore primary beam correction
+    jobid : int, optional
+        Job ID
+    cpu_frac : float, optional
+        CPU fraction to use
+    mem_frac : float, optional
+        Memory fraction to use
+
+    Returns
+    -------
+    int
+        Success message
+    """
+    if cpu_frac > 0.8:
+        cpu_frac = 0.8
+    total_cpu = max(1, int(psutil.cpu_count() * cpu_frac))
+    if mem_frac > 0.8:
+        mem_frac = 0.8
+    total_mem = (psutil.virtual_memory().available * mem_frac) / (1024**3)  # In GB
+
+    imagedir = imagedir.rstrip("/")
+    pbdir = f"{os.path.dirname(imagedir)}/pbdir"
+    pbcor_dir = f"{os.path.dirname(imagedir)}/pbcor_images"
+    os.makedirs(pbdir, exist_ok=True)
+    os.makedirs(pbcor_dir, exist_ok=True)
+    successful_pbcor = 0
+    try:
+        images = glob.glob(f"{imagedir}/*.fits")
+        if make_TB:
+            tb_dir = f"{os.path.dirname(imagedir)}/tb_images"
+            os.makedirs(tb_dir, exist_ok=True)
+        if len(images) == 0:
+            print(f"No image is present in image directory: {imagedir}")
+            return 1
+        first_set = []
+        remaining_set = []
+        freqs = []
+        for image in images:
+            freq = get_fits_freq(image)
+            if freq in freqs:
+                remaining_set.append(image)
+            else:
+                freqs.append(freq)
+                first_set.append(image)
+
+        ########################################
+        # Number of worker limit based on memory
+        ########################################
+        mem_limit = (
+            16 * max([os.path.getsize(image) for image in images]) / 1024**3
+        )  # In GB
+        njobs = max(1, min(total_cpu, int(total_mem / mem_limit)))
+        n_threads = max(1, int(total_cpu / njobs))
+
+        print("#################################")
+        print(f"Total dask worker: {njobs}")
+        print(f"CPU per worker: {n_threads}")
+        print(f"Memory per worker: {round(mem_limit,2)} GB")
+        print("#################################")
+        ###########################################
+
+        if len(first_set) > 0:
+            tasks = []
+            for image in first_set:
+                task = delayed(run_pbcor)(
+                    image,
+                    metafits,
+                    pbdir,
+                    pbcor_dir,
+                    restore=restore,
+                    jobid=jobid,
+                    ncpu=n_threads,
+                )
+                tasks.append(task)
+
+            results = []
+            print("Start correcting first set of images...")
+            for i in range(0, len(tasks), njobs):
+                batch = tasks[i : i + njobs]
+                futures = dask_client.compute(batch)
+                results.extend(dask_client.gather(futures))
+            results = list(results)
+
+            for r in results:
+                if r == 0:
+                    successful_pbcor += 1
+
+        if len(remaining_set) > 0:
+            tasks = []
+            for image in remaining_set:
+                task = delayed(run_pbcor)(
+                    image,
+                    metafits,
+                    pbdir,
+                    pbcor_dir,
+                    restore=restore,
+                    jobid=jobid,
+                    ncpu=n_threads,
+                )
+                tasks.append(task)
+
+            results = []
+            print("Correcting remaining images of different timestamps.")
+            for i in range(0, len(tasks), njobs):
+                batch = tasks[i : i + njobs]
+                futures = dask_client.compute(batch)
+                results.extend(dask_client.gather(futures))
+            results = list(results)
+
+            for r in results:
+                if r == 0:
+                    successful_pbcor += 1
+
+        ############################################
+        # Saving fits in helioprojective coordinates
+        ############################################
+        if successful_pbcor > 0:
+            hpcdir = f"{pbcor_dir}/hpcs"
+            pbcor_images = glob.glob(f"{pbcor_dir}/*.fits")
+            os.makedirs(hpcdir, exist_ok=True)
+            print("Saving primary beam corrected images helioprojective coordinates...")
+            for image in pbcor_images:
+                save_in_hpc(image, outdir=hpcdir)
+            if make_plots:
+                print("Making plots of primary beam corrected images ...")
+                pngdir = f"{pbcor_dir}/pngs"
+                os.makedirs(pngdir, exist_ok=True)
+                for image in pbcor_images:
+                    try:
+                        outimages = plot_in_hpc(
+                            image,
+                            draw_limb=True,
+                            extensions=["png"],
+                            outdirs=[pngdir],
+                        )
+                    except BaseException:
+                        junkpng = f"{pngdir}/{os.path.basename(image).split('.fits')[0]}.png.junk"
+                        os.system(f"touch {junkpng}")
+
+        ####################################
+        # Making brightness temperature maps
+        ####################################
+        if successful_pbcor > 0 and make_TB:
+            for pbcor_image in pbcor_images:
+                tb_image = (
+                    tb_dir
+                    + "/"
+                    + os.path.basename(pbcor_image).split(".fits")[0]
+                    + "_TB.fits"
+                )
+                generate_tb_map(pbcor_image, outfile=tb_image)
+
+            ############################################
+            # Saving fits in helioprojective coordinates
+            ###########################################
+            hpcdir = f"{tb_dir}/hpcs"
+            tb_images = glob.glob(f"{tb_dir}/*.fits")
+            os.makedirs(hpcdir, exist_ok=True)
+            print("Saving brightness temperature maps helioprojective coordinates...")
+            for image in tb_images:
+                save_in_hpc(image, outdir=hpcdir)
+
+            if make_plots:
+                print("Making plots of brightness temperature maps..")
+                pngdir = f"{tb_dir}/pngs"
+                os.makedirs(pngdir, exist_ok=True)
+                for image in tb_images:
+                    outimages = plot_in_hpc(
+                        image,
+                        draw_limb=True,
+                        extensions=["png"],
+                        outdirs=[pngdir],
+                    )
+
+        #########################################
+        # Final calculations
+        #########################################
+        print(f"Total input images: {len(images)}")
+        if successful_pbcor > 0:
+            print(f"Total corrected images: {len(pbcor_images)}")
+            if make_TB:
+                print(f"Total brightness temperatures maps: {len(tb_images)}")
+        else:
+            print(f"Total corrected images: 0")
+        return 0
+    except Exception as e:
+        traceback.print_exc()
+        return 1
+    finally:
+        os.system(f"rm -rf {pbdir}")
+
+
+def main(
+    imagedir,
+    metafits,
+    workdir="",
+    make_TB=True,
+    make_plots=True,
+    restore=False,
+    cpu_frac=0.8,
+    mem_frac=0.8,
+    logfile=None,
+    jobid=0,
+    start_remote_log=False,
+    dask_client=None,
+):
+    """
+    Primary beam correction of MeerKAT for a sets of images in a directory
+
+    Parameters
+    ----------
+    imagedir : str
+        Image directory
+    metafits : str
+        Metafits file
+    workdir : str, optional
+        Work directory
+    make_TB : bool, optional
+        Make brightness temperature map or not
+    make_plots : bool, optional
+        Make png plots
+    restore : bool, optional
+        Restore primary beam correction
+    cpu_frac : float,optional
+        CPU fraction
+    mem_frac : float
+        Memory fraction
+    logfile : str, optional
+        Log file
+    jobid : str, optional
+        Job ID
+    start_remote_log : bool, optional
+        Start remote logger
+    dask_client : dask.client, optional
+        Dask client
+
+    Returns
+    -------
+    int
+        Success message
+    """
+    if workdir == "":
+        workdir = imagedir + "/workdir"
+    os.makedirs(workdir, exist_ok=True)
+
+    pid = os.getpid()
+    cachedir = get_cachedir()
+    save_pid(pid, f"{cachedir}/pids/pids_{jobid}.txt")
+
+    ############
+    # Logger
+    ############
+    observer = None
+    if (
+        start_remote_log
+        and os.path.exists(f"{workdir}/jobname_password.npy")
+        and logfile is not None
+    ):
+        time.sleep(5)
+        jobname, password = np.load(
+            f"{workdir}/jobname_password.npy", allow_pickle=True
+        )
+        if os.path.exists(logfile):
+            observer = init_logger(
+                "all_pbcor", logfile, jobname=jobname, password=password
+            )
+
+    dask_cluster = None
+    if dask_client is None:
+        dask_client, dask_cluster, dask_dir = get_local_dask_cluster(
+            2,
+            dask_dir=workdir,
+            cpu_frac=cpu_frac,
+            mem_frac=mem_frac,
+        )
+        nworker = max(2, int(psutil.cpu_count() * cpu_frac))
+        scale_worker_and_wait(dask_cluster, nworker)
+
+    try:
+        if os.path.exists(imagedir):
+            msg = pbcor_all_images(
+                imagedir,
+                metafits,
+                make_TB=make_TB,
+                make_plots=make_plots,
+                restore=restore,
+                jobid=jobid,
+                cpu_frac=cpu_frac,
+                mem_frac=mem_frac,
+                dask_client=dask_client,
+            )
+        else:
+            print("Please provide correct image directory path.")
+            msg = 1
+    except Exception:
+        traceback.print_exc()
+        msg = 1
+    finally:
+        time.sleep(5)
+        drop_cache(imagedir)
+        drop_cache(workdir)
+        clean_shutdown(observer)
+        if dask_cluster is not None:
+            dask_client.close()
+            dask_cluster.close()
+            os.system(f"rm -rf {dask_dir}")
+    return msg
+
+
+def cli():
+    parser = argparse.ArgumentParser(
+        description="Correct all images for MeerKAT full-pol averaged primary beam",
+        formatter_class=SmartDefaultsHelpFormatter,
+    )
+
+    # Essential parameters
+    basic_args = parser.add_argument_group(
+        "###################\nEssential parameters\n###################"
+    )
+    basic_args.add_argument("imagedir", help="Path to image directory")
+    basic_args.add_argument("--metafits", required=True, help="Metafits file")
+    basic_args.add_argument("--workdir", default="", help="Path to work directory")
+
+    # Advanced parameters
+    adv_args = parser.add_argument_group(
+        "###################\nAdvanced parameters\n###################"
+    )
+    adv_args.add_argument(
+        "--no_make_TB",
+        action="store_false",
+        dest="make_TB",
+        help="Do not generate brightness temperature map",
+    )
+    adv_args.add_argument(
+        "--no_make_plots",
+        action="store_false",
+        dest="make_plots",
+        help="Do not make png plots",
+    )
+    adv_args.add_argument(
+        "--restore",
+        action="store_true",
+        dest="restore",
+        help="Restore primary beam correction",
+    )
+    adv_args.add_argument(
+        "--start_remote_log",
+        action="store_false",
+        dest="start_remote_log",
+        help="Start remote logger",
+    )
+
+    # Resource management parameters
+    hard_args = parser.add_argument_group(
+        "###################\nHardware resource management parameters\n###################"
+    )
+    hard_args.add_argument(
+        "--cpu_frac", type=float, default=0.8, help="CPU usage fraction"
+    )
+    hard_args.add_argument(
+        "--mem_frac", type=float, default=0.8, help="Memory usage fraction"
+    )
+    hard_args.add_argument("--logfile", default=None, help="Path to log file")
+    hard_args.add_argument(
+        "--jobid", type=int, default=0, help="Job ID for logging and PID tracking"
+    )
+
+    if len(sys.argv) == 1:
+        parser.print_help(sys.stderr)
+        return 1
+
+    args = parser.parse_args()
+
+    msg = main(
+        args.imagedir,
+        args.metafits,
+        workdir=args.workdir,
+        make_TB=args.make_TB,
+        make_plots=args.make_plots,
+        restore=args.restore,
+        cpu_frac=args.cpu_frac,
+        mem_frac=args.mem_frac,
+        logfile=args.logfile,
+        jobid=args.jobid,
+        start_remote_log=args.start_remote_log,
+    )
+    return msg
+
+
+if __name__ == "__main__":
+    result = cli()
+    print(
+        "\n###################\nPrimary beam corrections are done.\n###################\n"
+    )
+    os._exit(result)

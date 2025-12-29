@@ -13,18 +13,19 @@ from scipy.ndimage import gaussian_filter1d
 from scipy.interpolate import interp1d
 from casacore.tables import table
 from paircars.pipeline.import_model import suppress_output
+
 warnings.filterwarnings("ignore")
 
 
 def get_chans_flags(msname):
     """
     Get channels flagged or not
-    
+
     Parameters
     ----------
     msname : str
         Name of the measurement set
-        
+
     Returns
     -------
     numpy.array
@@ -36,12 +37,12 @@ def get_chans_flags(msname):
         tb.close()
     chan_flags = np.all(np.all(flag, axis=-1), axis=0)
     return chan_flags
-    
-    
+
+
 def create_crossphase_table(msname, caltable, freqs, crossphase, flags):
     """
     Create cross phase CASA caltable
-    
+
     Parameters
     ----------
     msname : str
@@ -54,7 +55,7 @@ def create_crossphase_table(msname, caltable, freqs, crossphase, flags):
         Crossphase array
     flags : numpy.array
         Flags
-    
+
     Returns
     -------
     str
@@ -63,16 +64,19 @@ def create_crossphase_table(msname, caltable, freqs, crossphase, flags):
     nchan = len(freqs)
     cmd = [
         "create-caltable",
-        "--msname", msname,
-        "--caltable", caltable,
-        "--nchan", str(nchan),
+        "--msname",
+        msname,
+        "--caltable",
+        caltable,
+        "--nchan",
+        str(nchan),
     ]
 
     subprocess.run(cmd, check=True)
     freqres = freqs[1] - freqs[0]
     if os.path.exists(caltable) is not True:
-        print ("Caltable is not made.")
-        return 
+        print("Caltable is not made.")
+        return
     with suppress_output():
         tb = table(msname)
         mean_time = np.nanmean(tb.getcol("TIME"))
@@ -308,10 +312,10 @@ def crossphasecal(
         # Col shape, baselines, chans, corrs
         weight = np.repeat(weight[:, np.newaxis, 0], model_data.shape[1], axis=1)
         tb.close()
-    if gaintable=="":
-        gaintable_supplied=False
+    if gaintable == "":
+        gaintable_supplied = False
     else:
-        gaintable_supplied=True 
+        gaintable_supplied = True
         with suppress_output():
             tb = table(gaintable)
             if type(gaintable) == list:
@@ -344,8 +348,8 @@ def crossphasecal(
     xy_data = data[..., 1]
     yx_data = data[..., 2]
     xy_model = model_data[..., 1]
-    yx_model = model_data[..., 2]   
-    if gaintable_supplied: 
+    yx_model = model_data[..., 2]
+    if gaintable_supplied:
         gainX1 = gain[ant1, :, 0]
         gainY1 = gain[ant1, :, -1]
         gainX2 = gain[ant2, :, 0]
@@ -381,4 +385,3 @@ def crossphasecal(
     crossphase = fitted_crossphase(freqs, crossphase)
     create_crossphase_table(msname, caltable, freqs, crossphase, chan_flags)
     return caltable
-       
