@@ -86,13 +86,52 @@ def get_MWA_bad_freqs():
     for coarse_chan in coarse_channels:
         cent_freq = coarse_chan * 1.28
         start_freq = cent_freq - 0.64
-        end_freq = end_freq + 0.64
+        end_freq = cent_freq + 0.64
         bad_freqs.append([start_freq, start_freq + 0.16])
         bad_freqs.append([cent_freq])
         bad_freqs.append([end_freq - 0.16, end_freq])
     return bad_freqs
 
 
+def get_MWA_coarse_bands(msname):
+    """
+    Get coarse channel bands of the MWA 
+    
+    Parameters
+    ----------
+    msname : str
+        Measurement set
+
+    Returns
+    -------
+    list
+        Coarse channel list
+    """
+    msmd=msmetadata()
+    msmd.open(msname)
+    freqs=msmd.chanfreqs(0,unit="MHz")
+    freqres = msmd.chanres(0,unit="MHz")[0]
+    msmd.close()
+    nchan_coarse = int(1.28/freqres)
+    start_ms_freq=round(np.nanmin(freqs),2)
+    end_ms_freq=round(np.nanmax(freqs),2)
+    coarse_channels = np.arange(55, 235)
+    coarse_chans = []
+    for coarse_chan in coarse_channels:
+        cent_freq = round(coarse_chan * 1.28,2)
+        start_freq = round(cent_freq - 0.64,2)
+        end_freq = round(cent_freq + 0.64,2)
+        if cent_freq>=start_ms_freq and cent_freq<=end_ms_freq:
+            start_chan=np.argmin(np.abs(start_freq-freqs))
+            end_chan=np.argmin(np.abs(end_freq-freqs))
+            if start_chan>0:
+                start_chan = max((start_chan//nchan_coarse)*nchan_coarse,nchan_coarse)
+            if end_chan>0:
+                end_chan = max((end_chan//nchan_coarse)*nchan_coarse,nchan_coarse)
+            coarse_chans.append([start_chan,end_chan])
+    return coarse_chans
+            
+            
 def get_MWA_good_freqs():
     """
     Get good frequencies of the MWA band

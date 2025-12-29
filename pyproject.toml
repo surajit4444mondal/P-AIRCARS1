@@ -227,7 +227,9 @@ run-mwa-paircars = "paircars.pipeline.master_flow:cli"
 show-paircars-ms="paircars.pipeline.show_msdetails:cli"
 show-paircars-status = "paircars.pipeline.show_status:cli"
 run-mwa-makeds = "paircars.pipeline.mwa_make_ds:cli"
+run-mwa-solar-siderealcor = "paircars.pipeline.do_sidereal_cor:cli"
 create-caltable = "paircars.utils.create_caltable:cli"
+
 
 [tool.setuptools]
 packages = [
