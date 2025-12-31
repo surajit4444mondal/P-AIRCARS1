@@ -2,6 +2,7 @@ import argparse
 import sys
 import os
 from casatasks import casalog
+
 try:
     logfile = casalog.logfile()
     os.remove(logfile)

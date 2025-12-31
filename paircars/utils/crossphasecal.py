@@ -16,6 +16,7 @@ from contextlib import contextmanager
 
 warnings.filterwarnings("ignore")
 
+
 @contextmanager
 def suppress_output():
     """
@@ -31,7 +32,8 @@ def suppress_output():
         finally:
             os.dup2(old_stdout, 1)
             os.dup2(old_stderr, 2)
-            
+
+
 def get_chans_flags(msname):
     """
     Get channels flagged or not

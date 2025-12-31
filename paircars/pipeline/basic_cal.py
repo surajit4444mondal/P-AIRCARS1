@@ -8,6 +8,7 @@ import time
 import sys
 import os
 from casatasks import casalog
+
 try:
     logfile = casalog.logfile()
     os.remove(logfile)
@@ -473,22 +474,17 @@ def run_basic_cal_rounds(
         flag_threshold = 6.0
         if refant == "":
             refant = get_refant(trial_ms)
-        if uvrange == "":
-            uvrange = ">200lambda"
-        flag_uvranges = get_uvrange_exclude(uvrange)
-        print(f"Flagging un-wanted uv-range: {','.join(flag_uvranges)}")
-        for flag_uvrange in flag_uvranges:
-            tasks = [
-                delayed(flagdata)(
+        tasks=[]
+        for msname in mslist:
+            if uvrange == "":
+                uvrange = get_gleam_uvrange(msname)
+            flag_uvranges = get_uvrange_exclude(uvrange)
+            task = delayed(flagdata)(
                     vis=msname, mode="manual", uvrange=flag_uvrange, flagbackup=False
                 )
-                for msname in mslist
-            ]
-            results = list(dask_client.gather(dask_client.compute(tasks)))
+            tasks.append(task)
+        results = list(dask_client.gather(dask_client.compute(tasks)))
 
-        print("#########################################")
-        print(f"Using UV-range for calibration: {uvrange}")
-        print("#########################################")
         for cal_round in range(1, n_rounds + 1):
             print("#################################")
             print(f"Calibration round: {cal_round}")
@@ -549,7 +545,7 @@ def main(
     mslist,
     workdir,
     outdir,
-    refant="1",
+    refant="",
     uvrange="",
     perform_polcal=False,
     keep_backup=False,
@@ -565,8 +561,8 @@ def main(
 
     Parameters
     ----------
-    mslist : list
-        Measurement set list
+    mslist : str
+        Measurement set list (comma separated)
     workdir : str
         Work directory
     outdir : str
@@ -601,6 +597,8 @@ def main(
     cachedir = get_cachedir()
     save_pid(pid, f"{cachedir}/pids/pids_{jobid}.txt")
 
+    mslist = mslist.split(",") 
+    
     if workdir == "":
         obsid = get_MWA_OBSID(mslist[0])
         workdir = os.path.dirname(os.path.abspath(mslist[0])) + "/workdir"
@@ -642,9 +640,7 @@ def main(
         )
         nworker = max(2, int(psutil.cpu_count() * cpu_frac))
         scale_worker_and_wait(dask_cluster, nworker)
-
-    mslist = mslist.split(",")
-
+        
     try:
         if len(mslist) > 0:
             print("###################################")
@@ -723,7 +719,7 @@ def cli():
     adv_args = parser.add_argument_group(
         "###################\nAdvanced calibration parameters\n###################"
     )
-    adv_args.add_argument("--refant", type=str, default="1", help="Reference antenna")
+    adv_args.add_argument("--refant", type=str, default="", help="Reference antenna")
     adv_args.add_argument(
         "--uvrange",
         type=str,
@@ -766,7 +762,7 @@ def cli():
     args = parser.parse_args()
 
     msg = main(
-        args.msname,
+        args,mslist,
         args.workdir,
         args.outdir,
         refant=args.refant,

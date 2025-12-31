@@ -6,6 +6,7 @@ from astroquery.jplhorizons import Horizons
 from astropy.time import Time
 from astropy.coordinates import EarthLocation, SkyCoord, AltAz
 from casatasks import casalog
+
 try:
     logfile = casalog.logfile()
     os.remove(logfile)

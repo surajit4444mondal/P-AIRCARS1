@@ -5,6 +5,7 @@ import copy
 import glob
 import os
 from casatasks import casalog
+
 try:
     logfile = casalog.logfile()
     os.remove(logfile)
@@ -36,7 +37,7 @@ def intensity_selfcal(
     solint="60s",
     refant="1",
     solmode="",
-    gaintype="T",
+    gaintype="G",
     applymode="calonly",
     threshold=3,
     weight="briggs",
@@ -377,13 +378,13 @@ def intensity_selfcal(
         tb.close()
 
         logger.info(
-            f"applycal(vis={msname},gaintable=[{bpass_caltable}],interp=['linear,linearflag'],applymode='{applymode}',calwt=[False])\n"
+            f"applycal(vis={msname},gaintable=[{bpass_caltable}],interp=['linear,nearestflag'],applymode='{applymode}',calwt=[False])\n"
         )
         with suppress_output():
             applycal(
                 vis=msname,
                 gaintable=[bpass_caltable],
-                interp=["linear,linearflag"],
+                interp=["linear,nearestflag"],
                 applymode=applymode,
                 calwt=[False],
             )

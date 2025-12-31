@@ -9,6 +9,7 @@ import glob
 import sys
 import os
 from casatasks import casalog
+
 try:
     logfile = casalog.logfile()
     os.remove(logfile)
@@ -262,7 +263,7 @@ def single_ms_flag(
 
 
 def do_flagging(
-    msname,
+    mslist,
     metafits,
     dask_client,
     workdir,
@@ -283,8 +284,8 @@ def do_flagging(
 
     Parameters
     ----------
-    msname : str
-        Name of the ms
+    mslist : list
+        List of the ms
     metafits : str
         MWA metafits
     dask_client : dask.client
@@ -329,32 +330,7 @@ def do_flagging(
 
         from casatasks import flagdata
 
-        msname = msname.rstrip("/")
-        mspath = os.path.dirname(os.path.abspath(msname))
-        os.chdir(mspath)
-        print("###########################")
-        print("Flagging measurement set : ", msname)
-        print("###########################")
-        correct_missing_col_subms(msname)
-        print("Restoring all previous flags...")
-        with suppress_output():
-            flagdata(vis=msname, mode="unflag", spw="0", flagbackup=False)
-        if flag_bad_spw:
-            badspw = get_bad_chans(msname)
-        else:
-            badspw = ""
-        if flag_bad_ants:
-            bad_ants_str = get_mwa_bad_ants(metafits)
-        else:
-            bad_ants_str = ""
-        if os.path.exists(msname + "/SUBMSS"):
-            subms_list = glob.glob(msname + "/SUBMSS/*")
-            for subms in subms_list:
-                os.system(f"rm -rf {subms}/.flagversions")
-        else:
-            subms_list = [msname]
-
-        njobs = max(1, min(total_cpu, len(subms_list)))
+        njobs = max(1, min(total_cpu, len(mslist)))
         n_threads = max(1, int(total_cpu / njobs))
         mem_limit = total_mem / njobs
 
@@ -363,37 +339,49 @@ def do_flagging(
         print(f"CPU per worker: {n_threads}")
         print(f"Memory per worker: {round(mem_limit,2)} GB")
         print("#################################")
-        ###########################################
 
-        if flag_backup:
-            do_flag_backup(msname, flagtype="flagdata")
-        tasks = [
-            delayed(single_ms_flag)(
-                ms,
-                badspw=badspw,
-                bad_ants_str=bad_ants_str,
-                datacolumn=datacolumn,
-                use_tfcrop=use_tfcrop,
-                use_rflag=use_rflag,
-                flagdimension=flagdimension,
-                flag_autocorr=flag_autocorr,
-                threshold=5.0,
-                n_threads=n_threads,
-                memory_limit=mem_limit,
+        ###########################################
+        tasks = []
+        for msname in mslist:
+            msname = msname.rstrip("/")
+            mspath = os.path.dirname(os.path.abspath(msname))
+            os.chdir(mspath)
+            print("###########################")
+            print("Flagging measurement set : ", msname)
+            print("###########################")
+            correct_missing_col_subms(msname)
+            print("Restoring all previous flags...")
+            with suppress_output():
+                flagdata(vis=msname, mode="unflag", spw="0", flagbackup=False)
+            if flag_bad_spw:
+                badspw = get_bad_chans(msname)
+            else:
+                badspw = ""
+            if flag_bad_ants:
+                bad_ants_str = get_mwa_bad_ants(metafits)
+            else:
+                bad_ants_str = ""
+
+            if flag_backup:
+                do_flag_backup(msname, flagtype="flagdata")
+            tasks.append(
+                delayed(single_ms_flag)(
+                    msname,
+                    badspw=badspw,
+                    bad_ants_str=bad_ants_str,
+                    datacolumn=datacolumn,
+                    use_tfcrop=use_tfcrop,
+                    use_rflag=use_rflag,
+                    flagdimension=flagdimension,
+                    flag_autocorr=flag_autocorr,
+                    threshold=5.0,
+                    n_threads=n_threads,
+                    memory_limit=mem_limit,
+                )
             )
-            for ms in subms_list
-        ]
-        print(f"Flagging mslist: {','.join(subms_list)}")
+        print(f"Flagging mslist: {','.join(mslist)}")
         futures = dask_client.compute(tasks)
         results = list(dask_client.gather(futures))
-        ###############
-        # Flag summary
-        ###############
-        summary_file = (
-            f"{outdir}/{os.path.basename(msname).split('.ms')[0]}_basicflag.summary"
-        )
-        print(f"Flag summary: {summary_file}")
-        flagsummary(msname, summary_file)
         return 0
     except Exception as e:
         traceback.print_exc()
@@ -401,7 +389,7 @@ def do_flagging(
 
 
 def main(
-    msname,
+    mslist,
     metafits,
     workdir="",
     outdir="",
@@ -425,8 +413,8 @@ def main(
 
     Parameters
     ----------
-    msname : str
-        Path to the input measurement set (MS) to be flagged.
+    mslist : str
+        Measurement set list (comma separated)
     metafits : str
         Metafits file
     workdir : str, optional
@@ -472,8 +460,10 @@ def main(
     cachedir = get_cachedir()
     save_pid(pid, f"{cachedir}/pids/pids_{jobid}.txt")
 
+    mslist = mslist.split(",")
+    
     if workdir == "":
-        workdir = os.path.dirname(os.path.abspath(msname)) + "/workdir"
+        workdir = os.path.dirname(os.path.abspath(mslist[0])) + "/workdir"
     os.makedirs(workdir, exist_ok=True)
     if outdir == "":
         outdir = workdir
@@ -511,9 +501,9 @@ def main(
         scale_worker_and_wait(dask_cluster, nworker)
 
     try:
-        if msname and os.path.exists(msname):
+        if len(mslist)>0:
             msg = do_flagging(
-                msname,
+                mslist,
                 metafits,
                 dask_client,
                 workdir,
@@ -537,7 +527,8 @@ def main(
         msg = 1
     finally:
         time.sleep(1)
-        drop_cache(msname)
+        for msname in mslist:
+            drop_cache(msname)
         drop_cache(workdir)
         clean_shutdown(observer)
         if dask_cluster is not None:
@@ -557,7 +548,12 @@ def cli():
     basic_args = parser.add_argument_group(
         "###################\nEssential parameters\n###################"
     )
-    basic_args.add_argument("msname", type=str, help="Name of measurement set")
+    basic_args.add_argument(
+        "mslist", type=str, help="Name of measurement sets (Comma seperated)"
+    )
+     basic_args.add_argument(
+        "metafits", type=str, help="Metafits file"
+    )
     basic_args.add_argument(
         "--workdir", type=str, default="", help="Name of work directory"
     )
@@ -625,9 +621,10 @@ def cli():
         return 1
 
     args = parser.parse_args()
-
+    
     msg = main(
-        msname=args.msname,
+        args.mslist,
+        args.metafits,
         workdir=args.workdir,
         outdir=args.outdir,
         datacolumn=args.datacolumn,

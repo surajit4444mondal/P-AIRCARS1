@@ -8,6 +8,7 @@ import glob
 import sys
 import os
 from casatasks import casalog
+
 try:
     logfile = casalog.logfile()
     os.remove(logfile)
@@ -39,7 +40,7 @@ def run_all_applysol(
 
     Parameters
     ----------
-    mslist : str
+    mslist : list
         Measurement set list
     dask_client : dask.client
         Dask client
@@ -253,6 +254,7 @@ def main(
 
     # Get first MS from mslist for fallback directory creation
     mslist = mslist.split(",")
+    
     if workdir == "":
         workdir = os.path.dirname(os.path.abspath(mslist[0])) + "/workdir"
     os.makedirs(workdir, exist_ok=True)

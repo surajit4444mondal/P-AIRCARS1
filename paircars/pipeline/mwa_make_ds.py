@@ -20,6 +20,7 @@ def make_solar_DS(
     mslist,
     metafits,
     workdir,
+    outdir,
     plot_quantity="TB",
     extension="png",
     showgui=False,
@@ -37,6 +38,8 @@ def make_solar_DS(
         Metafits file
     workdir : str
         Work directory
+    outdir : str
+        Output directory
     plot_quantity : str, optional
         Plotting quantity (TB or flux)
     extension : str, optional
@@ -61,8 +64,7 @@ def make_solar_DS(
     total_mem = (psutil.virtual_memory().available * mem_frac) / (1024**3)  # In GB
 
     warnings.filterwarnings("ignore", category=RuntimeWarning)
-    os.makedirs(f"{workdir}/dynamic_spectra", exist_ok=True)
-    outdir = f"{workdir}/dynamic_spectra"
+    os.makedirs(f"{outdir}/dynamic_spectra", exist_ok=True)
     print("##############################################")
     print(f"Start making dynamic spectra for ms: {msname}")
     print("##############################################")
@@ -85,7 +87,11 @@ def make_solar_DS(
         ###########################################
         tasks = []
         for msname in mslist:
-            tasks.append(delayed(calc_dynamic_spectrum)(msname, metafits, outdir))
+            tasks.append(
+                delayed(calc_dynamic_spectrum)(
+                    msname, metafits, f"{outdir}/dynamic_spectra"
+                )
+            )
         results = []
         print("Start making dynamic spectra...")
         for i in range(0, len(tasks), njobs):
@@ -103,14 +109,14 @@ def make_solar_DS(
         ###########################################
         obsid = get_MWA_OBSID(mslist[0])
         ds_file_name = f"{obsid}_ds"
-        plot_file = f"{workdir}/dynamic_spectra/{ds_file_name}.{extension}"
+        plot_file = f"{outdir}/dynamic_spectra/{ds_file_name}.{extension}"
         plot_file = make_ds_plot(
             ds_files,
             plot_file=plot_file,
             plot_quantity=plot_quantity,
             showgui=showgui,
         )
-        goes_files = glob.glob(f"{workdir}/dynamic_spectra/sci*.nc")
+        goes_files = glob.glob(f"{outdir}/dynamic_spectra/sci*.nc")
         for f in goes_files:
             os.system(f"rm -rf {f}")
         return plot_file
@@ -121,13 +127,14 @@ def make_solar_DS(
         time.sleep(5)
         for msname in mslist:
             drop_cache(msname)
-        drop_cache(workdir)
+        drop_cache(outdir)
 
 
 def main(
     mslist,
     metafits,
     workdir,
+    outdir,
     plot_quantity="TB",
     extension="png",
     cpu_frac=0.8,
@@ -142,12 +149,14 @@ def main(
 
     Parameters
     ----------
-    msname : str
-        Measurement set
+    mslist : str
+        Measurement set list (comma seperated)
     metafits : str
         Metafits file
     workdir : str
         Work directory
+    outdir : str
+        Output directory
     plot_quantity : str
         Plotting quantity (TB or flux)
     extension : str, optional
@@ -174,9 +183,14 @@ def main(
     cachedir = get_cachedir()
     save_pid(pid, f"{cachedir}/pids/pids_{jobid}.txt")
 
+    mslist = mslist.split(",")
+    
     if workdir == "":
         workdir = os.path.dirname(os.path.abspath(mslist[0])) + "/workdir"
     os.makedirs(workdir, exist_ok=True)
+    if outdir == "":
+        outdir = workdir
+    os.makedirs(outdir, exist_ok=True)
 
     ############
     # Logger
@@ -208,12 +222,11 @@ def main(
         scale_worker_and_wait(dask_cluster, nworker)
 
     try:
-        mslist = mslist.split(",")
         if len(mslist) > 0:
             ds_plot_file = make_solar_DS(
                 mslist,
                 metafits,
-                workdir,
+                outdir,
                 plot_quantity=plot_quantity,
                 extension=extension,
                 cpu_frac=cpu_frac,
@@ -251,7 +264,7 @@ def cli():
     essential = parser.add_argument_group(
         "###################\nEssential parameters\n###################"
     )
-    essential.add_argument("msname", type=str, help="Measurement set name")
+    essential.add_argument("mslist", type=str, help="Measurement set list (comma seperated)")
     essential.add_argument("metafits", type=str, help="Metafits file")
     essential.add_argument(
         "--workdir",
@@ -259,6 +272,13 @@ def cli():
         dest="workdir",
         required=True,
         help="Working directory",
+    )
+    essential.add_argument(
+        "--outdir",
+        type=str,
+        dest="outdir",
+        required=True,
+        help="Output directory",
     )
 
     # === Advanced parameters ===
@@ -309,11 +329,9 @@ def cli():
         return 1
 
     args = parser.parse_args()
-
-    mslist = args.mslist.split(",")
-
+    
     msg = main(
-        mslist,
+        args.mslist,
         args.metafits,
         args.workdir,
         plot_quantity=args.plot_quantity,

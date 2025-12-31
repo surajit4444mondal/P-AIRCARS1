@@ -10,6 +10,7 @@ from datetime import datetime as dt
 from contextlib import contextmanager
 from scipy.interpolate import interp1d
 from casatasks import casalog
+
 try:
     logfile = casalog.logfile()
     os.remove(logfile)

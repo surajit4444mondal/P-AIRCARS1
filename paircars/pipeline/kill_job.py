@@ -72,7 +72,7 @@ def kill_paircarsjob():
     try:
         results = np.loadtxt(jobfile_name, dtype="str", unpack=True)
         main_pid = int(results[1])
-        msname = str(results[2])
+        msdir = str(results[2])
         workdir = str(results[3])
         outdir = str(results[4])
     except Exception as e:
@@ -94,7 +94,7 @@ def kill_paircarsjob():
     os.system(f"rm -rf {workdir}/tmp_paircars_*")
 
     print("Dropping caches...")
-    drop_cache(msname)
+    drop_cache(msdir)
     drop_cache(workdir)
     drop_cache(outdir)
     drop_cache(cachedir)

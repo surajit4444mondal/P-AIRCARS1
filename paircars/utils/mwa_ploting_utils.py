@@ -20,6 +20,7 @@ from astropy.time import Time
 from astropy.coordinates import EarthLocation, SkyCoord
 from astropy.wcs import FITSFixedWarning
 from casatasks import casalog
+
 try:
     logfile = casalog.logfile()
     os.remove(logfile)

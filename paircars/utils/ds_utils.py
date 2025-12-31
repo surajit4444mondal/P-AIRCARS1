@@ -4,6 +4,7 @@ import warnings
 import types
 from scipy.interpolate import interp1d
 from casatasks import casalog
+
 try:
     logfile = casalog.logfile()
     os.remove(logfile)

@@ -8,6 +8,7 @@ import time
 import sys
 import os
 from casatasks import casalog
+
 try:
     logfile = casalog.logfile()
     os.remove(logfile)
@@ -102,7 +103,7 @@ def split_target_scans(
 
         os.chdir(workdir)
         print(f"Spliting ms : {msname}")
-        
+
         #######################################
         # Extracting time frequency information
         #######################################
@@ -128,7 +129,7 @@ def split_target_scans(
         # Making spectral chunks
         #############################
         coarse_channel_bands = get_MWA_coarse_bands(msname)
-        chanlist=[]
+        chanlist = []
         for chan in coarse_channel_bands:
             chanlist.append(f"{chan[0]}~{chan[1]}")
 
@@ -136,7 +137,7 @@ def split_target_scans(
         # Parallel spliting
         ##################################
         if len(chanlist) > 0:
-            total_chunks = len(chanlist) 
+            total_chunks = len(chanlist)
         else:
             total_chunks = 1
 
@@ -154,7 +155,7 @@ def split_target_scans(
         )
         timerange = ",".join(timerange_list)
         for chanrange in chanlist:
-            outputvis = f"{workdir}/{prefix}_scan_{scan}_spw_{chanrange}.ms"
+            outputvis = f"{workdir}/{prefix}_spw_{chanrange}.ms"
             if os.path.exists(f"{outputvis}/.splited"):
                 print(f"{outputvis} is already splited successfully.")
                 splited_ms_list.append(outputvis)
@@ -195,7 +196,7 @@ def split_target_scans(
 
 
 def main(
-    msname,
+    mslist,
     workdir="",
     datacolumn="data",
     scan=1,
@@ -217,8 +218,8 @@ def main(
 
     Parameters
     ----------
-    msname : str
-        Path to the input measurement set (MS).
+    mslist : str
+        Measurement sets (comma separated).
     workdir : str, optional
         Working directory for intermediate and output products. If empty, defaults to `<msname>/workdir`.
     datacolumn : str, optional
@@ -259,8 +260,10 @@ def main(
     cachedir = get_cachedir()
     save_pid(pid, f"{cachedir}/pids/pids_{jobid}.txt")
 
+    mslist = mslist.split(",")
+    
     if workdir == "":
-        workdir = os.path.dirname(os.path.abspath(msname)) + "/workdir"
+        workdir = os.path.dirname(os.path.abspath(mslist[0])) + "/workdir"
     os.makedirs(workdir, exist_ok=True)
 
     ############
@@ -295,27 +298,28 @@ def main(
         scale_worker_and_wait(dask_cluster, nworker)
 
     try:
-        if msname and os.path.exists(msname):
-            print("###################################")
-            print("Start spliting target in coarse frequency bands.")
-            print("###################################")
-            msg, final_target_mslist = split_target_scans(
-                msname,
-                dask_client,
-                workdir,
-                float(timeres),
-                float(freqres),
-                datacolumn,
-                time_window=float(time_window),
-                time_interval=float(time_interval),
-                quack_timestamps=int(quack_timestamps),
-                scan=scan,
-                prefix=prefix,
-                cpu_frac=float(cpu_frac),
-                mem_frac=float(mem_frac),
-            )
+        if len(mslist)>0:
+            for msname in mslist:
+                print("###################################")
+                print(f"Start spliting: {msname} in coarse frequency bands.")
+                print("###################################")
+                msg, final_target_mslist = split_target_scans(
+                    msname,
+                    dask_client,
+                    workdir,
+                    float(timeres),
+                    float(freqres),
+                    datacolumn,
+                    time_window=float(time_window),
+                    time_interval=float(time_interval),
+                    quack_timestamps=int(quack_timestamps),
+                    scan=scan,
+                    prefix=prefix,
+                    cpu_frac=float(cpu_frac),
+                    mem_frac=float(mem_frac),
+                )
         else:
-            print("Please provide correct measurement set.")
+            print("Please provide correct measurement set list.")
             msg = 1
     except Exception as e:
         traceback.print_exc()
@@ -334,7 +338,7 @@ def main(
 
 def cli():
     parser = argparse.ArgumentParser(
-        description="Split target scans", formatter_class=SmartDefaultsHelpFormatter
+        description="Split measurement set into coarse channels", formatter_class=SmartDefaultsHelpFormatter
     )
 
     # Essential parameters
@@ -342,9 +346,9 @@ def cli():
         "###################\nEssential parameters\n###################"
     )
     basic_args.add_argument(
-        "msname",
+        "mslist",
         type=str,
-        help="Name of measurement set (required positional argument)",
+        help="Name of measurement sets (required positional argument)",
     )
     basic_args.add_argument(
         "--workdir",
@@ -439,7 +443,7 @@ def cli():
     args = parser.parse_args()
 
     msg = main(
-        msname=args.msname,
+        mslist=args.mslist,
         workdir=args.workdir,
         datacolumn=args.datacolumn,
         scan=args.scan,
@@ -461,6 +465,6 @@ def cli():
 if __name__ == "__main__":
     result = cli()
     print(
-        "\n###################\nSpliting target coarse channels are done.\n###################\n"
+        "\n###################\nSpliting measurement set into coarse channels are done.\n###################\n"
     )
     os._exit(result)

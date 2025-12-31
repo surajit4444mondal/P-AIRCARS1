@@ -10,20 +10,25 @@ import glob
 import sys
 import os
 import socket
+from casatasks import casalog
+
+try:
+    logfile = casalog.logfile()
+    os.remove(logfile)
+except BaseException:
+    pass
 from casatools import msmetadata
 from datetime import datetime as dt
 from multiprocessing import Process, Event
-from meersolar.utils import *
+from paircars.utils import *
 from dask.distributed import get_client
 from dotenv import load_dotenv
 from prefect import flow, task
 from prefect.context import get_run_context
 from prefect_dask.task_runners import DaskTaskRunner
 from prefect_dask import get_dask_client
-from meersolar.meerpipeline import (
-    meer_make_ds,
-    do_fluxcal,
-    do_partition,
+from paircars.pipeline import (
+    mwa_make_ds,
     do_target_split,
     flagging,
     import_model,
@@ -33,7 +38,7 @@ from meersolar.meerpipeline import (
     do_selfcal,
     do_apply_selfcal,
     do_imaging,
-    meer_pbcor,
+    mwa_pbcor,
 )
 
 logging.getLogger("distributed").setLevel(logging.ERROR)
@@ -43,28 +48,31 @@ datadir = get_datadir()
 
 @task(name="making_dynamic_spectra", retries=2, retry_delay_seconds=10, log_prints=True)
 def run_ds_jobs(
-    msname,
+    mslist,
+    metafits,
     workdir,
     outdir,
-    target_scans=[],
+    plot_quantity="TB",
     jobid=0,
     cpu_frac=0.8,
     mem_frac=0.8,
     remote_log=False,
 ):
     """
-    Make dynamic spectra of the target scans
+    Make dynamic spectra of the solar target
 
     Parameters
     ----------
-    msname : str
-        Name of the measurement set
+    mslist : str 
+        Measurement sets (comma separated)
+    metafits : str
+        Metafits file
     workdir : str
         Name of the work directory
     outdir : str
-        Output directory
-    target_scans : list, optional
-        Target scans
+        Name of the output directory
+    plot_quantity : str, optional
+        Plot quantity (TB or flux)
     cpu_frac : float, optional
         CPU fraction to use
     mem_frac : float, optional
@@ -93,22 +101,23 @@ def run_ds_jobs(
     try:
         ##################
         print("###########################")
-        print("Making dynamic spectra of target scans .....")
+        print("Making dynamic spectra of solar target .....")
         print("###########################")
         ##########################
         # Making dynamic spectrum
         ##########################
         with get_dask_client() as dask_client:
-            msg = meer_make_ds.main(
-                msname,
+            msg = mwa_make_ds.main(
+                mslist,
+                metafits,
                 workdir,
                 outdir,
-                target_scans=target_scans,
+                plot_quantity=plot_quantity,
                 cpu_frac=float(cpu_frac),
                 mem_frac=float(mem_frac),
                 logfile=logfile,
                 jobid=jobid,
-                start_remote_log=remote_log,
+                start_remote_log=start_remote_log,
                 dask_client=dask_client,
             )
     finally:
@@ -120,214 +129,14 @@ def run_ds_jobs(
         return msg
 
 
-@task(
-    name="attenuation_calibration", retries=2, retry_delay_seconds=10, log_prints=True
-)
-def run_noise_diode_cal(
-    msname,
-    workdir,
-    caldir,
-    keep_backup=False,
-    jobid=0,
-    cpu_frac=0.8,
-    mem_frac=0.8,
-    remote_log=False,
-):
-    """
-    Perform noise diode based flux calibration
-
-    Parameters
-    ----------
-    msname: str
-        Name of the measurement set
-    workdir : str
-        Working directory
-    caldir : str
-        Caltable directory
-    keep_backup : bool, optional
-        Keep backup
-    cpu_frac : float, optional
-        CPU fraction to use
-    mem_frac : float, optional
-        Memory fraction to use
-    remote_log: bool, optional
-        Start remote logger
-
-    Returns
-    -------
-    int
-        Success message for noise diode based flux calibration
-    """
-    msname = msname.rstrip("/")
-    noisecal_basename = "noise_cal"
-    logdir = f"{workdir}/logs"
-    os.makedirs(logdir, exist_ok=True)
-    logfile = f"{logdir}/{noisecal_basename}.log"
-    if os.path.exists(logfile):
-        os.remove(logfile)
-    ctx = get_run_context()
-    task_id = str(ctx.task_run.id)
-    task_name = ctx.task_run.name
-    stop_event = Event()
-    log_thread_noise_cal = start_log_task_saver(
-        task_id, task_name, logfile, poll_interval=3, stop_event=stop_event
-    )
-    try:
-        #################
-        print("###########################")
-        print("Performing noise diode based flux calibration .....")
-        print("###########################")
-        #################
-        # Attenuation calibration
-        #################
-        with get_dask_client() as dask_client:
-            msg = do_fluxcal.main(
-                msname,
-                workdir,
-                caldir,
-                keep_backup=keep_backup,
-                start_remote_log=remote_log,
-                cpu_frac=float(cpu_frac),
-                mem_frac=float(mem_frac),
-                logfile=logfile,
-                jobid=jobid,
-                dask_client=dask_client,
-            )
-    finally:
-        stop_event.set()
-        log_thread_noise_cal.join(timeout=5)
-    if msg != 0:
-        raise RuntimeError("Attenuation calibration is failed.")
-    else:
-        return msg
-
-
-@task(
-    name="partitioning_calibrator", retries=2, retry_delay_seconds=10, log_prints=True
-)
-def run_partition(
-    msname,
-    workdir,
-    cal_scans=[],
-    jobid=0,
-    cpu_frac=0.8,
-    mem_frac=0.8,
-    remote_log=False,
-):
-    """
-    Perform basic calibration
-
-    Parameters
-    ----------
-    msname: str
-        Name of the measurement set
-    workdir : str
-        Working directory
-    cal_scans : list, optional
-        Calibrator scans
-    cpu_frac : float, optional
-        CPU fraction to use
-    mem_frac : float, optional
-        Memory fraction to use
-    remote_log: bool, optional
-        Start remote logger
-
-    Returns
-    -------
-    int
-        Success message
-    """
-    msname = msname.rstrip("/")
-    partition_basename = f"partition_cal"
-    logdir = f"{workdir}/logs"
-    os.makedirs(logdir, exist_ok=True)
-    logfile = f"{logdir}/{partition_basename}.log"
-    if os.path.exists(logfile):
-        os.remove(logfile)
-    ctx = get_run_context()
-    task_id = str(ctx.task_run.id)
-    task_name = ctx.task_run.name
-    stop_event = Event()
-    log_thread_part = start_log_task_saver(
-        task_id, task_name, logfile, poll_interval=3, stop_event=stop_event
-    )
-    try:
-        msmd = msmetadata()
-        msmd.open(msname)
-        nchan = msmd.nchan(0)
-        times = msmd.timesforfield(0)
-        msmd.close()
-        if len(times) == 1:
-            timeres = msmd.exposuretime(scan)["value"]
-        else:
-            timeres = times[1] - times[0]
-        if nchan > 1024:
-            width = int(nchan / 1024)
-            if width < 1:
-                width = 1
-        else:
-            width = 1
-        if timeres < 8:
-            timebin = "8s"
-        else:
-            timebin = ""
-        if len(cal_scans) == 0:
-            target_scans, cal_scans, f_scans, g_scans, p_scans = get_cal_target_scans(
-                msname
-            )
-            partition_cal_scans = []
-            for s in cal_scans:
-                noise_cal_scan = determine_noise_diode_cal_scan(msname, s)
-                if not noise_cal_scan:
-                    partition_cal_scans.append(s)
-            cal_scans = partition_cal_scans
-        cal_scans = ",".join([str(s) for s in cal_scans])
-        calibrator_ms = workdir + "/calibrator.ms"
-        ##############
-        print("###########################")
-        print("Partitioning measurement set ...")
-        print("###########################")
-        ###################
-        # Paritioning calibrator scans
-        ###################
-        with get_dask_client() as dask_client:
-            msg = do_partition.main(
-                msname,
-                outputms=calibrator_ms,
-                workdir=workdir,
-                scans=cal_scans,
-                width=int(width),
-                timebin=timebin,
-                datacolumn="data",
-                cpu_frac=float(cpu_frac),
-                mem_frac=float(mem_frac),
-                logfile=logfile,
-                jobid=jobid,
-                start_remote_log=remote_log,
-                dask_client=dask_client,
-            )
-    finally:
-        stop_event.set()
-        log_thread_part.join(timeout=5)
-    if msg != 0:
-        raise RuntimeError("Partitioning calibrator scans is failed.")
-    else:
-        return msg
-
-
-@task(name="spliting_target_scans", retries=2, retry_delay_seconds=10, log_prints=True)
+@task(name="spliting_ms", retries=2, retry_delay_seconds=10, log_prints=True)
 def run_target_split_jobs(
-    msname,
+    mslist,
     workdir,
     datacolumn="data",
-    spw="",
     timeres=-1,
     freqres=-1,
-    target_freq_chunk=-1,
-    n_spectral_chunk=-1,
-    target_scans=[],
-    prefix="targets",
-    merge_spws=False,
+    prefix="target",
     time_window=-1,
     time_interval=-1,
     jobid=0,
@@ -336,32 +145,22 @@ def run_target_split_jobs(
     remote_log=False,
 ):
     """
-    Split target scans
+    Split measurement set
 
     Parameters
     ----------
-    msname: str
-        Name of the measurement set
+    mslist: str
+        Name of the measurement sets (comma separated)
     workdir : str
         Working directory
     datacolumn : str, optional
         Data column
-    spw : str, optional
-        Spectral window to split
     timeres : float, optional
         Time bin to average in seconds
     freqres : float, optional
         Frequency averaging in MHz
-    target_freq_chunk : float, optional
-        Target frequency chunk in MHz
-    n_spectral_chunk : int, optional
-        Number of spectral chunks to split
-    target_scans : list, optional
-        Target scans
     prefix : str, optional
         Prefix of splited targets
-    merge_spws : bool, optional
-        Merge spectral windows
     time_window : float, optional
         Time window in seconds
     time_interval : float, optional
@@ -376,9 +175,8 @@ def run_target_split_jobs(
     Returns
     -------
     int
-        Success message for spliting target scans
+        Success message for spliting measurement set
     """
-    msname = msname.rstrip("/")
     split_basename = f"split_{prefix}"
     logdir = f"{workdir}/logs"
     os.makedirs(logdir, exist_ok=True)
@@ -395,27 +193,21 @@ def run_target_split_jobs(
     try:
         ############
         print("###########################")
-        print(f"Spliting {prefix} scans .....")
+        print(f"Spliting {prefix} .....")
         print("###########################")
         ##################
-        # Spliting target scans
+        # Spliting ms
         ##################
-        scans = ",".join([str(s) for s in target_scans])
         with get_dask_client() as dask_client:
             msg = do_target_split.main(
-                msname,
+                mslist,
                 workdir=workdir,
                 datacolumn=datacolumn,
-                spw=spw,
-                scans=scans,
                 time_window=time_window,
                 time_interval=time_interval,
-                spectral_chunk=target_freq_chunk,
-                n_spectral_chunk=n_spectral_chunk,
                 freqres=freqres,
                 timeres=timeres,
                 prefix=prefix,
-                merge_spws=merge_spws,
                 cpu_frac=float(cpu_frac),
                 mem_frac=float(mem_frac),
                 logfile=logfile,
@@ -427,14 +219,15 @@ def run_target_split_jobs(
         stop_event.set()
         log_thread_split.join(timeout=5)
     if msg != 0:
-        raise RuntimeError("Spliting target scans is failed.")
+        raise RuntimeError("Spliting measurement set into coarse channels is failed.")
     else:
         return msg
 
 
 @task(name="flagging", retries=2, retry_delay_seconds=10, log_prints=True)
 def run_flag(
-    msname,
+    mslist,
+    metafits,
     workdir,
     outdir,
     flag_calibrators=True,
@@ -448,8 +241,10 @@ def run_flag(
 
     Parameters
     ----------
-    msname: str
-        Name of the measurement set
+    mslist: str
+        Name of the measurement sets (comma separted)
+    metafits : str
+        Metafits file
     workdir : str
         Working directory
     outdir : str
@@ -470,16 +265,16 @@ def run_flag(
     int
         Success message
     """
-    msname = msname.rstrip("/")
     if flag_calibrators:
         flagdimension = "freqtime"
         flagfield_type = "cal"
+        use_tfcrop = True
+        flag_basename = f"flagging_{flagfield_type}_calibrator"
     else:
         flagdimension = "freq"
         flagfield_type = "target"
-    flag_basename = (
-        f"flagging_{flagfield_type}_" + os.path.basename(msname).split(".ms")[0]
-    )
+        use_tfcrop = False
+        flag_basename = f"flagging_{flagfield_type}_target"
     logdir = f"{workdir}/logs"
     os.makedirs(logdir, exist_ok=True)
     logfile = f"{logdir}/{flag_basename}.log"
@@ -502,19 +297,18 @@ def run_flag(
         ########################
         with get_dask_client() as dask_client:
             msg = flagging.main(
-                msname,
+                mslist,
+                metafits,
                 workdir=workdir,
                 outdir=outdir,
                 datacolumn="DATA",
                 flag_bad_ants=True,
                 flag_bad_spw=True,
-                use_tfcrop=True,
-                use_rflag=False,
+                use_tfcrop=use_tfcrop,
                 flag_autocorr=True,
-                flagbackup=True,
                 flagdimension=flagdimension,
                 cpu_frac=float(cpu_frac),
-                mem_frac=float(cpu_frac),
+                mem_frac=float(mem_grac),
                 logfile=logfile,
                 jobid=jobid,
                 start_remote_log=remote_log,
@@ -524,7 +318,7 @@ def run_flag(
         stop_event.set()
         log_thread_flag.join(timeout=5)
     if msg != 0:
-        raise RuntimeError("Calibrator flagging is failed.")
+        raise RuntimeError("Flagging is failed.")
     else:
         return msg
 
@@ -536,7 +330,8 @@ def run_flag(
     log_prints=True,
 )
 def run_import_model(
-    msname,
+    mslist,
+    metafits,
     workdir,
     jobid=0,
     cpu_frac=0.8,
@@ -548,8 +343,10 @@ def run_import_model(
 
     Parameters
     ----------
-    msname: str
-        Name of the measurement set
+    mslist : str
+        Name of the measurement sets (comma separated)
+    metafits : str
+        Metafits file
     workdir : str
         Working directory
     cpu_frac : float, optional
@@ -564,8 +361,7 @@ def run_import_model(
     int
         Success message
     """
-    msname = msname.rstrip("/")
-    model_basename = "modeling_" + os.path.basename(msname).split(".ms")[0]
+    model_basename = "modeling"
     logdir = f"{workdir}/logs"
     os.makedirs(logdir, exist_ok=True)
     logfile = f"{logdir}/{model_basename}.log"
@@ -588,15 +384,16 @@ def run_import_model(
         ########################
         with get_dask_client() as dask_client:
             msg = import_model.main(
-                msname,
-                workdir=workdir,
-                cpu_frac=float(cpu_frac),
-                mem_frac=float(mem_frac),
-                logfile=logfile,
-                jobid=jobid,
-                start_remote_log=remote_log,
-                dask_client=dask_client,
-            )
+                    mslist,
+                    metafits,
+                    workdir,
+                    cpu_frac=float(cpu_frac),
+                    mem_frac=float(mem_frac),
+                    logfile=logfile,
+                    jobid=jobid,
+                    start_remote_log=remote_log,
+                    dask_client=dask_client,
+                )
     finally:
         stop_event.set()
         log_thread_model.join(timeout=5)
@@ -608,7 +405,7 @@ def run_import_model(
 
 @task(name="basic_calibration", retries=2, retry_delay_seconds=10, log_prints=True)
 def run_basic_cal_jobs(
-    msname,
+    mslist,
     workdir,
     outdir,
     perform_polcal=False,
@@ -623,8 +420,8 @@ def run_basic_cal_jobs(
 
     Parameters
     ----------
-    msname: str
-        Name of the measurement set
+    mslist: str
+        Name of the measurement sets (comma seperated)
     workdir : str
         Working directory
     outdir : str
@@ -645,7 +442,6 @@ def run_basic_cal_jobs(
     int
         Success message for basic calibration
     """
-    msname = msname.rstrip("/")
     cal_basename = "basic_cal"
     logdir = f"{workdir}/logs"
     os.makedirs(logdir, exist_ok=True)
@@ -669,18 +465,18 @@ def run_basic_cal_jobs(
         ########################
         with get_dask_client() as dask_client:
             msg = basic_cal.main(
-                msname,
-                workdir,
-                outdir,
-                perform_polcal=perform_polcal,
-                keep_backup=keep_backup,
-                start_remote_log=remote_log,
-                cpu_frac=float(cpu_frac),
-                mem_frac=float(mem_frac),
-                logfile=logfile,
-                jobid=jobid,
-                dask_client=dask_client,
-            )
+                    mslist,
+                    workdir,
+                    outdir,
+                    perform_polcal=perform_polcal,
+                    keep_backup=keep_backup,
+                    start_remote_log=remote_log,
+                    cpu_frac=float(cpu_frac),
+                    mem_frac=float(mem_frac),
+                    logfile=logfile,
+                    jobid=jobid,
+                    dask_client=dask_client,
+                )
     finally:
         stop_event.set()
         log_thread_cal.join(timeout=5)
@@ -697,10 +493,11 @@ def run_basic_cal_jobs(
     log_prints=True,
 )
 def run_apply_basiccal_sol(
-    target_mslist,
+    mslist,
+    calibrator_metafits,
+    target_metafits,
     workdir,
     caldir,
-    use_only_bandpass=False,
     overwrite_datacolumn=True,
     applymode="calflag",
     prefix="target",
@@ -714,14 +511,18 @@ def run_apply_basiccal_sol(
 
     Parameters
     ----------
-    target_mslist: list
-        Target measurement set list
+    mslist: str
+        Target measurement set list (comma separated)
+    calibrator_metafits : str
+        Calibrator metafits
+    target_metafits : str
+        Target metafits
     workdir : str
         Working directory
     caldir : str
         Caltable directory
-    use_only_bandpass : bool
-        Use only bandpass solutions
+    overwrite_datacolumn : bool
+        Overwrite data column or not
     applymode : str, optional
         Applycal mode
     prefix : str, optional
@@ -730,8 +531,6 @@ def run_apply_basiccal_sol(
         CPU fraction to use
     mem_frac : float, optional
         Memory fraction to use
-    overwrite_datacolumn : bool
-        Overwrite data column or not
     remote_log: bool, optional
         Start remote logger
 
@@ -740,7 +539,6 @@ def run_apply_basiccal_sol(
     int
         Success message for applying calibration solutions and spliting target scans
     """
-    mslist = ",".join(target_mslist)
     applycal_basename = f"apply_basiccal_{prefix}"
     logdir = f"{workdir}/logs"
     os.makedirs(logdir, exist_ok=True)
@@ -757,26 +555,27 @@ def run_apply_basiccal_sol(
     try:
         ######################
         print("###########################")
-        print("Applying basic calibration solutions on target scans .....")
+        print("Applying basic calibration solutions on solar target .....")
         print("###########################")
         ######################
         # Applying basic calibration
         ######################
         with get_dask_client() as dask_client:
             msg = do_apply_basiccal.main(
-                mslist,
-                workdir,
-                caldir,
-                use_only_bandpass=use_only_bandpass,
-                applymode=applymode,
-                overwrite_datacolumn=overwrite_datacolumn,
-                start_remote_log=remote_log,
-                cpu_frac=float(cpu_frac),
-                mem_frac=float(mem_frac),
-                logfile=logfile,
-                jobid=jobid,
-                dask_client=dask_client,
-            )
+                            mslist,
+                            calibrator_metafits,
+                            target_metafits,
+                            workdir,
+                            caldir,
+                            applymode=applymode,
+                            overwrite_datacolumn=overwrite_datacolumn,
+                            start_remote_log=remote_log,
+                            cpu_frac=float(cpu_frac),
+                            mem_frac=float(mem_frac),
+                            logfile=logfile,
+                            jobid=jobid,
+                            dask_client=dask_client,
+                        )
     finally:
         stop_event.set()
         log_thread_apply.join(timeout=5)
@@ -792,7 +591,7 @@ def run_apply_basiccal_sol(
 def run_solar_siderealcor_jobs(
     mslist,
     workdir,
-    prefix="targets",
+    prefix="target",
     jobid=0,
     cpu_frac=0.8,
     mem_frac=0.8,
@@ -804,7 +603,7 @@ def run_solar_siderealcor_jobs(
     Parameters
     ----------
     mslist: str
-        List of the measurement sets
+        List of the measurement sets (comma separated)
     workdir : str
         Work directory
     prefix : str, optional
@@ -821,7 +620,6 @@ def run_solar_siderealcor_jobs(
     int
         Success message
     """
-    mslist = ",".join(mslist)
     sidereal_basename = f"cor_sidereal_{prefix}"
     logdir = f"{workdir}/logs"
     os.makedirs(logdir, exist_ok=True)
@@ -868,6 +666,7 @@ def run_selfcal_jobs(
     mslist,
     workdir,
     caldir,
+    cal_applied,
     start_thresh=5.0,
     stop_thresh=3.0,
     max_iter=100,
@@ -894,12 +693,14 @@ def run_selfcal_jobs(
 
     Parameters
     ----------
-    mslist: list
-        Target measurement set list
+    mslist: str
+        Target measurement set list (comma separated)
     workdir : str
         Working directory
     caldir : str
         Caltable directory
+    cal_applied : bool
+        Whether calibration solutions are applied or not
     cpu_frac : float, optional
         CPU fraction to use
     mem_frac : float, optional
@@ -942,7 +743,6 @@ def run_selfcal_jobs(
     int
         Success message for self-calibration
     """
-    mslist = ",".join(mslist)
     selfcal_basename = "selfcal_targets"
     logdir = f"{workdir}/logs"
     os.makedirs(logdir, exist_ok=True)
@@ -959,7 +759,7 @@ def run_selfcal_jobs(
     try:
         ########################
         print("###########################")
-        print("Performing self-calibration of target scans .....")
+        print("Performing self-calibration of solar targets .....")
         print("###########################")
         ########################
         # Selfcal jobs
@@ -969,6 +769,7 @@ def run_selfcal_jobs(
                 mslist,
                 workdir,
                 caldir,
+                cal_applied,
                 start_thresh=float(start_thresh),
                 stop_thresh=float(stop_thresh),
                 max_iter=float(max_iter),
@@ -1020,14 +821,12 @@ def run_apply_selfcal_sol(
 
     Parameters
     ----------
-    target_mslist: list
-        Target measurement set list
+    target_mslist: str
+        Target measurement set list (comma separated)
     workdir : str
         Working directory
     caldir : str
         Caltable directory
-    use_only_bandpass : bool
-        Use only bandpass solutions
     applymode : str, optional
         Applycal mode
     cpu_frac : float, optional
@@ -1044,7 +843,6 @@ def run_apply_selfcal_sol(
     int
         Success message for applying calibration solutions and spliting target scans
     """
-    mslist = ",".join(target_mslist)
     applycal_basename = "apply_selfcal"
     logdir = f"{workdir}/logs"
     os.makedirs(logdir, exist_ok=True)
@@ -1061,7 +859,7 @@ def run_apply_selfcal_sol(
     try:
         ##################
         print("###########################")
-        print("Applying self-calibration solutions on target scans .....")
+        print("Applying self-calibration solutions on targets .....")
         print("###########################")
         ########################
         # Applying self-calibration
@@ -1120,8 +918,8 @@ def run_imaging_jobs(
 
     Parameters
     ----------
-    mslist: list
-        Target measurement set list
+    mslist: str
+        Target measurement set list (comma separated)
     workdir : str
         Working directory
     outdir : str
@@ -1170,7 +968,6 @@ def run_imaging_jobs(
     int
         Success message for imaging
     """
-    mslist = ",".join(mslist)
     imaging_basename = "imaging_targets"
     logdir = f"{workdir}/logs"
     os.makedirs(logdir, exist_ok=True)
@@ -1232,8 +1029,8 @@ def run_imaging_jobs(
 @task(name="applying_primary_beam", retries=2, retry_delay_seconds=10, log_prints=True)
 def run_apply_pbcor(
     imagedir,
+    metafits,
     workdir,
-    apply_parang=True,
     jobid=0,
     cpu_frac=0.8,
     mem_frac=0.8,
@@ -1246,10 +1043,10 @@ def run_apply_pbcor(
     ----------
     imagedir: str
         Image directory name
+    metafits : str
+        Metafits file
     workdir : str
         Work directory
-    apply_parang : bool, optional
-        Apply parallactic angle correction
     cpu_frac : float, optional
         CPU fraction to use
     mem_frac : float, optional
@@ -1284,17 +1081,17 @@ def run_apply_pbcor(
         # Applying primary beam correction
         #####################
         with get_dask_client() as dask_client:
-            msg = meer_pbcor.main(
-                imagedir,
-                workdir=workdir,
-                apply_parang=apply_parang,
-                cpu_frac=float(cpu_frac),
-                mem_frac=float(mem_frac),
-                logfile=logfile,
-                jobid=jobid,
-                start_remote_log=remote_log,
-                dask_client=dask_client,
-            )
+            msg = mwa_pbcor.main(
+                    imagedir,
+                    metafits,
+                    workdir=workdir,
+                    cpu_frac=float(cpu_frac),
+                    mem_frac=float(mem_frac),
+                    logfile=logfile,
+                    jobid=jobid,
+                    start_remote_log=remote_log,
+                    dask_client=dask_client,
+                )
     finally:
         stop_event.set()
         log_thread_pbcor.join(timeout=5)
@@ -1305,15 +1102,18 @@ def run_apply_pbcor(
 
 
 @flow(
-    name="MeerSOLAR Master control",
+    name="P-AIRCARS Master control",
     version="3.0",
-    description="Calibration and Imaging Pipeline for MeerKAT Solar Observation",
+    description="Calibration and Imaging Pipeline for MWA Solar Observation",
     log_prints=True,
 )
 def master_control(
-    msname,
+    target_datadir,
+    target_metafits,
     workdir,
     outdir,
+    calibrator_datadir="",
+    calibrator_metafits="",
     solar_data=True,
     # Pre-calibration
     do_forcereset_weightflag=False,
@@ -1322,7 +1122,6 @@ def master_control(
     do_import_model=True,
     # Basic calibration
     do_basic_cal=True,
-    do_noise_cal=True,
     do_applycal=True,
     # Target data preparation
     do_target_split=True,
@@ -1337,7 +1136,6 @@ def master_control(
     do_selfcal_split=True,
     do_apply_selfcal=True,
     do_ap_selfcal=True,
-    solar_selfcal=True,
     solint="5min",
     # Sidereal correction
     do_sidereal_cor=False,
@@ -1352,10 +1150,8 @@ def master_control(
     image_freqres=-1,
     image_timeres=-1,
     pol="IQUV",
-    apply_parang=True,
     clean_threshold=1.0,
     use_multiscale=True,
-    use_solar_mask=True,
     cutout_rsun=2.5,
     make_overlay=True,
     # Resource settings
@@ -1392,8 +1188,6 @@ def master_control(
 
     do_basic_cal : bool, optional
         Perform basic calibration
-    do_noise_cal : bool, optional
-        Peform calibration of solar attenuators using noise diode (only used if solar_data=True)
     do_applycal : bool, optional
         Apply basic calibration on target scans
 
@@ -1419,8 +1213,6 @@ def master_control(
         Apply self-calibration solutions
     do_ap_selfcal : bool, optional
         Perform amplitude-phase self-cal or not
-    solar_selfcal : bool, optional
-        Whether self-calibration is performing on solar observation or not
     solint : str, optional
         Solution intervals in self-cal
 
@@ -1446,14 +1238,10 @@ def master_control(
         Image temporal resolution in seconds (-1 means full scan duration)
     pol : str, optional
         Stokes parameters of final imaging
-    apply_parang : bool, optional
-        Apply parallactic angle correction
     clean_threshold : float, optional
         CLEAN threshold of final imaging
     use_multiscale : bool, optional
         Use multiscale scales or not
-    use_solar_mask : bool, optional
-        Use solar mask
     cutout_rsun : float, optional
         Cutout image size from center in solar radii (default : 2.5 solar radii)
     make_overlay : bool, optional
@@ -1478,13 +1266,57 @@ def master_control(
     int
         Success message
     """
+    #############################################
+    # Listing target and calibrator ms
+    # Determining where to use calibrator or not
+    #############################################
+    target_mslist = glob.glob(f"{target_datadir}/*.ms")
+    target_header = fits.getheader(target_metafits)
+    target_obsid = target_header["GPSTIME"]
+    target_freq_config = target_header["CHANNELS"]
+    
+    calibrator_mslist = glob.glob(f"{calibrator_datadir}/*.ms")
+    if len(calibrator_mslist)==0:
+        want_cont = input(f"No calibrator observation is provided. Do you want to continue without calibrator? Y/Yes.")
+        if want_cont.upper()=="YES" or want_cont.upper()=="Y":
+            has_cal=False
+        else:
+            return 1
+    elif os.path.exists(calibrator_metafits):
+        calibrator_header = fits.getheader(calibrator_metafits)
+        calibrator_obsid = calibrator_header["GPSTIME"]
+        calibrator_freq_config = calibrator_header["CHANNELS"]
+        if np.abs(calibrator_obsid-target_obsid)>12*3600:
+            want_cont=input("Calibrator observations were taken 12 hours apart. Do you want to continue without calibrator? Y/Yes.")
+            if want_cont.upper()=="YES" or want_cont.upper()=="Y":
+                has_cal=False
+            else:
+                return 1
+        elif target_freq_config!=calibrator_freq_config:
+            print(f"Target coarse channels: {target_freq_config}.")
+            print(f"Calibrator coarse channels: {calibrator_freq_config}.")
+            want_cont=input("Calibrator and target frequency configuration is different. Do you want to continue without calibrator? Y/Yes.")
+            if want_cont.upper()=="YES" or want_cont.upper()=="Y":
+                has_cal=False
+            else:
+                return 1
+        else:
+            has_cal=True
+    else:
+        want_cont=input(f"Calibrator ms is available. No calibrator metafits is provided. Do you want to continue without calibrator? Y/Yes.")
+        if want_cont.upper()=="YES" or want_cont.upper()=="Y":
+            has_cal=False
+        else:
+            return 1
+            
     ###################################
     # Preparing working directories
     ###################################
     print("Preparing working directories....")
     if workdir == "":
-        workdir = os.path.dirname(os.path.abspath(msname)) + "/workdir"
+        workdir = os.path.dirname(os.path.abspath(target_mslist[0])) + "/workdir"
     workdir = workdir.rstrip("/")
+    print(f"Work directory: {workdir}.")
 
     #################################
     # Setup logger
@@ -1512,24 +1344,14 @@ def master_control(
     current_worker = get_total_worker(dask_cluster)
 
     #####################################
-    # Initiating meersolar data
+    # Initiating paircars data
     #####################################
-    from meersolar.meerpipeline.init_data import init_meersolar_data
-
-    init_meersolar_data()
+    from paircars.pipeline.init_data import init_paircars_data
+    init_paircars_data()
 
     ###################################################
     # Measurement set check and other working directory
     ###################################################
-    msname = os.path.abspath(msname.rstrip("/"))
-    if os.path.exists(msname) == False:
-        print("Please provide a valid measurement set location.")
-        return 1
-    valid_ms = check_datacolumn_valid(msname)
-    if valid_ms is not True:
-        print(f"Measurement set : {msname} is corrupted.")
-        return 1
-    mspath = os.path.dirname(msname)
     if outdir == "":
         outdir = workdir
     outdir = outdir.rstrip("/")
@@ -1554,14 +1376,14 @@ def master_control(
         main_job_file = save_main_process_info(
             pid,
             jobid,
-            os.path.abspath(msname),
+            target_datadir,
             os.path.abspath(workdir),
             os.path.abspath(outdir),
             cpu_frac,
             mem_frac,
         )
         print("###########################")
-        print(f"MeerSOLAR Job ID: {jobid}")
+        print(f"P-AIRCARS Job ID: {jobid}")
         print(f"Work directory: {workdir}")
         print(f"Final product directory: {outdir}")
         print("###########################")
@@ -1586,15 +1408,15 @@ def master_control(
             emails = get_emails()
             timestamp = dt.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
             if emails != "":
-                email_subject = f"MeerSOLAR Logger Details: {timestamp}"
+                email_subject = f"P-AIRCARS Logger Details: {timestamp}"
 
                 email_msg = (
-                    f"MeerSOLAR user,\n\n"
-                    f"MeerSOLAR Job ID: {jobid}\n\n"
+                    f"P-AIRCARS user,\n\n"
+                    f"P-AIRCARS Job ID: {jobid}\n\n"
                     f"Best,\n"
-                    f"MeerSOLAR"
+                    f"P-AIRCARS"
                 )
-                from meersolar.data.sendmail import (
+                from paircars.data.sendmail import (
                     send_paircars_notification as send_notification,
                 )
 
@@ -1607,10 +1429,10 @@ def master_control(
             ####################################
             hostname = socket.gethostname()
             timestamp = dt.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
-            job_name = f"{hostname} :: {timestamp} :: {os.path.basename(msname).split('.ms')[0]}"
+            job_name = f"{hostname} :: {timestamp} :: {target_obsid}"
             timestamp1 = dt.utcnow().strftime("%Y%m%dT%H%M%S")
             remote_job_id = (
-                f"{hostname}_{timestamp1}_{os.path.basename(msname).split('.ms')[0]}"
+                f"{hostname}_{timestamp1}_{target_obsid}"
             )
             password = generate_password()
             np.save(
@@ -1628,17 +1450,17 @@ def master_control(
             )
             emails = get_emails()
             if emails != "":
-                email_subject = f"MeerSOLAR Logger Details: {timestamp}"
+                email_subject = f"P-AIRCARS Logger Details: {timestamp}"
 
                 email_msg = (
-                    f"MeerSOLAR user,\n\n"
-                    f"MeerSOLAR Job ID: {jobid}\n\n"
+                    f"P-AIRCARS user,\n\n"
+                    f"P-AIRCARS Job ID: {jobid}\n\n"
                     f"Remote logger Job ID: {job_name}\n"
                     f"Remote access password: {password}\n\n"
                     f"Best,\n"
-                    f"MeerSOLAR"
+                    f"P-AIRCARS"
                 )
-                from meersolar.data.sendmail import (
+                from paircars.data.sendmail import (
                     send_paircars_notification as send_notification,
                 )
 
@@ -1668,15 +1490,7 @@ def master_control(
             if solar_selfcal:
                 solar_selfcal = False
             full_FoV = True
-
-        ##################################################
-        # Target spliting spectral and temporal chunks
-        ##################################################
-        if image_timeres > (2 * 3660):  # If more than 2 hours
-            print(
-                f"Image time integration is more than 2 hours, which may cause smearing due to solar differential rotation."
-            )
-
+            
         #####################################################################
         # Checking if ms is full pol for polarization calibration and imaging
         #####################################################################
@@ -1703,6 +1517,10 @@ def master_control(
             freqavg = round(min(image_freqres, max_freqres), 1)
         else:
             freqavg = round(max_freqres, 1)
+        total_ncoarse=0
+        for ms in target_mslist:
+            ncoarse = get_ncoarse(ms)
+            total_ncoarse+=ncoarse
 
         ################################################
         # Determining maximum allowed temporal averaging
@@ -1714,56 +1532,14 @@ def master_control(
             max_timeres = min(
                 calc_time_smearing_timewidth(msname), max_time_solar_smearing(msname)
             )
+        if image_timeres > (2 * 3660):  # If more than 2 hours
+            print(
+                f"Image time integration is more than 2 hours, which may cause smearing due to solar differential rotation."
+            )
         if image_timeres > 0:
             timeavg = round(min(image_timeres, max_timeres), 1)
         else:
             timeavg = round(max_timeres, 1)
-
-        #########################################
-        # Target ms frequency chunk based on band
-        #########################################
-        print("Determing bad spectral channels....")
-        bad_spws = get_bad_chans(msname)
-        if bad_spws != "":
-            bad_spws = bad_spws.split("0:")[-1].split(";")
-            good_start = []
-            good_end = []
-            for i in range(len(bad_spws) - 1):
-                start_chan = int(bad_spws[i].split("~")[-1]) + 1
-                end_chan = int(bad_spws[i + 1].split("~")[0]) - 1
-                good_start.append(start_chan)
-                good_end.append(end_chan)
-            start_chan = min(good_start)
-            end_chan = max(good_end)
-        else:
-            msmd = msmetadata()
-            msmd.open(msname)
-            nchan = msmd.nchan(0)
-            msmd.close()
-            start_chan = 0
-            end_chan = nchan
-        spw = f"0:{start_chan}~{end_chan}"
-
-        #############################################################
-        # Determining numbers of spectral chunks for parallel imaging
-        #############################################################
-        print("Determining spectral chunks for parallel imaging....")
-        if image_freqres < 0:
-            target_freq_chunk = -1
-            nchunk = 1
-        else:
-            msmd = msmetadata()
-            msmd.open(msname)
-            chanres = msmd.chanres(0, unit="MHz")[0]
-            msmd.close()
-            total_bw = chanres * (end_chan - start_chan)
-            nchunk = int(total_bw / image_freqres)
-            if nchunk > max(1, max_worker):  # Maximum 1 chunking or number of workers
-                nchunk = max(1, max_worker)
-                target_freq_chunk = total_bw / nchunk
-            else:
-                nchunk = 1
-                target_freq_chunk = image_freqres
 
         #############################
         # Reset any previous weights
@@ -1773,44 +1549,30 @@ def master_control(
         total_cpus = psutil.cpu_count(logical=True)
         available_cpus = int(total_cpus * (1 - cpu_usage / 100.0))
         available_cpus = max(1, available_cpus)  # Avoid zero workers
-        reset_weights_and_flags(
-            msname, n_threads=available_cpus, force_reset=do_forcereset_weightflag
-        )
-
-        #######################################
-        # Filtering valid scans
-        #######################################
-        valid_scans = get_valid_scans(msname, min_scan_time=1)
-        all_target_scans_dummy, cal_scans_dummy, _, _, _ = get_cal_target_scans(msname)
-        all_target_scans = []
-        cal_scans = []
-        for scan in all_target_scans_dummy:
-            if scan in valid_scans:
-                all_target_scans.append(scan)
-        del all_target_scans_dummy
-        for scan in cal_scans_dummy:
-            if scan in valid_scans:
-                cal_scans.append(scan)
-        del cal_scans_dummy
-
-        if len(target_scans) == 0:
-            target_scans = all_target_scans
+        for msname in target_mslist:
+            reset_weights_and_flags(
+                msname, n_threads=available_cpus, force_reset=do_forcereset_weightflag
+            )
+        for msname in calibrator_mslist:
+            reset_weights_and_flags(
+                msname, n_threads=available_cpus, force_reset=do_forcereset_weightflag
+            )
 
         #######################################
         # Run dynamic spectra making
         #######################################
         if make_ds:
             current_worker = get_total_worker(dask_cluster)
-            nworker = min(max_worker, len(target_scans) + current_worker)
+            nworker = min(max_worker, total_ncoarse + current_worker)
             scale_worker_and_wait(dask_cluster, nworker)
             future_maskms = run_ds_jobs.with_options(
                 task_run_name=f"making_dynamic_spectra_{jobid}",
             ).submit(
-                msname,
+                target_mslist,
+                target_metafits,
                 workdir,
                 outdir,
                 jobid=jobid,
-                target_scans=target_scans,
                 cpu_frac=round(cpu_frac, 2),
                 mem_frac=round(mem_frac, 2),
                 remote_log=remote_logger,
@@ -1823,81 +1585,46 @@ def master_control(
             finally:
                 scale_worker_and_wait(dask_cluster, current_worker)
 
-        ########################################
-        # Run noise-diode based flux calibration
-        ########################################
-        if do_noise_cal:
+        ##############################
+        # Run spliting jobs
+        ##############################
+        # If basic calibration is requested and calibrator ms and metafits are present
+        future_cal_split=None
+        if do_basic_cal and has_cal:
+            prefix="calibrator"
             current_worker = get_total_worker(dask_cluster)
-            nworker = min(max_worker, len(all_target_scans) + current_worker)
+            nworker = min(max_worker, total_ncoarse + current_worker)
             scale_worker_and_wait(dask_cluster, nworker)
-            future_noisecal = run_noise_diode_cal.with_options(
-                task_run_name=f"attenuation_calibration_{jobid}"
-            ).submit(
-                msname,
+            future_cal_split = run_target_split_jobs.with_options(
+                task_run_name=f"spliting_{prefix}_{jobid}").submit(
+                calibrator_mslist,
                 workdir,
-                caldir,
+                datacolumn="data",
+                timeres=timeavg,
+                freqres=freqavg,
+                prefix=prefix,
+                time_window=-1,
+                time_interval=-1,
                 jobid=jobid,
-                keep_backup=keep_backup,
-                cpu_frac=round(cpu_frac, 2),
-                mem_frac=round(mem_frac, 2),
-                remote_log=remote_logger,
+                cpu_frac=float(cpu_frac),
+                mem_frac=float(mem_frac),
+                remote_log=remote_log,
             )
             try:
-                msg = future_noisecal.result()
-                if os.path.exists(f"{workdir}/.noattcal"):
-                    os.system(f"rm -rf {workdir}/.noattcal")
-                os.system(f"touch {workdir}/.attcal")
+                msg = future_cal_split.result()
             except Exception as e:
-                print(
-                    "!!!! WARNING: Error in running noise-diode based flux calibration. Flux density calibration may not be correct. !!!!"
-                )
-                traceback.print_exc()
-                if os.path.exists(f"{workdir}/.attcal"):
-                    os.system(f"rm -rf {workdir}/.attcal")
-                os.system(f"touch {workdir}/.noattcal")
-            finally:
-                scale_worker_and_wait(dask_cluster, current_worker)
-        else:
-            if os.path.exists(f"{workdir}/.attcal") == False:
-                os.system(f"touch {workdir}/.noattcal")
-
-        ##############################
-        # Run partitioning jobs
-        ##############################
-        # If do partition or calibrator ms is not present in case of basic
-        # calibration is requested
-        calibrator_msname = workdir + "/calibrator.ms"
-        if do_basic_cal and (
-            do_cal_partition or os.path.exists(calibrator_msname) == False
-        ):
-            partition_cal_scans = []
-            for s in cal_scans:
-                noise_cal_scan = determine_noise_diode_cal_scan(msname, s)
-                if not noise_cal_scan:
-                    partition_cal_scans.append(s)
-            current_worker = get_total_worker(dask_cluster)
-            nworker = min(max_worker, len(partition_cal_scans) + current_worker)
-            scale_worker_and_wait(dask_cluster, nworker)
-            future_partition = run_partition.with_options(
-                task_run_name=f"partitioning_calibrator_{jobid}"
-            ).submit(
-                msname,
-                workdir,
-                cal_scans=partition_cal_scans,
-                jobid=jobid,
-                cpu_frac=round(cpu_frac, 2),
-                mem_frac=round(mem_frac, 2),
-                remote_log=remote_logger,
-            )
-            try:
-                msg = future_partition.result()
-            except Exception as e:
-                print("!!!! WARNING: Error in partitioning calibrator fields. !!!!")
+                print("!!!! WARNING: Error in spliting calibrator measurement sets. !!!!")
                 traceback.print_exc()
                 return 1
             finally:
                 scale_worker_and_wait(dask_cluster, current_worker)
-
+            split_cal_mslist = glob.glob(workdir + "/calibrators_spw_*.ms")
+            if len(split_cal_mslist) == 0:
+                print(
+                    "No splited measurement set is present for basic calibration."
+                )
+                has_cal=False
+                
         ###################################################
         # Start spliting selfcal ms, if worker available
         ###################################################
@@ -1905,7 +1632,7 @@ def master_control(
         if (
             do_selfcal and do_selfcal_split and max_worker > 4
         ):  # At-least four worker possible
-            prefix = "selfcals"
+            prefix = "selfcal"
             try:
                 time_interval = float(solint)
             except BaseException:
@@ -1918,44 +1645,37 @@ def master_control(
                 else:
                     time_interval = -1
             current_worker = get_total_worker(dask_cluster)
-            nworker = min(max_worker, (len(target_scans) * nchunk) + current_worker)
+            nworker = min(max_worker, total_ncoarse + current_worker)
             scale_worker_and_wait(dask_cluster, nworker)
             future_selfcal_split = run_target_split_jobs.with_options(
-                task_run_name=f"spliting_{prefix}_scans_{jobid}"
+                task_run_name=f"spliting_{prefix}_{jobid}"
             ).submit(
-                msname,
+                target_mslist,
                 workdir,
                 datacolumn="data",
-                freqres=freqavg,
                 timeres=timeavg,
-                target_freq_chunk=25,
-                n_spectral_chunk=nchunk,  # Number of target spectral chunk
-                target_scans=target_scans,
+                freqres=freqavg,
                 prefix=prefix,
-                merge_spws=True,
-                time_window=min(60, time_interval),
+                time_window=min(10,time_interval),
                 time_interval=time_interval,
                 jobid=jobid,
-                cpu_frac=round(cpu_frac, 2),
-                mem_frac=round(mem_frac, 2),
-                remote_log=remote_logger,
+                cpu_frac=float(cpu_frac),
+                mem_frac=float(mem_frac),
+                remote_log=remote_log,
             )
 
         ##################################
         # Run flagging jobs on calibrators
         ##################################
         # Only if basic calibration is requested
-        if do_cal_flag and do_basic_cal:
-            if os.path.exists(calibrator_msname) == False:
-                print(f"Calibrator ms: {calibrator_ms} is not present.")
-                return 1
+        if do_cal_flag and do_basic_cal and has_cal:
             current_worker = get_total_worker(dask_cluster)
-            nworker = min(max_worker, len(cal_scans) + current_worker)
+            nworker = min(max_worker, total_ncoarse + current_worker)
             scale_worker_and_wait(dask_cluster, nworker)
             future_flag = run_flag.with_options(
                 task_run_name=f"flagging_{jobid}"
             ).submit(
-                calibrator_msname,
+                split_cal_mslist,
                 workdir,
                 outdir,
                 flag_calibrators=True,
@@ -1978,22 +1698,14 @@ def master_control(
         # Import model
         #################################
         # Only if basic calibration is requested
-        if do_import_model and do_basic_cal:
-            if os.path.exists(calibrator_msname) == False:
-                print(f"Calibrator ms: {calibrator_ms} is not present.")
-                return 1
-            fluxcal_fields, fluxcal_scans = get_fluxcals(calibrator_msname)
-            phasecal_fields, phasecal_scans, phasecal_fluxes = get_phasecals(
-                calibrator_msname
-            )
-            calibrator_field = fluxcal_fields + phasecal_fields
+        if do_import_model and do_basic_cal and has_cal:
             current_worker = get_total_worker(dask_cluster)
-            nworker = min(max_worker, len(cal_scans) + current_worker)
+            nworker = min(max_worker, total_ncoarse + current_worker)
             scale_worker_and_wait(dask_cluster, nworker)
             future_import_model = run_import_model.with_options(
                 task_run_name=f"importing_model_visibilities_{jobid}"
             ).submit(
-                calibrator_msname,
+                split_cal_mslist,
                 workdir,
                 jobid=jobid,
                 cpu_frac=round(cpu_frac, 2),
@@ -2014,18 +1726,14 @@ def master_control(
         ###############################
         # Run basic calibration
         ###############################
-        use_only_bandpass = False
-        if do_basic_cal:
-            if os.path.exists(calibrator_msname) == False:
-                print(f"Calibrator ms: {calibrator_ms} is not present.")
-                return 1
+        if do_basic_cal and has_cal:
             current_worker = get_total_worker(dask_cluster)
-            nworker = min(max_worker, len(cal_scans) + current_worker)
+            nworker = min(max_worker, total_ncoarse + current_worker)
             scale_worker_and_wait(dask_cluster, nworker)
             future_basical = run_basic_cal_jobs.with_options(
                 task_run_name=f"basic_calibration_{jobid}"
             ).submit(
-                calibrator_msname,
+                split_cal_mslist,
                 workdir,
                 outdir,
                 perform_polcal=do_polcal,
@@ -2037,19 +1745,20 @@ def master_control(
             )
             try:
                 msg = future_basical.result()
-                msg, ms_diag_plot = plot_ms_diagnostics(
-                    calibrator_msname,
-                    outdir=f"{outdir}/diagnostic_plots",
-                    dask_client=dask_client,
-                    cpu_frac=cpu_frac,
-                    mem_frac=mem_frac,
-                )
-                if msg == 0:
-                    print(f"Calibrator diagnostic plots are saved in : {ms_diag_plot}")
-                else:
-                    print(
-                        "Error in creating diagnostic plots for calibrator measurement set."
+                for calms in split_cal_mslist:
+                    msg, ms_diag_plot = plot_ms_diagnostics(
+                        calms,
+                        outdir=f"{outdir}/diagnostic_plots",
+                        dask_client=dask_client,
+                        cpu_frac=cpu_frac,
+                        mem_frac=mem_frac,
                     )
+                    if msg == 0:
+                        print(f"Calibrator diagnostic plots are saved in : {ms_diag_plot}")
+                    else:
+                        print(
+                            "Error in creating diagnostic plots for calibrator measurement set: {calms}."
+                        )
                 caltables = glob.glob(f"{caldir}/*cal")
                 for caltable in caltables:
                     msg, caltable_diag_plot = plot_caltable_diagnostics(
@@ -2065,10 +1774,10 @@ def master_control(
                         )
             except Exception as e:
                 print(
-                    "!!!! WARNING: Error in basic calibration. Not continuing further. !!!!"
+                    "!!!! WARNING: Error in basic calibration. Starting without basic calibration. !!!!"
                 )
                 traceback.print_exc()
-                return 1
+                has_cal=False
             finally:
                 scale_worker_and_wait(dask_cluster, nworker)
 
@@ -2077,19 +1786,14 @@ def master_control(
         ##########################################
         if len(glob.glob(f"{caldir}/*.bcal")) == 0:
             print(f"No bandpass table is present in calibration directory : {caldir}.")
-            return 1
-        if len(glob.glob(f"{caldir}/*.gcal")) == 0:
-            print(
-                f"No time-dependent gaintable is present in calibration directory : {caldir}. Applying only bandpass solutions."
-            )
-            use_only_bandpass = True
-
+            has_cal=False
+      
         ############################################
         # Spliting for self-cals
         ############################################
         # Spliting only if self-cal is requested
         if not do_selfcal_split and do_selfcal:
-            selfcal_target_mslist = glob.glob(workdir + "/selfcals_scan*.ms")
+            selfcal_target_mslist = glob.glob(workdir + "/selfcals_spw*.ms")
             if len(selfcal_target_mslist) == 0:
                 print(
                     "No measurement set is present for self-calibration. Spliting them.."
@@ -2100,7 +1804,7 @@ def master_control(
         # Start spliting selfcal ms, if not started already
         ###################################################
         if do_selfcal and do_selfcal_split and future_selfcal_split is None:
-            prefix = "selfcals"
+            prefix = "selfcal"
             try:
                 time_interval = float(solint)
             except BaseException:
@@ -2113,34 +1817,30 @@ def master_control(
                 else:
                     time_interval = -1
             current_worker = get_total_worker(dask_cluster)
-            nworker = min(max_worker, (len(target_scans) * nchunk) + current_worker)
+            nworker = min(max_worker, total_ncoarse + current_worker)
             scale_worker_and_wait(dask_cluster, nworker)
             future_selfcal_split = run_target_split_jobs.with_options(
-                task_run_name=f"spliting_{prefix}_scans_{jobid}"
+                task_run_name=f"spliting_{prefix}_{jobid}"
             ).submit(
-                msname,
+                target_mslist,
                 workdir,
                 datacolumn="data",
-                freqres=freqavg,
                 timeres=timeavg,
-                target_freq_chunk=25,
-                n_spectral_chunk=nchunk,  # Number of target spectral chunk
-                target_scans=target_scans,
+                freqres=freqavg,
                 prefix=prefix,
-                merge_spws=True,
-                time_window=min(60, time_interval),
+                time_window=min(10,time_interval),
                 time_interval=time_interval,
                 jobid=jobid,
-                cpu_frac=round(cpu_frac, 2),
-                mem_frac=round(mem_frac, 2),
-                remote_log=remote_logger,
+                cpu_frac=float(cpu_frac),
+                mem_frac=float(mem_frac),
+                remote_log=remote_log,
             )
 
         ######################################
         # Checking status of self-cal split
         ######################################
         if future_selfcal_split is not None:
-            print("Checking spliting of target scans for selfcal status...")
+            print("Checking status of spliting of target for selfcal ...")
             try:
                 msg = future_selfcal_split.result()
             except Exception as e:
@@ -2151,31 +1851,27 @@ def master_control(
                 traceback.print_exc()
             finally:
                 scale_worker_and_wait(dask_cluster, 1)
-
-        #############################################
-        # Spliting target scans if not started already
-        #############################################
+        
+        ###################
+        # Spliting targets 
+        ###################
         # If corrected data is requested or imaging is requested
         future_split = None
         if (
             do_target_split and (do_applycal or do_imaging) and max_worker > 4
         ):  # Only if at-least 4 workers
-            prefix = "targets"
+            prefix = "target"
             current_worker = get_total_worker(dask_cluster)
-            nworker = min(max_worker, (len(target_scans) * nchunk) + current_worker)
+            nworker = min(max_worker, total_ncoarse + current_worker)
             scale_worker_and_wait(dask_cluster, nworker)
             future_split = run_target_split_jobs.with_options(
-                task_run_name=f"spliting_{prefix}_scans_{jobid}"
+                task_run_name=f"spliting_{prefix}_{jobid}"
             ).submit(
-                msname,
+                target_mslist,
                 workdir,
                 datacolumn="data",
-                spw=spw,
-                target_freq_chunk=target_freq_chunk,
                 freqres=freqavg,
                 timeres=timeavg,
-                n_spectral_chunk=-1,
-                target_scans=target_scans,
                 prefix=prefix,
                 jobid=jobid,
                 cpu_frac=round(cpu_frac, 2),
@@ -2186,7 +1882,7 @@ def master_control(
         ####################################
         # Filtering any corrupted ms
         #####################################
-        selfcal_target_mslist = glob.glob(workdir + "/selfcals_scan*.ms")
+        selfcal_target_mslist = glob.glob(workdir + "/selfcals_spw*.ms")
         if (selfcal_target_mslist) == 0:
             print(
                 "!!!! WARNING: Error in running spliting target scans for selfcal. !!!!"
@@ -2211,9 +1907,9 @@ def master_control(
             print(f"Selfcal mslist : {[os.path.basename(i) for i in selfcal_mslist]}")
 
         #########################################################
-        # Applying solutions on target scans for self-calibration
+        # Applying solutions on targets for self-calibration
         #########################################################
-        if do_selfcal:
+        if do_selfcal and has_cal: # If calibrator solutions are available
             current_worker = get_total_worker(dask_cluster)
             nworker = min(max_worker, len(selfcal_mslist) + current_worker)
             scale_worker_and_wait(dask_cluster, nworker)
@@ -2221,9 +1917,10 @@ def master_control(
                 task_run_name=f"applying_basiccal_selfcal_{jobid}"
             ).submit(
                 selfcal_mslist,
+                calibrator_metafits,
+                target_metafits,
                 workdir,
                 caldir,
-                use_only_bandpass=use_only_bandpass,
                 overwrite_datacolumn=False,
                 applymode="calflag",
                 prefix="selfcal",
@@ -2231,12 +1928,12 @@ def master_control(
                 cpu_frac=round(cpu_frac, 2),
                 mem_frac=round(mem_frac, 2),
                 remote_log=remote_logger,
-            )
+            )    
             try:
                 msg = future_apply_basical_selfcal.result()
             except Exception as e:
                 print(
-                    "!!!! WARNING: Error in applying basic calibration solutions on target scans. Not continuing further for selfcal.!!!!"
+                    "!!!! WARNING: Error in applying basic calibration solutions on target. Not continuing further for selfcal.!!!!"
                 )
                 do_selfcal = False
                 traceback.print_exc()
@@ -2259,7 +1956,7 @@ def master_control(
                 ).submit(
                     selfcal_mslist,
                     workdir,
-                    prefix="selfcals",
+                    prefix="selfcal",
                     jobid=jobid,
                     cpu_frac=round(cpu_frac, 2),
                     mem_frac=round(mem_frac, 2),
@@ -2281,6 +1978,7 @@ def master_control(
                 selfcal_mslist,
                 workdir,
                 caldir,
+                has_cal,
                 solint=solint,
                 do_apcal=do_ap_selfcal,
                 solar_selfcal=solar_selfcal,
@@ -2313,7 +2011,7 @@ def master_control(
                         )
             except Exception as e:
                 print(
-                    "!!!! WARNING: Error in self-calibration on target scans. Not applying self-calibration. !!!!"
+                    "!!!! WARNING: Error in self-calibration on targets. Not applying self-calibration. !!!!"
                 )
                 do_apply_selfcal = False
                 traceback.print_exc()
@@ -2332,26 +2030,22 @@ def master_control(
                 do_apply_selfcal = False
 
         #############################################
-        # Spliting target scans if not started already
+        # Spliting targets if not started already
         #############################################
         # If corrected data is requested or imaging is requested
         if do_target_split and (do_applycal or do_imaging) and future_split is None:
-            prefix = "targets"
+            prefix = "target"
             current_worker = get_total_worker(dask_cluster)
-            nworker = min(max_worker, (len(target_scans) * nchunk) + current_worker)
+            nworker = min(max_worker, total_ncoarse + current_worker)
             scale_worker_and_wait(dask_cluster, nworker)
             future_split = run_target_split_jobs.with_options(
-                task_run_name=f"spliting_{prefix}_scans_{jobid}"
+                task_run_name=f"spliting_{prefix}_{jobid}"
             ).submit(
-                msname,
+                target_mslist,
                 workdir,
                 datacolumn="data",
-                spw=spw,
-                target_freq_chunk=target_freq_chunk,
                 freqres=freqavg,
                 timeres=timeavg,
-                n_spectral_chunk=-1,
-                target_scans=target_scans,
                 prefix=prefix,
                 jobid=jobid,
                 cpu_frac=round(cpu_frac, 2),
@@ -2363,20 +2057,20 @@ def master_control(
         # Checking target spliting is done or not
         ##########################################
         if future_split is not None:
-            print("Checking spliting of target scans status...")
+            print("Checking spliting of targets status...")
             try:
                 msg = future_split.result()
             except Exception as e:
-                print("!!!! WARNING: Error in spliting target scans. !!!!")
+                print("!!!! WARNING: Error in spliting targets. !!!!")
                 traceback.print_exc()
                 return 1
             finally:
                 scale_worker_and_wait(dask_cluster, 1)
 
         if do_imaging or do_applycal or do_apply_selfcal:
-            target_mslist = glob.glob(workdir + "/targets_scan*.ms")
-            if len(target_mslist) == 0:
-                print("!!!! WARNING: No target scans are present. !!!!")
+            split_target_mslist = glob.glob(workdir + "/target_spw*.ms")
+            if len(split_target_mslist) == 0:
+                print("!!!! WARNING: No target ms are present. !!!!")
                 return 1
 
             ####################################
@@ -2386,21 +2080,21 @@ def master_control(
                 "Checking final valid measurement sets before applying solutions and spawning imaging...."
             )
             filtered_mslist = []  # Filtering in case any ms is corrupted
-            for ms in target_mslist:
+            for ms in split_target_mslist:
                 checkcol = check_datacolumn_valid(ms)
                 if checkcol:
                     filtered_mslist.append(ms)
                 else:
                     print(f"Issue in : {ms}")
                     os.system("rm -rf {ms}")
-            target_mslist = filtered_mslist
-            if len(target_mslist) == 0:
-                print("No filtered target scan ms are available in work directory.")
+            split_target_mslist = filtered_mslist
+            if len(split_target_mslist) == 0:
+                print("No filtered target ms are available in work directory.")
                 return 1
 
             if do_applycal or do_imaging:
                 print(
-                    f"Target scan mslist : {[os.path.basename(i) for i in target_mslist]}"
+                    f"Target mslist : {[os.path.basename(i) for i in split_target_mslist]}"
                 )
 
         #########################################################
@@ -2408,15 +2102,14 @@ def master_control(
         #########################################################
         if do_applycal:
             current_worker = get_total_worker(dask_cluster)
-            nworker = min(max_worker, len(target_mslist) + current_worker)
+            nworker = min(max_worker, len(split_target_mslist) + current_worker)
             scale_worker_and_wait(dask_cluster, nworker)
             future_apply_basical = run_apply_basiccal_sol.with_options(
                 task_run_name=f"applying_basiccal_target_{jobid}"
             ).submit(
-                target_mslist,
+                split_target_mslist,
                 workdir,
                 caldir,
-                use_only_bandpass=use_only_bandpass,
                 overwrite_datacolumn=True,
                 applymode="calflag",
                 prefix="target",
@@ -2438,14 +2131,14 @@ def master_control(
 
             if do_sidereal_cor:
                 current_worker = get_total_worker(dask_cluster)
-                nworker = min(max_worker, len(target_mslist) + current_worker)
+                nworker = min(max_worker, len(split_target_mslist) + current_worker)
                 scale_worker_and_wait(dask_cluster, nworker)
                 future_sidereal_cor = run_solar_siderealcor_jobs.with_options(
                     task_run_name=f"solar_sidereal_correction_{jobid}"
                 ).submit(
-                    target_mslist,
+                    split_target_mslist,
                     workdir,
-                    prefix="targets",
+                    prefix="target",
                     jobid=jobid,
                     cpu_frac=round(cpu_frac, 2),
                     mem_frac=round(mem_frac, 2),
@@ -2463,14 +2156,14 @@ def master_control(
         # Apply self-calibration
         ########################################
         if do_apply_selfcal:
-            target_mslist = sorted(target_mslist)
+            split_target_mslist = sorted(split_target_mslist)
             current_worker = get_total_worker(dask_cluster)
-            nworker = min(max_worker, len(target_mslist) + current_worker)
+            nworker = min(max_worker, len(split_target_mslist) + current_worker)
             scale_worker_and_wait(dask_cluster, nworker)
             future_apply_selfcal = run_apply_selfcal_sol.with_options(
                 task_run_name=f"applying_selfcal_{jobid}"
             ).submit(
-                target_mslist,
+                split_target_mslist,
                 workdir,
                 caldir,
                 overwrite_datacolumn=False,
@@ -2484,7 +2177,7 @@ def master_control(
                 msg = future_apply_selfcal.result()
             except Exception as e:
                 print(
-                    "!!!! WARNING: Error in applying self-calibration solutions on target scans. !!!!"
+                    "!!!! WARNING: Error in applying self-calibration solutions on targets. !!!!"
                 )
                 traceback.print_exc()
             finally:
@@ -2493,9 +2186,9 @@ def master_control(
         #####################################
         # Target ms diagnostic plots
         #####################################
-        if do_apply_selfcal or do_imaging: 
-            if len(target_mslist) > 0:
-                for targetms in target_mslist:
+        if do_apply_selfcal or do_imaging:
+            if len(split_target_mslist) > 0:
+                for targetms in split_target_mslist:
                     msg, ms_diag_plot = plot_ms_diagnostics(
                         targetms,
                         outdir=f"{outdir}/diagnostic_plots",
@@ -2520,14 +2213,13 @@ def master_control(
                 do_polcal == False
             ):  # Only if do_polcal is False, overwrite to make only Stokes I
                 pol = "I"
-            band = get_band_name(target_mslist[0])
             current_worker = get_total_worker(dask_cluster)
             nworker = min(max_worker, len(target_mslist) + current_worker)
             scale_worker_and_wait(dask_cluster, nworker)
             future_imaging = run_imaging_jobs.with_options(
                 task_run_name=f"imaging_{jobid}"
             ).submit(
-                target_mslist,
+                split_target_mslist,
                 workdir,
                 outdir,
                 freqrange=freqrange,
@@ -2536,7 +2228,6 @@ def master_control(
                 weight=weight,
                 robust=float(robust),
                 pol=pol,
-                band=band,
                 freqres=image_freqres,
                 timeres=image_timeres,
                 threshold=float(clean_threshold),
@@ -2598,8 +2289,8 @@ def master_control(
                     task_run_name=f"applying_primary_beam_{jobid}"
                 ).submit(
                     imagedir,
+                    target_metafits,
                     workdir,
-                    apply_parang=apply_parang,
                     jobid=jobid,
                     cpu_frac=round(cpu_frac, 2),
                     mem_frac=round(mem_frac, 2),
@@ -2640,7 +2331,7 @@ def master_control(
 
 def cli():
     parser = argparse.ArgumentParser(
-        description="Run MeerSOLAR for calibration and imaging of solar observations.",
+        description="Run P-AIRCARS for calibration and imaging of solar observations.",
         formatter_class=SmartDefaultsHelpFormatter,
     )
     # === Essential parameters ===
@@ -2761,12 +2452,6 @@ def cli():
         "--do_pbcor",
         action="store_true",
         help="Apply primary beam correction after imaging",
-    )
-    advanced_image.add_argument(
-        "--no_apply_parang",
-        action="store_false",
-        dest="apply_parang",
-        help="Disable parallactic angle rotation during imaging",
     )
     advanced_image.add_argument(
         "--cutout_rsun",
@@ -3036,7 +2721,6 @@ def cli():
             image_freqres=args.image_freqres,
             image_timeres=args.image_timeres,
             pol=args.pol,
-            apply_parang=args.apply_parang,
             clean_threshold=args.clean_threshold,
             use_multiscale=args.use_multiscale,
             use_solar_mask=args.use_solar_mask,

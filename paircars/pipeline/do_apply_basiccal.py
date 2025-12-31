@@ -11,6 +11,7 @@ import glob
 import sys
 import os
 from casatasks import casalog
+
 try:
     logfile = casalog.logfile()
     os.remove(logfile)
@@ -178,7 +179,7 @@ def run_all_applysol(
 
     Parameters
     ----------
-    mslist : str
+    mslist : list
         Measurement set list
     target_metafits : str
         Target metafits file
@@ -232,7 +233,6 @@ def run_all_applysol(
             print(
                 f"No crosshand phase solution is present in calibration directory : {caldir}. Applying only bandpass solutions."
             )
-            use_only_bandpass = True
 
         ################################
         # Scale bandpass for attenuators
@@ -279,11 +279,14 @@ def run_all_applysol(
             ms_freq = msmd.meanfreq(0, unit="MHz")
             msmd.close()
             final_bpasstable = get_nearest_bandpass_table(att_caltables, ms_freq)
-            final_crossphasetable = get_nearest_bandpass_table(
-                crossphase_table, ms_freq
-            )
-            final_gaintable = [final_bpasstable, final_crossphasetable]
-            interp = ["nearestflag", "nearestflag"]
+            final_gaintable = [final_bpasstable]
+            interp=["nearest,nearestflag"]
+            if len(crossphase_table)>0:
+                final_crossphasetable = get_nearest_bandpass_table(
+                    crossphase_table, ms_freq
+                )
+                final_gaintable.append(final_crossphasetable)
+                interp.append(nearest,nearestflag)
             tasks.append(
                 delayed(applysol)(
                     ms,
@@ -330,7 +333,6 @@ def main(
     target_metafits,
     workdir,
     caldir,
-    use_only_bandpass=False,
     applymode="calflag",
     overwrite_datacolumn=False,
     force_apply=False,
@@ -348,7 +350,7 @@ def main(
     Parameters
     ----------
     mslist : str
-        Comma-separated list of measurement set paths to which calibration will be applied.
+        Measurement set list (comma separated).
     calibrator_metafits : str
         Calibrator metafits
     target_metafits : str
@@ -357,8 +359,6 @@ def main(
         Directory for logs, PID files, and temporary data products.
     caldir : str
         Path to directory containing calibration tables (e.g., bandpass, gain, polarization).
-    use_only_bandpass : bool, optional
-        If True, applies only the bandpass calibration (no gain or polarization cal). Default is False.
     applymode : str, optional
         CASA calibration application mode (e.g., "calonly", "calflag", "flagonly"). Default is "calflag".
     overwrite_datacolumn : bool, optional
@@ -387,8 +387,10 @@ def main(
     cachedir = get_cachedir()
     save_pid(pid, f"{cachedir}/pids/pids_{jobid}.txt")
 
+    mslist = mslist.split(",")
+    
     if workdir == "":
-        workdir = os.path.dirname(os.path.abspath(mslist.split(",")[0])) + "/workdir"
+        workdir = os.path.dirname(os.path.abspath(mslist[0])) + "/workdir"
     os.makedirs(workdir, exist_ok=True)
 
     ############
@@ -431,7 +433,6 @@ def main(
             print("Provide existing caltable directory.")
             msg = 1
         else:
-            mslist = mslist.split(",")
             msg = run_all_applysol(
                 mslist,
                 calibrator_metafits,
@@ -439,7 +440,6 @@ def main(
                 dask_client,
                 workdir,
                 caldir,
-                use_only_bandpass=use_only_bandpass,
                 overwrite_datacolumn=overwrite_datacolumn,
                 applymode=applymode,
                 force_apply=force_apply,
@@ -478,14 +478,16 @@ def cli():
         help="Comma-separated list of measurement sets (required)",
     )
     basic_args.add_argument(
-        "calibrator_metafits",
+        "--calibrator_metafits",
         type=str,
-        help="Calibrator metafits (required)",
+        required=True,
+        help="Calibrator metafits",
     )
     basic_args.add_argument(
-        "target_metafits",
+        "--target_metafits",
         type=str,
-        help="Target metafits (required)",
+        required=True,
+        help="Target metafits",
     )
     basic_args.add_argument(
         "--workdir",
@@ -505,11 +507,6 @@ def cli():
     # Advanced parameters
     adv_args = parser.add_argument_group(
         "###################\nAdvanced parameters\n###################"
-    )
-    adv_args.add_argument(
-        "--use_only_bandpass",
-        action="store_true",
-        help="Use only bandpass calibration solutions",
     )
     adv_args.add_argument(
         "--applymode",
@@ -553,14 +550,13 @@ def cli():
         return 1
 
     args = parser.parse_args()
-
+    
     msg = main(
         args.mslist,
         args.calibrator_metafits,
         args.target_metafits,
         args.workdir,
         args.caldir,
-        use_only_bandpass=args.use_only_bandpass,
         applymode=args.applymode,
         overwrite_datacolumn=args.overwrite_datacolumn,
         force_apply=args.force_apply,

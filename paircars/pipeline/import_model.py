@@ -1,10 +1,13 @@
 import os
 import numpy as np
 import time
+import sys
+import dask
 import traceback
 import logging
 import argparse
 import subprocess
+from dask import delayed
 from contextlib import contextmanager
 from casacore.tables import table as casacore_table, makecoldesc
 
@@ -175,51 +178,224 @@ def import_model(msname, metafits, beamfile="", sourcelist="", ncpu=-1):
         os.system(f"rm -rf {msname.split('.ms')[0]}_model.ms")
 
 
+def main(
+    mslist,
+    metafits,
+    workdir,
+    beamfile="",
+    sourcelist="",
+    cpu_frac=0.8,
+    mem_frac=0.8,
+    logfile=None,
+    jobid="0",
+    start_remote_log=False,
+    dask_client=None,
+):
+    """
+    Make dynamic spectra
+
+    Parameters
+    ----------
+    mslist : str
+        Measurement set list (comma separated)
+    metafits : str
+        Metafits file
+    workdir : str
+        Work directory
+    beamfile : str, optional
+        MWA beam file
+    sourcelist : str, optional
+        MWA global sky model (fits or ascii in wsclean format)
+    cpu_frac : float, optional
+        CPU fraction
+    mem_frac : float, optional
+        Memory fraction
+    logfile : str, optional
+        Log file
+    jobid : str, optional
+        Job ID
+    start_remote_log : bool, optional
+        Start remote log
+    dask_client: dask.client, optional
+        Dask client
+
+    Returns
+    -------
+    int
+        Success messsage
+    """
+    pid = os.getpid()
+    cachedir = get_cachedir()
+    save_pid(pid, f"{cachedir}/pids/pids_{jobid}.txt")
+
+    mslist = mslist.split(",")
+    
+    if workdir == "":
+        workdir = os.path.dirname(os.path.abspath(mslist[0])) + "/workdir"
+    os.makedirs(workdir, exist_ok=True)
+
+    ############
+    # Logger
+    ############
+    observer = None
+    if (
+        start_remote_log
+        and os.path.exists(f"{workdir}/jobname_password.npy")
+        and logfile is not None
+    ):
+        time.sleep(5)
+        jobname, password = np.load(
+            f"{workdir}/jobname_password.npy", allow_pickle=True
+        )
+        if os.path.exists(logfile):
+            observer = init_logger(
+                "ds_plot", logfile, jobname=jobname, password=password
+            )
+    if observer == None:
+        print("Remote link or jobname is blank. Not transmiting to remote logger.")
+
+    dask_cluster = None
+    if dask_client is None:
+        dask_client, dask_cluster, dask_dir = get_local_dask_cluster(
+            2,
+            dask_dir=workdir,
+            cpu_frac=cpu_frac,
+            mem_frac=mem_frac,
+        )
+        nworker = max(2, int(psutil.cpu_count() * cpu_frac))
+        scale_worker_and_wait(dask_cluster, nworker)
+
+    try:
+        ncpu = max(1, int(psutil.cpu_count() * cpu_frac / len(mslist)))
+        njobs = max(1, int(len(mslist) / ncpu))
+        if len(mslist) > 0:
+            tasks = []
+            for msname in mslist:
+                tasks.append(
+                    delayed(import_model)(
+                        msname,
+                        metafits,
+                        beamfile=beamfile,
+                        sourcelist=sourcelist,
+                        ncpu=ncpu,
+                    )
+                )
+            print("Start import modeling...")
+            results = []
+            for i in range(0, len(tasks), njobs):
+                batch = tasks[i : i + njobs]
+                futures = dask_client.compute(batch)
+                results.extend(dask_client.gather(futures))
+            results = list(results)
+            msg = 0
+            for i in range(len(results)):
+                if results[i] != 0:
+                    print(f"Error in model import for ms: {mslist[i]}.")
+                    msg = 1
+        else:
+            print("Please provide a valid measurement set list.")
+            msg = 1
+    except Exception as e:
+        traceback.print_exc()
+        msg = 1
+    finally:
+        time.sleep(5)
+        for msname in mslist:
+            drop_cache(msname)
+        drop_cache(workdir)
+        clean_shutdown(observer)
+        if dask_cluster is not None:
+            dask_client.close()
+            dask_cluster.close()
+            os.system(f"rm -rf {dask_dir}")
+    return msg
+
+
 ################################
 # CLI interface
 ################################
 def cli():
     parser = argparse.ArgumentParser(description="Simulate and import MWA visibilities")
-    parser.add_argument(
-        "--msname",
-        required=True,
-        help="Name of the measurement set",
-        metavar="String",
+
+    # Essential parameters
+    basic_args = parser.add_argument_group(
+        "###################\nEssential parameters\n###################"
     )
-    parser.add_argument(
+    basic_args.add_argument(
+        "--mslist",
+        type=str,
+        required=True,
+        help="Name of the measurement sets (comma seperated)",
+    )
+    basic_args.add_argument(
         "--metafits",
+        type=str,
         required=True,
         help="Name of the metafits file",
-        metavar="String",
     )
-    parser.add_argument(
+    basic_args.add_argument(
+        "--workdir",
+        type=str,
+        required=True,
+        help="Work directory",
+    )
+    
+    # Advanced parameters
+    adv_args = parser.add_argument_group(
+        "###################\nAdvanced parameters\n###################"
+    )
+    adv_args.add_argument(
         "--beamfile",
         type=str,
         default="",
         help="Name of the MWA PB file",
-        metavar="String",
     )
-    parser.add_argument(
+    adv_args.add_argument(
         "--sourcelist",
         type=str,
         default="",
         help="Source model file",
-        metavar="String",
     )
-    parser.add_argument(
-        "--ncpu",
-        type=int,
-        default=-1,
-        help="Number of CPU threads to be used (default: all)",
-        metavar="Integer",
+    adv_args.add_argument(
+        "--start_remote_log", action="store_true", help="Start remote logging"
     )
+
+    # Resource management parameters
+    hard_args = parser.add_argument_group(
+        "###################\nHardware resource management parameters\n###################"
+    )
+    hard_args.add_argument(
+        "--cpu_frac",
+        type=float,
+        default=0.8,
+        help="CPU fraction",
+    )
+    hard_args.add_argument(
+        "--mem_frac",
+        type=float,
+        default=0.8,
+        help="Memory fraction",
+    )
+    hard_args.add_argument("--logfile", type=str, default=None, help="Log file")
+    hard_args.add_argument("--jobid", type=int, default=0, help="Job ID")
+
+    if len(sys.argv) == 1:
+        parser.print_help(sys.stderr)
+        return 1
+
     args = parser.parse_args()
-    msg = import_model(
-        args.msname,
+    
+    msg = main(
+        args.mslist,
         args.metafits,
-        args.beamfile,
-        args.sourcelist,
-        ncpu=args.ncpu,
+        args.workdir,
+        beamfile=args.beamfile,
+        sourcelist=args.sourcelist,
+        cpu_frac=float(args.cpu_frac),
+        mem_frac=float(args.mem_frac),
+        logfile=args.logfile,
+        jobid=args.jobid,
+        start_remote_log=args.start_remote_log,
     )
     return msg
 

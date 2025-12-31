@@ -6,6 +6,7 @@ import os
 import traceback
 import time
 from casatasks import casalog
+
 try:
     logfile = casalog.logfile()
     os.remove(logfile)

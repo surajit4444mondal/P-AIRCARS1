@@ -94,7 +94,7 @@ def get_jobid():
     return int(cur_jobid)
 
 
-def save_main_process_info(pid, jobid, msname, workdir, outdir, cpu_frac, mem_frac):
+def save_main_process_info(pid, jobid, msdir, workdir, outdir, cpu_frac, mem_frac):
     """
     Save main processes info
 
@@ -104,8 +104,8 @@ def save_main_process_info(pid, jobid, msname, workdir, outdir, cpu_frac, mem_fr
         Main job process id
     jobid : int
         Job ID
-    msname : str
-        Main measurement set
+    msdir : str
+        Measurement set directory
     workdir : str
         Work directory
     outdir : str
@@ -140,7 +140,7 @@ def save_main_process_info(pid, jobid, msname, workdir, outdir, cpu_frac, mem_fr
                 if os.path.exists(f"{cachedir}/pids/pids_{job_id}.txt"):
                     os.system(f"rm -rf {cachedir}/pids/pids_{job_id}.txt")
     main_job_file = f"{cachedir}/main_pids_{jobid}.txt"
-    main_str = f"{jobid} {pid} {msname} {workdir} {outdir} {cpu_frac} {mem_frac}"
+    main_str = f"{jobid} {pid} {msdir} {workdir} {outdir} {cpu_frac} {mem_frac}"
     with open(main_job_file, "w") as f:
         f.write(main_str)
     return main_job_file

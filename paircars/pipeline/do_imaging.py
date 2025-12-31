@@ -11,6 +11,7 @@ import glob
 import sys
 import os
 from casatasks import casalog
+
 try:
     logfile = casalog.logfile()
     os.remove(logfile)
@@ -888,11 +889,11 @@ def main(
     pid = os.getpid()
     cachedir = get_cachedir()
     save_pid(pid, f"{cachedir}/pids/pids_{jobid}.txt")
+    
     mslist = mslist.split(",")
 
     if workdir == "":
-        first_ms = mslist[0]
-        workdir = os.path.dirname(os.path.abspath(first_ms)) + "/workdir"
+        workdir = os.path.dirname(os.path.abspath(mslist[0])) + "/workdir"
     os.makedirs(workdir, exist_ok=True)
 
     if outdir == "" or not os.path.exists(outdir):

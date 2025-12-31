@@ -1001,7 +1001,8 @@ def make_primarybeammap(
         T_fringe_XX,
         T_fringe_YY,
     )
-    
+
+
 # Expose functions and classes
 __all__ = [
     name

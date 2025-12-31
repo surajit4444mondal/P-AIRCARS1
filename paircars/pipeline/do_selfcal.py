@@ -10,6 +10,7 @@ import sys
 import os
 import copy
 from casatasks import casalog
+
 try:
     logfile = casalog.logfile()
     os.remove(logfile)
@@ -540,6 +541,7 @@ def main(
     mslist,
     workdir,
     caldir,
+    cal_applied, #TODO
     start_thresh=5,
     stop_thresh=3,
     max_iter=100,
@@ -628,7 +630,8 @@ def main(
     cachedir = get_cachedir()
     save_pid(pid, f"{cachedir}/pids/pids_{jobid}.txt")
 
-    mslist = str(mslist).split(",")
+    mslist = mslist.split(",")
+    
     if workdir == "":
         workdir = os.path.dirname(os.path.abspath(mslist[0])) + "/workdir"
     os.makedirs(workdir, exist_ok=True)
@@ -718,17 +721,6 @@ def main(
                     os.system("rm -rf {ms}")
             mslist = filtered_mslist
 
-            chanlist = []
-            for ms in mslist:
-                channame = (
-                    os.path.basename(ms)
-                    .split(".ms")[0]
-                    .split("spw_")[-1]
-                    .split("_time")[0]
-                )
-                if channame not in chanlist:
-                    chanlist.append(channame)
-
             ######################################
             # Resetting maximum file limit
             ######################################
@@ -749,13 +741,9 @@ def main(
                     timeres = np.diff(times)
                     pos = np.where(timeres > 3 * np.nanmedian(timeres))[0]
                     max_intervals = min(1, len(pos))
-                    freqs = msmd.chanfreqs(0, unit="MHz")
-                    freqres = np.diff(freqs)
-                    pos = np.where(freqres > 3 * np.nanmedian(freqres))[0]
-                    max_nchan = min(1, len(pos))
                     msmd.close()
                     per_job_fd = (
-                        (max_nchan + 1) * max_intervals * 4 * 2
+                         max_intervals * 4 * 2
                     )  # 4 types of images, 2 is fudge factor
                     if per_job_fd == 0:
                         per_job_fd = 1
