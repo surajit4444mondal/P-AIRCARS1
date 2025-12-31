@@ -9,59 +9,12 @@ import argparse
 import subprocess
 from dask import delayed
 from contextlib import contextmanager
-from casacore.tables import table as casacore_table, makecoldesc
+from casatasks import setjy
+from casatools import table as casatable, msmetadata
+from paircars.utils import *
 
 logging.getLogger("distributed").setLevel(logging.ERROR)
 logging.getLogger("tornado.application").setLevel(logging.CRITICAL)
-
-
-@contextmanager
-def suppress_output():
-    """
-    Supress CASA terminal output
-    """
-    with open(os.devnull, "w") as fnull:
-        old_stdout = os.dup(1)
-        old_stderr = os.dup(2)
-        os.dup2(fnull.fileno(), 1)
-        os.dup2(fnull.fileno(), 2)
-        try:
-            yield
-        finally:
-            os.dup2(old_stdout, 1)
-            os.dup2(old_stderr, 2)
-
-
-def get_cachedir():
-    """
-    Get cache directory
-    """
-    homedir = os.environ.get("HOME")
-    if homedir is None:
-        homedir = os.path.expanduser("~")
-    username = os.getlogin()
-    cachedir = f"{homedir}/.solarpipe"
-    os.makedirs(cachedir, exist_ok=True)
-    os.makedirs(f"{cachedir}/pids", exist_ok=True)
-    return cachedir
-
-
-def get_datadir():
-    """
-    Get package data directory
-
-    Returns
-    -------
-    str
-        Data directory
-    """
-    cachedir = get_cachedir()
-    if os.path.exists(f"{cachedir}/solarpipe_data_dir.txt") == False:
-        return None
-    with open(f"{cachedir}/solarpipe_data_dir.txt", "r") as f:
-        datadir = f.read().strip()
-    os.makedirs(datadir, exist_ok=True)
-    return datadir
 
 
 def import_model(msname, metafits, beamfile="", sourcelist="", ncpu=-1):
@@ -99,22 +52,19 @@ def import_model(msname, metafits, beamfile="", sourcelist="", ncpu=-1):
             + "\n###################\n"
         )
         with suppress_output():
-            data_table = casacore_table(msname + "/SPECTRAL_WINDOW", readonly=True)
-            nchan = data_table.getcol("NUM_CHAN")[0]
-            freqres = data_table.getcol("RESOLUTION")[0][0] / 10**3
-            mid_freq = data_table.getcol("REF_FREQUENCY")[0] / 10**6
-            data_table.close()
-            data_table = casacore_table(msname + "/POLARIZATION", readonly=True)
-            npol = data_table.getcol("NUM_CORR")[0]
-            data_table.close()
-            data_table = casacore_table(msname + "/ANTENNA", readonly=True)
-            nant = data_table.nrows()
-            data_table.close()
-            data_table = casacore_table(msname, readonly=False)
-            times = np.unique(data_table.getcol("TIME"))
-            ntime = times.size
-            timeres = data_table.getcol("EXPOSURE")[0]
-            data_table.close()
+            msmd=msmetadata()
+            msmd.open(msname)
+            nchan = msmd.nchan(0)
+            mid_freq = msmd.meanfreq(0,unit="MHz")
+            freqres = msmd.chanres(0,unit="kHz")[0]
+            npol = msmd.ncorrforpol()[0]
+            nant = msmd.nantennas()
+            times = msmd.timesforfield(0)
+            ntime = len(times)
+            timeres = msmd.exposuretime(scan=1)["value"]
+            nrow = msmd.nrows()
+            msmd.close()
+        
         hyperdrive_cmd = [
             f"{datadir}/hyperdrive",
             "vis-simulate",
@@ -145,28 +95,30 @@ def import_model(msname, metafits, beamfile="", sourcelist="", ncpu=-1):
             "--output-model-time-average",
             f"{timeres}s",
         ]
-        subprocess.run(hyperdrive_cmd, check=True)
+        subprocess.run(hyperdrive_cmd, check=True, stdout = subprocess.DEVNULL, stderr = subprocess.DEVNULL)
         model_msname = msname.split(".ms")[0] + "_model.ms"
         ########################
         # Importing model
         ########################
-        data_table = casacore_table(msname, readonly=False)
-        model_table = casacore_table(model_msname, readonly=False)
-        baselines = [*zip(data_table.getcol("ANTENNA1"), data_table.getcol("ANTENNA2"))]
-        m_array = model_table.getcol("DATA")
-        pos = np.array([i[0] != i[1] for i in baselines])
-        model_array = np.empty((len(baselines), nchan, npol), dtype="complex")
-        model_array[pos, ...] = m_array
-        model_array[~pos, ...] = 0.0
-        column_names = data_table.colnames()
-        if "MODEL_DATA" in column_names:
+        with suppress_output():
+            data_table=casatable()
+            data_table.open(msname, nomodify=False)
+            column_names = data_table.colnames()
+            if "MODEL_DATA" not in column_names:
+                data_table.close()
+                setjy(vis=msname,standard="manual",fluxdensity=[1,0,0,0],usescratch=True)
+                data_table.open(msname, nomodify=False)
+            model_table=casatable()
+            model_table.open(model_msname, nomodify=False)
+            baselines = [*zip(data_table.getcol("ANTENNA1"), data_table.getcol("ANTENNA2"))]
+            m_array = model_table.getcol("DATA")
+            pos = np.array([i[0] != i[1] for i in baselines])
+            model_array = np.empty((npol,nchan,len(baselines)), dtype="complex")
+            model_array[...,pos] = m_array
+            model_array[...,~pos] = 0.0
             data_table.putcol("MODEL_DATA", model_array)
-        else:
-            coldesc = makecoldesc("MODEL_DATA", model_table.getcoldesc("DATA"))
-            data_table.addcols(coldesc)
-            data_table.putcol("MODEL_DATA", model_array)
-        data_table.close()
-        model_table.close()
+            data_table.close()
+            model_table.close()
         del m_array, model_array
         print(f"Model import done in: {round(time.time()-starttime,2)}s")
         return 0
@@ -262,12 +214,16 @@ def main(
             cpu_frac=cpu_frac,
             mem_frac=mem_frac,
         )
-        nworker = max(2, int(psutil.cpu_count() * cpu_frac))
+        nworker = min(len(mslist), int(psutil.cpu_count() * cpu_frac))
         scale_worker_and_wait(dask_cluster, nworker)
 
     try:
-        ncpu = max(1, int(psutil.cpu_count() * cpu_frac / len(mslist)))
-        njobs = max(1, int(len(mslist) / ncpu))
+        ms_sizes = [get_ms_size(ms) for ms in mslist]
+        per_job_mem=2*max(ms_sizes)
+        mem_limit = (psutil.virtual_memory().available * mem_frac)/(1024**3)
+        max_njobs = int(mem_limit/per_job_mem)
+        njobs = max(1, min(max_njobs,len(mslist)))
+        ncpu = max(1, int(psutil.cpu_count() * cpu_frac /njobs)) 
         if len(mslist) > 0:
             tasks = []
             for msname in mslist:
@@ -281,12 +237,11 @@ def main(
                     )
                 )
             print("Start import modeling...")
-            results = []
-            for i in range(0, len(tasks), njobs):
-                batch = tasks[i : i + njobs]
+            results=[]
+            for i in range(0,len(tasks),njobs):
+                batch = tasks[i:i+njobs]
                 futures = dask_client.compute(batch)
                 results.extend(dask_client.gather(futures))
-            results = list(results)
             msg = 0
             for i in range(len(results)):
                 if results[i] != 0:
