@@ -382,6 +382,15 @@ def do_flagging(
         print(f"Flagging mslist: {','.join(mslist)}")
         futures = dask_client.compute(tasks)
         results = list(dask_client.gather(futures))
+        for msname in mslist:
+            ###############
+            # Flag summary
+            ###############
+            summary_file = (
+                f"{outdir}/{os.path.basename(msname).split('.ms')[0]}_basicflag.summary"
+            )
+            print(f"Flag summary: {summary_file}")
+            flagsummary(msname, summary_file)
         return 0
     except Exception as e:
         traceback.print_exc()
@@ -461,7 +470,7 @@ def main(
     save_pid(pid, f"{cachedir}/pids/pids_{jobid}.txt")
 
     mslist = mslist.split(",")
-    
+
     if workdir == "":
         workdir = os.path.dirname(os.path.abspath(mslist[0])) + "/workdir"
     os.makedirs(workdir, exist_ok=True)
@@ -497,11 +506,11 @@ def main(
             cpu_frac=cpu_frac,
             mem_frac=mem_frac,
         )
-        nworker = max(2, int(psutil.cpu_count() * cpu_frac))
-        scale_worker_and_wait(dask_cluster, nworker)
+        nworker = min(len(mslist), int(psutil.cpu_count() * cpu_frac))
+        scale_worker_and_wait(dask_cluster, nworker + 1)
 
     try:
-        if len(mslist)>0:
+        if len(mslist) > 0:
             msg = do_flagging(
                 mslist,
                 metafits,
@@ -551,9 +560,7 @@ def cli():
     basic_args.add_argument(
         "mslist", type=str, help="Name of measurement sets (Comma seperated)"
     )
-     basic_args.add_argument(
-        "metafits", type=str, help="Metafits file"
-    )
+    basic_args.add_argument("metafits", type=str, help="Metafits file")
     basic_args.add_argument(
         "--workdir", type=str, default="", help="Name of work directory"
     )
@@ -621,7 +628,7 @@ def cli():
         return 1
 
     args = parser.parse_args()
-    
+
     msg = main(
         args.mslist,
         args.metafits,

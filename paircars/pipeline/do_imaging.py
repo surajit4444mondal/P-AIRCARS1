@@ -889,7 +889,7 @@ def main(
     pid = os.getpid()
     cachedir = get_cachedir()
     save_pid(pid, f"{cachedir}/pids/pids_{jobid}.txt")
-    
+
     mslist = mslist.split(",")
 
     if workdir == "":

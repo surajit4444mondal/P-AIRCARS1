@@ -8,13 +8,13 @@ import logging
 import argparse
 import subprocess
 from dask import delayed
-from contextlib import contextmanager
 from casatasks import setjy
 from casatools import table as casatable, msmetadata
 from paircars.utils import *
 
 logging.getLogger("distributed").setLevel(logging.ERROR)
 logging.getLogger("tornado.application").setLevel(logging.CRITICAL)
+datadir = get_datadir()
 
 
 def import_model(msname, metafits, beamfile="", sourcelist="", ncpu=-1):
@@ -34,7 +34,6 @@ def import_model(msname, metafits, beamfile="", sourcelist="", ncpu=-1):
     ncpu : int, optional
         Number of cpu threads to use
     """
-    datadir = get_datadir()
     if datadir is None:
         print("Please setup P-AIRCARS first.")
         return
@@ -52,11 +51,11 @@ def import_model(msname, metafits, beamfile="", sourcelist="", ncpu=-1):
             + "\n###################\n"
         )
         with suppress_output():
-            msmd=msmetadata()
+            msmd = msmetadata()
             msmd.open(msname)
             nchan = msmd.nchan(0)
-            mid_freq = msmd.meanfreq(0,unit="MHz")
-            freqres = msmd.chanres(0,unit="kHz")[0]
+            mid_freq = msmd.meanfreq(0, unit="MHz")
+            freqres = msmd.chanres(0, unit="kHz")[0]
             npol = msmd.ncorrforpol()[0]
             nant = msmd.nantennas()
             times = msmd.timesforfield(0)
@@ -64,7 +63,7 @@ def import_model(msname, metafits, beamfile="", sourcelist="", ncpu=-1):
             timeres = msmd.exposuretime(scan=1)["value"]
             nrow = msmd.nrows()
             msmd.close()
-        
+
         hyperdrive_cmd = [
             f"{datadir}/hyperdrive",
             "vis-simulate",
@@ -95,27 +94,39 @@ def import_model(msname, metafits, beamfile="", sourcelist="", ncpu=-1):
             "--output-model-time-average",
             f"{timeres}s",
         ]
-        subprocess.run(hyperdrive_cmd, check=True, stdout = subprocess.DEVNULL, stderr = subprocess.DEVNULL)
+        subprocess.run(
+            hyperdrive_cmd,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
         model_msname = msname.split(".ms")[0] + "_model.ms"
         ########################
         # Importing model
         ########################
         with suppress_output():
-            data_table=casatable()
+            data_table = casatable()
             data_table.open(msname, nomodify=False)
             column_names = data_table.colnames()
             if "MODEL_DATA" not in column_names:
                 data_table.close()
-                setjy(vis=msname,standard="manual",fluxdensity=[1,0,0,0],usescratch=True)
+                setjy(
+                    vis=msname,
+                    standard="manual",
+                    fluxdensity=[1, 0, 0, 0],
+                    usescratch=True,
+                )
                 data_table.open(msname, nomodify=False)
-            model_table=casatable()
+            model_table = casatable()
             model_table.open(model_msname, nomodify=False)
-            baselines = [*zip(data_table.getcol("ANTENNA1"), data_table.getcol("ANTENNA2"))]
+            baselines = [
+                *zip(data_table.getcol("ANTENNA1"), data_table.getcol("ANTENNA2"))
+            ]
             m_array = model_table.getcol("DATA")
             pos = np.array([i[0] != i[1] for i in baselines])
-            model_array = np.empty((npol,nchan,len(baselines)), dtype="complex")
-            model_array[...,pos] = m_array
-            model_array[...,~pos] = 0.0
+            model_array = np.empty((npol, nchan, len(baselines)), dtype="complex")
+            model_array[..., pos] = m_array
+            model_array[..., ~pos] = 0.0
             data_table.putcol("MODEL_DATA", model_array)
             data_table.close()
             model_table.close()
@@ -181,7 +192,7 @@ def main(
     save_pid(pid, f"{cachedir}/pids/pids_{jobid}.txt")
 
     mslist = mslist.split(",")
-    
+
     if workdir == "":
         workdir = os.path.dirname(os.path.abspath(mslist[0])) + "/workdir"
     os.makedirs(workdir, exist_ok=True)
@@ -215,15 +226,15 @@ def main(
             mem_frac=mem_frac,
         )
         nworker = min(len(mslist), int(psutil.cpu_count() * cpu_frac))
-        scale_worker_and_wait(dask_cluster, nworker)
+        scale_worker_and_wait(dask_cluster, nworker + 1)
 
     try:
         ms_sizes = [get_ms_size(ms) for ms in mslist]
-        per_job_mem=2*max(ms_sizes)
-        mem_limit = (psutil.virtual_memory().available * mem_frac)/(1024**3)
-        max_njobs = int(mem_limit/per_job_mem)
-        njobs = max(1, min(max_njobs,len(mslist)))
-        ncpu = max(1, int(psutil.cpu_count() * cpu_frac /njobs)) 
+        per_job_mem = 2 * max(ms_sizes)
+        mem_limit = (psutil.virtual_memory().available * mem_frac) / (1024**3)
+        max_njobs = int(mem_limit / per_job_mem)
+        njobs = max(1, min(max_njobs, len(mslist)))
+        ncpu = max(1, int(psutil.cpu_count() * cpu_frac / njobs))
         if len(mslist) > 0:
             tasks = []
             for msname in mslist:
@@ -237,9 +248,9 @@ def main(
                     )
                 )
             print("Start import modeling...")
-            results=[]
-            for i in range(0,len(tasks),njobs):
-                batch = tasks[i:i+njobs]
+            results = []
+            for i in range(0, len(tasks), njobs):
+                batch = tasks[i : i + njobs]
                 futures = dask_client.compute(batch)
                 results.extend(dask_client.gather(futures))
             msg = 0
@@ -294,7 +305,7 @@ def cli():
         required=True,
         help="Work directory",
     )
-    
+
     # Advanced parameters
     adv_args = parser.add_argument_group(
         "###################\nAdvanced parameters\n###################"
@@ -339,7 +350,7 @@ def cli():
         return 1
 
     args = parser.parse_args()
-    
+
     msg = main(
         args.mslist,
         args.metafits,

@@ -1,14 +1,15 @@
 import types
 import julian
-import resource
 import numpy as np
 import os
+import copy
 import astropy.units as u
 from astropy.time import Time
 from astropy.coordinates import Angle
 from datetime import datetime as dt
 from contextlib import contextmanager
 from scipy.interpolate import interp1d
+from scipy.ndimage import gaussian_filter1d
 from casatasks import casalog
 
 try:
@@ -173,6 +174,85 @@ def ceil_to_multiple(n, base):
         The modified number
     """
     return ((n // base) + 1) * base
+
+
+def average_with_padding(array, chanwidth, axis=0, pad_value=np.nan):
+    """
+    Averages an array along a specified axis with a given chunk width (chanwidth),
+    padding the array if its size along that axis is not divisible by chanwidth.
+
+    Parameters
+    ----------
+    array : ndarray
+        Input array to average.
+    chanwidth : int
+        Width of chunks to average.
+    axis : int
+        Axis along which to perform the averaging.
+    pad_value : float
+        Value to pad with if padding is needed (default: np.nan).
+
+    Returns
+    --------
+    ndarray
+        Array averaged along the specified axis.
+    """
+    # Compute the shape along the specified axis
+    original_size = array.shape[axis]
+    pad_size = -original_size % chanwidth
+    # If padding is needed, apply it directly along the target axis
+    if pad_size > 0:
+        pad_width = [(0, 0)] * array.ndim
+        pad_width[axis] = (0, pad_size)
+        array = np.pad(array, pad_width, constant_values=pad_value)
+    # Compute the new shape and reshape the array for chunking
+    new_shape = list(array.shape)
+    new_shape[axis] = array.shape[axis] // chanwidth
+    new_shape.insert(axis + 1, chanwidth)
+    reshaped_array = array.reshape(new_shape)
+    # Use nanmean along the chunk axis for averaging
+    averaged_array = np.nanmean(reshaped_array, axis=axis + 1)
+    return averaged_array
+
+
+def filter_outliers(data, threshold=5, max_iter=3):
+    """
+    Filter outliers and perform cubic spline fitting
+
+    Parameters
+    ----------
+    y : numpy.array
+        Y values
+    threshold : float
+        Threshold of filtering
+    max_iter : int
+        Maximum number of iterations
+
+    Returns
+    -------
+    numpy.array
+        Clean Y-values
+    """
+    for c in range(max_iter):
+        data = np.asarray(data, dtype=np.float64)
+        original_nan_mask = np.isnan(data)
+        # Interpolate NaNs for smoothing
+        interpolated_data = interpolate_nans(data)
+        # Apply Gaussian smoothing
+        smoothed = gaussian_filter1d(
+            interpolated_data, sigma=threshold, truncate=3 * threshold
+        )
+        # Compute residuals and std only on valid original data
+        residuals = data - smoothed
+        valid_mask = ~original_nan_mask
+        std_dev = np.std(residuals[valid_mask])
+        # Detect outliers
+        outlier_mask = np.abs(residuals) > threshold * std_dev
+        combined_mask = valid_mask & ~outlier_mask
+        # Replace outliers with NaN
+        filtered_data = np.where(combined_mask, data, np.nan)
+        data = copy.deepcopy(filtered_data)
+    return filtered_data
 
 
 def angular_separation_equatorial(ra1, dec1, ra2, dec2):

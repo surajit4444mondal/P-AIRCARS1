@@ -1,5 +1,4 @@
 import os
-import copy
 import time
 import psutil
 import warnings
@@ -9,51 +8,36 @@ import numpy as np
 import subprocess
 import traceback
 from datetime import datetime
-from scipy.ndimage import gaussian_filter1d
 from scipy.interpolate import interp1d
-from casacore.tables import table
-from contextlib import contextmanager
+from casatools import msmetadata, table as casatable, calibrater
+from paircars.utils import *
 
 warnings.filterwarnings("ignore")
 
 
-@contextmanager
-def suppress_output():
+def create_blank_table(msname, caltable):
     """
-    Supress CASA terminal output
-    """
-    with open(os.devnull, "w") as fnull:
-        old_stdout = os.dup(1)
-        old_stderr = os.dup(2)
-        os.dup2(fnull.fileno(), 1)
-        os.dup2(fnull.fileno(), 2)
-        try:
-            yield
-        finally:
-            os.dup2(old_stdout, 1)
-            os.dup2(old_stderr, 2)
-
-
-def get_chans_flags(msname):
-    """
-    Get channels flagged or not
+    Create a blank bandpass table
 
     Parameters
     ----------
     msname : str
         Name of the measurement set
-
+    caltable : str
+        Caltable name
+        s
     Returns
     -------
-    numpy.array
-        A boolean array indicating whether the channel is completely flagged or not
+    str
+        Blank caltable name
     """
-    with suppress_output():
-        tb = table(msname)
-        flag = tb.getcol("FLAG")
-        tb.close()
-    chan_flags = np.all(np.all(flag, axis=-1), axis=0)
-    return chan_flags
+    if os.path.exists(caltable):
+        os.system(f"rm -rf {caltable}")
+    cb = calibrater()
+    cb.open(msname)
+    cb.createcaltable(caltable, "Complex", "B Jones", False)
+    cb.close()
+    return caltable
 
 
 def create_crossphase_table(msname, caltable, freqs, crossphase, flags):
@@ -79,8 +63,9 @@ def create_crossphase_table(msname, caltable, freqs, crossphase, flags):
         Caltable name
     """
     nchan = len(freqs)
+    caltable = create_blank_table(msname, caltable)
     cmd = [
-        "create-caltable",
+        "run-mwa-fill-caltable",
         "--msname",
         msname,
         "--caltable",
@@ -89,19 +74,23 @@ def create_crossphase_table(msname, caltable, freqs, crossphase, flags):
         str(nchan),
     ]
 
-    subprocess.run(cmd, check=True)
+    subprocess.run(
+        cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
     freqres = freqs[1] - freqs[0]
     if os.path.exists(caltable) is not True:
         print("Caltable is not made.")
         return
     with suppress_output():
-        tb = table(msname)
+        tb = casatable()
+        tb.open(msname)
         mean_time = np.nanmean(tb.getcol("TIME"))
         tb.close()
         del tb
-        tb = table(caltable + "/SPECTRAL_WINDOW", readonly=False)
-        freqs = np.array(freqs)[np.newaxis, :]
-        freqres_array = np.repeat(np.array([[freqres]]), nchan, axis=1)
+        tb = casatable()
+        tb.open(caltable + "/SPECTRAL_WINDOW", nomodify=False)
+        freqs = np.array(freqs)[:, np.newaxis]
+        freqres_array = np.ones(freqs.shape) * freqres
         tb.putcol("CHAN_FREQ", freqs)
         tb.putcol("NUM_CHAN", nchan)
         tb.putcol("REF_FREQUENCY", np.nanmean(freqs))
@@ -109,117 +98,24 @@ def create_crossphase_table(msname, caltable, freqs, crossphase, flags):
         tb.putcol("EFFECTIVE_BW", freqres_array)
         tb.putcol("RESOLUTION", freqres_array)
         tb.close()
-        tb = table(caltable, readonly=False)
+        tb = casatable()
+        tb.open(caltable, nomodify=False)
         ant = tb.getcol("ANTENNA1")
         gain = tb.getcol("CPARAM")
         cross_phase_gain_X = np.repeat(
-            np.exp(1j * np.deg2rad(crossphase))[np.newaxis, :], len(ant), axis=0
+            np.exp(1j * np.deg2rad(crossphase))[..., np.newaxis], len(ant), axis=-1
         )
-        gain[..., 0] = cross_phase_gain_X
-        gain[..., 1] = cross_phase_gain_X * 0 + 1
+        gain[0, ...] = cross_phase_gain_X
+        gain[1, ...] = cross_phase_gain_X * 0 + 1
+        gain[np.isnan(gain) == True] = 1.0
         tb.putcol("CPARAM", gain)
         times = np.array([mean_time] * len(ant))
         flags = flags[np.newaxis, :, np.newaxis]
-        flags = np.repeat(np.repeat(flags, len(ant), axis=0), 2, axis=2)
+        flags = np.repeat(np.repeat(flags, len(ant), axis=2), 2, axis=0)
         tb.putcol("FLAG", flags)
         tb.putcol("TIME", times)
         tb.close()
     return caltable
-
-
-def average_with_padding(array, chanwidth, axis=0, pad_value=np.nan):
-    """
-    Averages an array along a specified axis with a given chunk width (chanwidth),
-    padding the array if its size along that axis is not divisible by chanwidth.
-
-    Parameters
-    ----------
-    array : ndarray
-        Input array to average.
-    chanwidth : int
-        Width of chunks to average.
-    axis : int
-        Axis along which to perform the averaging.
-    pad_value : float
-        Value to pad with if padding is needed (default: np.nan).
-
-    Returns
-    --------
-    ndarray
-        Array averaged along the specified axis.
-    """
-    # Compute the shape along the specified axis
-    original_size = array.shape[axis]
-    pad_size = -original_size % chanwidth
-    # If padding is needed, apply it directly along the target axis
-    if pad_size > 0:
-        pad_width = [(0, 0)] * array.ndim
-        pad_width[axis] = (0, pad_size)
-        array = np.pad(array, pad_width, constant_values=pad_value)
-    # Compute the new shape and reshape the array for chunking
-    new_shape = list(array.shape)
-    new_shape[axis] = array.shape[axis] // chanwidth
-    new_shape.insert(axis + 1, chanwidth)
-    reshaped_array = array.reshape(new_shape)
-    # Use nanmean along the chunk axis for averaging
-    averaged_array = np.nanmean(reshaped_array, axis=axis + 1)
-    return averaged_array
-
-
-def interpolate_nans(data):
-    """Linearly interpolate NaNs in 1D array."""
-    nans = np.isnan(data)
-    if np.all(nans):
-        raise ValueError("All values are NaN.")
-    x = np.arange(len(data))
-    interp_func = interp1d(
-        x[~nans],
-        data[~nans],
-        kind="linear",
-        bounds_error=False,
-        fill_value="extrapolate",
-    )
-    return interp_func(x)
-
-
-def filter_outliers(data, threshold=5, max_iter=3):
-    """
-    Filter outliers and perform cubic spline fitting
-
-    Parameters
-    ----------
-    y : numpy.array
-        Y values
-    threshold : float
-        Threshold of filtering
-    max_iter : int
-        Maximum number of iterations
-
-    Returns
-    -------
-    numpy.array
-        Clean Y-values
-    """
-    for c in range(max_iter):
-        data = np.asarray(data, dtype=np.float64)
-        original_nan_mask = np.isnan(data)
-        # Interpolate NaNs for smoothing
-        interpolated_data = interpolate_nans(data)
-        # Apply Gaussian smoothing
-        smoothed = gaussian_filter1d(
-            interpolated_data, sigma=threshold, truncate=3 * threshold
-        )
-        # Compute residuals and std only on valid original data
-        residuals = data - smoothed
-        valid_mask = ~original_nan_mask
-        std_dev = np.std(residuals[valid_mask])
-        # Detect outliers
-        outlier_mask = np.abs(residuals) > threshold * std_dev
-        combined_mask = valid_mask & ~outlier_mask
-        # Replace outliers with NaN
-        filtered_data = np.where(combined_mask, data, np.nan)
-        data = copy.deepcopy(filtered_data)
-    return filtered_data
 
 
 def fitted_crossphase(freqs, crossphase):
@@ -286,62 +182,63 @@ def crossphasecal(
     Parameters
     ----------
     msname : str
-            Name of the measurement set
+        Name of the measurement set
     caltable : str
         Name of the caltable
     uvrange : str, optional
         UV-range for calibration
     gaintable : str, optional
-            Previous gaintable
+        Previous gaintable
     chanwidth : int, optional
         Channels to average
 
     Returns
     -------
     str
-            Name of the caltable
+        Name of the caltable
     """
-    starttime = time.time()
     ncpu = int(psutil.cpu_count() * 0.8)
     if ncpu < 1:
         ncpu = 1
     ne.set_num_threads(ncpu)
-    starttime = time.time()
     if caltable == "":
         caltable = msname.split(".ms")[0] + ".kcross"
     #######################
     with suppress_output():
-        tb = table(msname + "/SPECTRAL_WINDOW")
+        tb = casatable()
+        tb.open(msname + "/SPECTRAL_WINDOW")
         freqs = tb.getcol("CHAN_FREQ").flatten()
         cent_freq = tb.getcol("REF_FREQUENCY")[0]
         wavelength = (3 * 10**8) / cent_freq
         tb.close()
         del tb
-    with suppress_output():
-        tb = table(msname)
-        ant1 = tb.getcol("ANTENNA1")
-        ant2 = tb.getcol("ANTENNA2")
-        data = tb.getcol("DATA")
-        model_data = tb.getcol("MODEL_DATA")
-        flag = tb.getcol("FLAG")
-        uvw = tb.getcol("UVW")
-        weight = tb.getcol("WEIGHT")
-        # Col shape, baselines, chans, corrs
-        weight = np.repeat(weight[:, np.newaxis, 0], model_data.shape[1], axis=1)
-        tb.close()
+    # with suppress_output():
+    tb = casatable()
+    tb.open(msname)
+    ant1 = tb.getcol("ANTENNA1")
+    ant2 = tb.getcol("ANTENNA2")
+    data = tb.getcol("DATA")
+    model_data = tb.getcol("MODEL_DATA")
+    flag = tb.getcol("FLAG")
+    uvw = tb.getcol("UVW")
+    weight = tb.getcol("WEIGHT")
+    # Col shape, corrs, chans, baselines
+    weight = np.repeat(weight[0, np.newaxis, :], model_data.shape[1], axis=0)
+    tb.close()
     if gaintable == "":
         gaintable_supplied = False
     else:
         gaintable_supplied = True
         with suppress_output():
-            tb = table(gaintable)
+            tb = casatable()
+            tb.open(gaintable)
             if type(gaintable) == list:
                 gaintable = gaintable[0]
             gain = tb.getcol("CPARAM")
             tb.close()
             del tb
     if uvrange != "":
-        uvdist = np.sqrt(uvw[:, 0] ** 2 + uvw[:, 1] ** 2)
+        uvdist = np.sqrt(uvw[0, :] ** 2 + uvw[1, :] ** 2)
         if "~" in uvrange:
             minuv_m = float(uvrange.split("lambda")[0].split("~")[0]) * wavelength
             maxuv_m = float(uvrange.split("lambda")[0].split("~")[-1]) * wavelength
@@ -353,24 +250,24 @@ def crossphasecal(
             maxuv_m = float(uvrange.split("lambda")[0].split("<")[-1]) * wavelength
         uv_filter = (uvdist >= minuv_m) & (uvdist <= maxuv_m)
         # Filter data based on uv_filter
-        data = data[uv_filter, :, :]
-        model_data = model_data[uv_filter, :, :]
-        flag = flag[uv_filter, :, :]
-        weight = weight[uv_filter, :]
+        data = data[..., uv_filter]
+        model_data = model_data[..., uv_filter]
+        flag = flag[..., uv_filter]
+        weight = weight[..., uv_filter]
         ant1 = ant1[uv_filter]
         ant2 = ant2[uv_filter]
     #######################
     data[flag] = np.nan
     model_data[flag] = np.nan
-    xy_data = data[..., 1]
-    yx_data = data[..., 2]
-    xy_model = model_data[..., 1]
-    yx_model = model_data[..., 2]
+    xy_data = data[1, ...]
+    yx_data = data[2, ...]
+    xy_model = model_data[1, ...]
+    yx_model = model_data[2, ...]
     if gaintable_supplied:
-        gainX1 = gain[ant1, :, 0]
-        gainY1 = gain[ant1, :, -1]
-        gainX2 = gain[ant2, :, 0]
-        gainY2 = gain[ant2, :, -1]
+        gainX1 = gain[0, :, ant1].T
+        gainY1 = gain[-1, :, ant1].T
+        gainX2 = gain[0, :, ant2].T
+        gainY2 = gain[-1, :, ant2].T
         del gain
     del data, model_data, uvw, flag
     if chanwidth > 1:
@@ -392,13 +289,15 @@ def crossphasecal(
         argument = ne.evaluate(
             "weight * xy_data * conj(xy_model) + weight * yx_model * conj(yx_data)"
         )
-    crossphase = np.angle(np.nansum(argument, axis=0), deg=True)
+    crossphase = np.angle(np.nansum(argument, axis=-1), deg=True)
     freqs = average_with_padding(freqs, chanwidth, axis=0, pad_value=np.nan)
     if chanwidth > 1:
         chan_flags = np.array([False] * len(crossphase))
     else:
-        chan_flags = get_chans_flags(msname)
-    crossphase[chan_flags] = np.nan
+        unflag_chans, flag_chans = get_chans_flag(msname)
+        chan_flags = np.array([False] * len(crossphase))
+        chan_flags[flag_chans] = True
+    crossphase[flag_chans] = np.nan
     crossphase = fitted_crossphase(freqs, crossphase)
     create_crossphase_table(msname, caltable, freqs, crossphase, chan_flags)
     return caltable

@@ -280,13 +280,13 @@ def run_all_applysol(
             msmd.close()
             final_bpasstable = get_nearest_bandpass_table(att_caltables, ms_freq)
             final_gaintable = [final_bpasstable]
-            interp=["nearest,nearestflag"]
-            if len(crossphase_table)>0:
+            interp = ["nearest,nearestflag"]
+            if len(crossphase_table) > 0:
                 final_crossphasetable = get_nearest_bandpass_table(
                     crossphase_table, ms_freq
                 )
                 final_gaintable.append(final_crossphasetable)
-                interp.append(nearest,nearestflag)
+                interp.append(nearest, nearestflag)
             tasks.append(
                 delayed(applysol)(
                     ms,
@@ -388,7 +388,7 @@ def main(
     save_pid(pid, f"{cachedir}/pids/pids_{jobid}.txt")
 
     mslist = mslist.split(",")
-    
+
     if workdir == "":
         workdir = os.path.dirname(os.path.abspath(mslist[0])) + "/workdir"
     os.makedirs(workdir, exist_ok=True)
@@ -550,7 +550,7 @@ def cli():
         return 1
 
     args = parser.parse_args()
-    
+
     msg = main(
         args.mslist,
         args.calibrator_metafits,

@@ -254,7 +254,7 @@ def main(
 
     # Get first MS from mslist for fallback directory creation
     mslist = mslist.split(",")
-    
+
     if workdir == "":
         workdir = os.path.dirname(os.path.abspath(mslist[0])) + "/workdir"
     os.makedirs(workdir, exist_ok=True)

@@ -184,7 +184,7 @@ def main(
     save_pid(pid, f"{cachedir}/pids/pids_{jobid}.txt")
 
     mslist = mslist.split(",")
-    
+
     if workdir == "":
         workdir = os.path.dirname(os.path.abspath(mslist[0])) + "/workdir"
     os.makedirs(workdir, exist_ok=True)
@@ -264,7 +264,9 @@ def cli():
     essential = parser.add_argument_group(
         "###################\nEssential parameters\n###################"
     )
-    essential.add_argument("mslist", type=str, help="Measurement set list (comma seperated)")
+    essential.add_argument(
+        "mslist", type=str, help="Measurement set list (comma seperated)"
+    )
     essential.add_argument("metafits", type=str, help="Metafits file")
     essential.add_argument(
         "--workdir",
@@ -329,7 +331,7 @@ def cli():
         return 1
 
     args = parser.parse_args()
-    
+
     msg = main(
         args.mslist,
         args.metafits,

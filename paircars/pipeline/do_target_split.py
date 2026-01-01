@@ -261,7 +261,7 @@ def main(
     save_pid(pid, f"{cachedir}/pids/pids_{jobid}.txt")
 
     mslist = mslist.split(",")
-    
+
     if workdir == "":
         workdir = os.path.dirname(os.path.abspath(mslist[0])) + "/workdir"
     os.makedirs(workdir, exist_ok=True)
@@ -298,7 +298,7 @@ def main(
         scale_worker_and_wait(dask_cluster, nworker)
 
     try:
-        if len(mslist)>0:
+        if len(mslist) > 0:
             for msname in mslist:
                 print("###################################")
                 print(f"Start spliting: {msname} in coarse frequency bands.")
@@ -338,7 +338,8 @@ def main(
 
 def cli():
     parser = argparse.ArgumentParser(
-        description="Split measurement set into coarse channels", formatter_class=SmartDefaultsHelpFormatter
+        description="Split measurement set into coarse channels",
+        formatter_class=SmartDefaultsHelpFormatter,
     )
 
     # Essential parameters

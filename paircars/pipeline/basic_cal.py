@@ -268,7 +268,7 @@ def single_ms_cal_and_flag(
         # Apply calibration
         ##############################
         if applysol:
-            print(f"Applying calibrations on: {msname}")
+            print(f"Applying calibrations on: {msname} from {applycal_gaintable}.")
             run_applycal(
                 msname,
                 flagbackup=False,
@@ -463,6 +463,7 @@ def run_basic_cal_rounds(
         else:
             n_rounds = 2
             perform_polcal = False
+        print(f"Calibration for ms list: {mslist}.")
         print(f"Total calibration rounds: {n_rounds}")
 
         #################
@@ -474,16 +475,14 @@ def run_basic_cal_rounds(
         flag_threshold = 6.0
         if refant == "":
             refant = get_refant(trial_ms)
-        tasks=[]
         for msname in mslist:
             if uvrange == "":
                 uvrange = get_gleam_uvrange(msname)
             flag_uvranges = get_uvrange_exclude(uvrange)
-            task = delayed(flagdata)(
+            for flag_uvrange in flag_uvranges:
+                flagdata(
                     vis=msname, mode="manual", uvrange=flag_uvrange, flagbackup=False
                 )
-            tasks.append(task)
-        results = list(dask_client.gather(dask_client.compute(tasks)))
 
         for cal_round in range(1, n_rounds + 1):
             print("#################################")
@@ -494,7 +493,7 @@ def run_basic_cal_rounds(
                     do_polcal = True
                 flag_threshold = 5.0
             caltable_dic = single_round_cal_and_flag(
-                msname,
+                mslist,
                 dask_client,
                 workdir,
                 cal_round,
@@ -547,7 +546,7 @@ def main(
     outdir,
     refant="",
     uvrange="",
-    perform_polcal=False,
+    perform_polcal=True,
     keep_backup=False,
     start_remote_log=False,
     cpu_frac=0.8,
@@ -597,8 +596,8 @@ def main(
     cachedir = get_cachedir()
     save_pid(pid, f"{cachedir}/pids/pids_{jobid}.txt")
 
-    mslist = mslist.split(",") 
-    
+    mslist = mslist.split(",")
+
     if workdir == "":
         obsid = get_MWA_OBSID(mslist[0])
         workdir = os.path.dirname(os.path.abspath(mslist[0])) + "/workdir"
@@ -638,9 +637,9 @@ def main(
             cpu_frac=cpu_frac,
             mem_frac=mem_frac,
         )
-        nworker = max(2, int(psutil.cpu_count() * cpu_frac))
-        scale_worker_and_wait(dask_cluster, nworker)
-        
+        nworker = min(len(mslist), int(psutil.cpu_count() * cpu_frac))
+        scale_worker_and_wait(dask_cluster, nworker + 1)
+
     try:
         if len(mslist) > 0:
             print("###################################")
@@ -658,7 +657,7 @@ def main(
                 cpu_frac=float(cpu_frac),
                 mem_frac=float(mem_frac),
             )
-
+            print(f"Caltables: {caltables}")
             for caltable in caltables:
                 if caltable is not None and os.path.exists(caltable):
                     dest = caldir + "/" + os.path.basename(caltable)
@@ -696,7 +695,7 @@ def cli():
         "###################\nEssential parameters\n###################"
     )
     basic_args.add_argument(
-        "mslit",
+        "mslist",
         type=str,
         help="Name of measurement sets (comma separated)",
     )
@@ -727,7 +726,10 @@ def cli():
         help="UV range for calibration (e.g. '>100lambda')",
     )
     adv_args.add_argument(
-        "--perform_polcal", action="store_true", help="Enable polarization calibration"
+        "--no-perform_polcal",
+        dest="perform_polcal",
+        action="store_false",
+        help="Disable polarization calibration",
     )
     adv_args.add_argument(
         "--keep_backup",
@@ -762,7 +764,7 @@ def cli():
     args = parser.parse_args()
 
     msg = main(
-        args,mslist,
+        args.mslist,
         args.workdir,
         args.outdir,
         refant=args.refant,

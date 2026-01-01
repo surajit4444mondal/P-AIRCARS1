@@ -541,7 +541,7 @@ def main(
     mslist,
     workdir,
     caldir,
-    cal_applied, #TODO
+    cal_applied,  # TODO
     start_thresh=5,
     stop_thresh=3,
     max_iter=100,
@@ -631,7 +631,7 @@ def main(
     save_pid(pid, f"{cachedir}/pids/pids_{jobid}.txt")
 
     mslist = mslist.split(",")
-    
+
     if workdir == "":
         workdir = os.path.dirname(os.path.abspath(mslist[0])) + "/workdir"
     os.makedirs(workdir, exist_ok=True)
@@ -743,7 +743,7 @@ def main(
                     max_intervals = min(1, len(pos))
                     msmd.close()
                     per_job_fd = (
-                         max_intervals * 4 * 2
+                        max_intervals * 4 * 2
                     )  # 4 types of images, 2 is fudge factor
                     if per_job_fd == 0:
                         per_job_fd = 1

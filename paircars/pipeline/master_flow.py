@@ -63,7 +63,7 @@ def run_ds_jobs(
 
     Parameters
     ----------
-    mslist : str 
+    mslist : str
         Measurement sets (comma separated)
     metafits : str
         Metafits file
@@ -384,16 +384,16 @@ def run_import_model(
         ########################
         with get_dask_client() as dask_client:
             msg = import_model.main(
-                    mslist,
-                    metafits,
-                    workdir,
-                    cpu_frac=float(cpu_frac),
-                    mem_frac=float(mem_frac),
-                    logfile=logfile,
-                    jobid=jobid,
-                    start_remote_log=remote_log,
-                    dask_client=dask_client,
-                )
+                mslist,
+                metafits,
+                workdir,
+                cpu_frac=float(cpu_frac),
+                mem_frac=float(mem_frac),
+                logfile=logfile,
+                jobid=jobid,
+                start_remote_log=remote_log,
+                dask_client=dask_client,
+            )
     finally:
         stop_event.set()
         log_thread_model.join(timeout=5)
@@ -465,18 +465,18 @@ def run_basic_cal_jobs(
         ########################
         with get_dask_client() as dask_client:
             msg = basic_cal.main(
-                    mslist,
-                    workdir,
-                    outdir,
-                    perform_polcal=perform_polcal,
-                    keep_backup=keep_backup,
-                    start_remote_log=remote_log,
-                    cpu_frac=float(cpu_frac),
-                    mem_frac=float(mem_frac),
-                    logfile=logfile,
-                    jobid=jobid,
-                    dask_client=dask_client,
-                )
+                mslist,
+                workdir,
+                outdir,
+                perform_polcal=perform_polcal,
+                keep_backup=keep_backup,
+                start_remote_log=remote_log,
+                cpu_frac=float(cpu_frac),
+                mem_frac=float(mem_frac),
+                logfile=logfile,
+                jobid=jobid,
+                dask_client=dask_client,
+            )
     finally:
         stop_event.set()
         log_thread_cal.join(timeout=5)
@@ -562,20 +562,20 @@ def run_apply_basiccal_sol(
         ######################
         with get_dask_client() as dask_client:
             msg = do_apply_basiccal.main(
-                            mslist,
-                            calibrator_metafits,
-                            target_metafits,
-                            workdir,
-                            caldir,
-                            applymode=applymode,
-                            overwrite_datacolumn=overwrite_datacolumn,
-                            start_remote_log=remote_log,
-                            cpu_frac=float(cpu_frac),
-                            mem_frac=float(mem_frac),
-                            logfile=logfile,
-                            jobid=jobid,
-                            dask_client=dask_client,
-                        )
+                mslist,
+                calibrator_metafits,
+                target_metafits,
+                workdir,
+                caldir,
+                applymode=applymode,
+                overwrite_datacolumn=overwrite_datacolumn,
+                start_remote_log=remote_log,
+                cpu_frac=float(cpu_frac),
+                mem_frac=float(mem_frac),
+                logfile=logfile,
+                jobid=jobid,
+                dask_client=dask_client,
+            )
     finally:
         stop_event.set()
         log_thread_apply.join(timeout=5)
@@ -1082,16 +1082,16 @@ def run_apply_pbcor(
         #####################
         with get_dask_client() as dask_client:
             msg = mwa_pbcor.main(
-                    imagedir,
-                    metafits,
-                    workdir=workdir,
-                    cpu_frac=float(cpu_frac),
-                    mem_frac=float(mem_frac),
-                    logfile=logfile,
-                    jobid=jobid,
-                    start_remote_log=remote_log,
-                    dask_client=dask_client,
-                )
+                imagedir,
+                metafits,
+                workdir=workdir,
+                cpu_frac=float(cpu_frac),
+                mem_frac=float(mem_frac),
+                logfile=logfile,
+                jobid=jobid,
+                start_remote_log=remote_log,
+                dask_client=dask_client,
+            )
     finally:
         stop_event.set()
         log_thread_pbcor.join(timeout=5)
@@ -1274,41 +1274,49 @@ def master_control(
     target_header = fits.getheader(target_metafits)
     target_obsid = target_header["GPSTIME"]
     target_freq_config = target_header["CHANNELS"]
-    
+
     calibrator_mslist = glob.glob(f"{calibrator_datadir}/*.ms")
-    if len(calibrator_mslist)==0:
-        want_cont = input(f"No calibrator observation is provided. Do you want to continue without calibrator? Y/Yes.")
-        if want_cont.upper()=="YES" or want_cont.upper()=="Y":
-            has_cal=False
+    if len(calibrator_mslist) == 0:
+        want_cont = input(
+            f"No calibrator observation is provided. Do you want to continue without calibrator? Y/Yes."
+        )
+        if want_cont.upper() == "YES" or want_cont.upper() == "Y":
+            has_cal = False
         else:
             return 1
     elif os.path.exists(calibrator_metafits):
         calibrator_header = fits.getheader(calibrator_metafits)
         calibrator_obsid = calibrator_header["GPSTIME"]
         calibrator_freq_config = calibrator_header["CHANNELS"]
-        if np.abs(calibrator_obsid-target_obsid)>12*3600:
-            want_cont=input("Calibrator observations were taken 12 hours apart. Do you want to continue without calibrator? Y/Yes.")
-            if want_cont.upper()=="YES" or want_cont.upper()=="Y":
-                has_cal=False
+        if np.abs(calibrator_obsid - target_obsid) > 12 * 3600:
+            want_cont = input(
+                "Calibrator observations were taken 12 hours apart. Do you want to continue without calibrator? Y/Yes."
+            )
+            if want_cont.upper() == "YES" or want_cont.upper() == "Y":
+                has_cal = False
             else:
                 return 1
-        elif target_freq_config!=calibrator_freq_config:
+        elif target_freq_config != calibrator_freq_config:
             print(f"Target coarse channels: {target_freq_config}.")
             print(f"Calibrator coarse channels: {calibrator_freq_config}.")
-            want_cont=input("Calibrator and target frequency configuration is different. Do you want to continue without calibrator? Y/Yes.")
-            if want_cont.upper()=="YES" or want_cont.upper()=="Y":
-                has_cal=False
+            want_cont = input(
+                "Calibrator and target frequency configuration is different. Do you want to continue without calibrator? Y/Yes."
+            )
+            if want_cont.upper() == "YES" or want_cont.upper() == "Y":
+                has_cal = False
             else:
                 return 1
         else:
-            has_cal=True
+            has_cal = True
     else:
-        want_cont=input(f"Calibrator ms is available. No calibrator metafits is provided. Do you want to continue without calibrator? Y/Yes.")
-        if want_cont.upper()=="YES" or want_cont.upper()=="Y":
-            has_cal=False
+        want_cont = input(
+            f"Calibrator ms is available. No calibrator metafits is provided. Do you want to continue without calibrator? Y/Yes."
+        )
+        if want_cont.upper() == "YES" or want_cont.upper() == "Y":
+            has_cal = False
         else:
             return 1
-            
+
     ###################################
     # Preparing working directories
     ###################################
@@ -1347,6 +1355,7 @@ def master_control(
     # Initiating paircars data
     #####################################
     from paircars.pipeline.init_data import init_paircars_data
+
     init_paircars_data()
 
     ###################################################
@@ -1431,9 +1440,7 @@ def master_control(
             timestamp = dt.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
             job_name = f"{hostname} :: {timestamp} :: {target_obsid}"
             timestamp1 = dt.utcnow().strftime("%Y%m%dT%H%M%S")
-            remote_job_id = (
-                f"{hostname}_{timestamp1}_{target_obsid}"
-            )
+            remote_job_id = f"{hostname}_{timestamp1}_{target_obsid}"
             password = generate_password()
             np.save(
                 f"{workdir}/jobname_password.npy",
@@ -1490,7 +1497,7 @@ def master_control(
             if solar_selfcal:
                 solar_selfcal = False
             full_FoV = True
-            
+
         #####################################################################
         # Checking if ms is full pol for polarization calibration and imaging
         #####################################################################
@@ -1517,10 +1524,10 @@ def master_control(
             freqavg = round(min(image_freqres, max_freqres), 1)
         else:
             freqavg = round(max_freqres, 1)
-        total_ncoarse=0
+        total_ncoarse = 0
         for ms in target_mslist:
             ncoarse = get_ncoarse(ms)
-            total_ncoarse+=ncoarse
+            total_ncoarse += ncoarse
 
         ################################################
         # Determining maximum allowed temporal averaging
@@ -1589,14 +1596,15 @@ def master_control(
         # Run spliting jobs
         ##############################
         # If basic calibration is requested and calibrator ms and metafits are present
-        future_cal_split=None
+        future_cal_split = None
         if do_basic_cal and has_cal:
-            prefix="calibrator"
+            prefix = "calibrator"
             current_worker = get_total_worker(dask_cluster)
             nworker = min(max_worker, total_ncoarse + current_worker)
             scale_worker_and_wait(dask_cluster, nworker)
             future_cal_split = run_target_split_jobs.with_options(
-                task_run_name=f"spliting_{prefix}_{jobid}").submit(
+                task_run_name=f"spliting_{prefix}_{jobid}"
+            ).submit(
                 calibrator_mslist,
                 workdir,
                 datacolumn="data",
@@ -1613,18 +1621,18 @@ def master_control(
             try:
                 msg = future_cal_split.result()
             except Exception as e:
-                print("!!!! WARNING: Error in spliting calibrator measurement sets. !!!!")
+                print(
+                    "!!!! WARNING: Error in spliting calibrator measurement sets. !!!!"
+                )
                 traceback.print_exc()
                 return 1
             finally:
                 scale_worker_and_wait(dask_cluster, current_worker)
             split_cal_mslist = glob.glob(workdir + "/calibrators_spw_*.ms")
             if len(split_cal_mslist) == 0:
-                print(
-                    "No splited measurement set is present for basic calibration."
-                )
-                has_cal=False
-                
+                print("No splited measurement set is present for basic calibration.")
+                has_cal = False
+
         ###################################################
         # Start spliting selfcal ms, if worker available
         ###################################################
@@ -1656,7 +1664,7 @@ def master_control(
                 timeres=timeavg,
                 freqres=freqavg,
                 prefix=prefix,
-                time_window=min(10,time_interval),
+                time_window=min(10, time_interval),
                 time_interval=time_interval,
                 jobid=jobid,
                 cpu_frac=float(cpu_frac),
@@ -1754,7 +1762,9 @@ def master_control(
                         mem_frac=mem_frac,
                     )
                     if msg == 0:
-                        print(f"Calibrator diagnostic plots are saved in : {ms_diag_plot}")
+                        print(
+                            f"Calibrator diagnostic plots are saved in : {ms_diag_plot}"
+                        )
                     else:
                         print(
                             "Error in creating diagnostic plots for calibrator measurement set: {calms}."
@@ -1777,7 +1787,7 @@ def master_control(
                     "!!!! WARNING: Error in basic calibration. Starting without basic calibration. !!!!"
                 )
                 traceback.print_exc()
-                has_cal=False
+                has_cal = False
             finally:
                 scale_worker_and_wait(dask_cluster, nworker)
 
@@ -1786,8 +1796,8 @@ def master_control(
         ##########################################
         if len(glob.glob(f"{caldir}/*.bcal")) == 0:
             print(f"No bandpass table is present in calibration directory : {caldir}.")
-            has_cal=False
-      
+            has_cal = False
+
         ############################################
         # Spliting for self-cals
         ############################################
@@ -1828,7 +1838,7 @@ def master_control(
                 timeres=timeavg,
                 freqres=freqavg,
                 prefix=prefix,
-                time_window=min(10,time_interval),
+                time_window=min(10, time_interval),
                 time_interval=time_interval,
                 jobid=jobid,
                 cpu_frac=float(cpu_frac),
@@ -1851,9 +1861,9 @@ def master_control(
                 traceback.print_exc()
             finally:
                 scale_worker_and_wait(dask_cluster, 1)
-        
+
         ###################
-        # Spliting targets 
+        # Spliting targets
         ###################
         # If corrected data is requested or imaging is requested
         future_split = None
@@ -1909,7 +1919,7 @@ def master_control(
         #########################################################
         # Applying solutions on targets for self-calibration
         #########################################################
-        if do_selfcal and has_cal: # If calibrator solutions are available
+        if do_selfcal and has_cal:  # If calibrator solutions are available
             current_worker = get_total_worker(dask_cluster)
             nworker = min(max_worker, len(selfcal_mslist) + current_worker)
             scale_worker_and_wait(dask_cluster, nworker)
@@ -1928,7 +1938,7 @@ def master_control(
                 cpu_frac=round(cpu_frac, 2),
                 mem_frac=round(mem_frac, 2),
                 remote_log=remote_logger,
-            )    
+            )
             try:
                 msg = future_apply_basical_selfcal.result()
             except Exception as e:
