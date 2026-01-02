@@ -1303,7 +1303,7 @@ def make_ds_plot(dsfiles, plot_file=None, plot_quantity="TB", showgui=False):
             dsfile, allow_pickle=True
         )
         if plot_quantity == "TB":
-            data_i = T_data_i/10**6
+            data_i = T_data_i / 10**6
         else:
             data_i = S_data_i
         if i == 0:
@@ -1314,11 +1314,11 @@ def make_ds_plot(dsfiles, plot_file=None, plot_quantity="TB", showgui=False):
         else:
             df = np.nanmedian(np.diff(freqs))
             gapsize = int(np.round((np.nanmin(freqs_i) - np.nanmax(freqs)) / df))
-            gapsize = 1#max(gapsize, 0)
+            gapsize = 1  # max(gapsize, 0)
 
             if 0 < gapsize < 5:
                 last_freq_median = np.nanmedian(data[-1, :])
-                new_freq_median  = np.nanmedian(data_i[0, :])
+                new_freq_median = np.nanmedian(data_i[0, :])
                 if np.isfinite(new_freq_median) and new_freq_median != 0:
                     data_i = (data_i / new_freq_median) * last_freq_median
 
@@ -1336,7 +1336,7 @@ def make_ds_plot(dsfiles, plot_file=None, plot_quantity="TB", showgui=False):
     ########################################
     median_bandshape = np.nanmedian(data, axis=-1)
     pos = np.where(np.isnan(median_bandshape) == False)[0]
-    if len(pos)>0:
+    if len(pos) > 0:
         data = data[min(pos) : max(pos), :]
         freqs = freqs[min(pos) : max(pos)]
     temp_times = times[np.isnan(times) == False]

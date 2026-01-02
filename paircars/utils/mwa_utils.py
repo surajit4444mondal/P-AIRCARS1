@@ -127,7 +127,7 @@ def get_MWA_coarse_bands(msname):
                 end_chan = max((end_chan // nchan_coarse) * nchan_coarse, nchan_coarse)
             coarse_chans.append([start_chan, end_chan])
     return coarse_chans
-    
+
 
 def get_bad_chans(msname):
     """
@@ -145,24 +145,25 @@ def get_bad_chans(msname):
     """
     msmd = msmetadata()
     msmd.open(msname)
-    chanres = msmd.chanres(0,unit="MHz")[0]
+    chanres = msmd.chanres(0, unit="MHz")[0]
     nchan = msmd.nchan(0)
     msmd.close()
     msmd.done()
-    n_per_coarse_chan=int(1.28/chanres)
-    n_edge_chan=int(0.16/chanres)
+    n_per_coarse_chan = int(1.28 / chanres)
+    n_edge_chan = int(0.16 / chanres)
     spw = "0:"
-    for i in range(0,nchan,n_per_coarse_chan):
-        if i==i+n_edge_chan-1:
-            spw+=f"{i};"
+    for i in range(0, nchan, n_per_coarse_chan):
+        if i == i + n_edge_chan - 1:
+            spw += f"{i};"
         else:
-            spw+=f"{i}~{i+n_edge_chan-1};"
-        spw+=f"{i+int(n_per_coarse_chan/2)};"
-        if i+nchan-n_edge_chan==i+nchan-1:
-            spw+=f"{i+nchan-1};"
+            spw += f"{i}~{i+n_edge_chan-1};"
+        if n_edge_chan > 1:
+            spw += f"{i+int(n_per_coarse_chan/2)};"
+        if i + nchan - n_edge_chan == i + nchan - 1:
+            spw += f"{i+nchan-1};"
         else:
-            spw+=f"{i+nchan-n_edge_chan}~{i+nchan-1};"
-    spw=spw[:-1]
+            spw += f"{i+nchan-n_edge_chan}~{i+nchan-1};"
+    spw = spw[:-1]
     return spw
 
 
@@ -182,16 +183,19 @@ def get_good_chans(msname):
     """
     msmd = msmetadata()
     msmd.open(msname)
-    chanres = msmd.chanres(0,unit="MHz")[0]
+    chanres = msmd.chanres(0, unit="MHz")[0]
     nchan = msmd.nchan(0)
     msmd.close()
     msmd.done()
-    n_per_coarse_chan=int(1.28/chanres)
-    n_edge_chan=int(0.16/chanres)
+    n_per_coarse_chan = int(1.28 / chanres)
+    n_edge_chan = int(0.16 / chanres)
     spw = "0:"
-    for i in range(0,nchan,n_per_coarse_chan):
-        spw+=f"{i+n_edge_chan}~{i+int(n_per_coarse_chan/2)-1};{i+int(n_per_coarse_chan/2)+1}~{i+nchan};"
-    spw=spw[:-1]
+    for i in range(0, nchan, n_per_coarse_chan):
+        if n_edge_chan > 1:
+            spw += f"{i+n_edge_chan}~{i+int(n_per_coarse_chan/2)-1};{i+int(n_per_coarse_chan/2)+1}~{i+nchan-n_edge_chan};"
+        else:
+            spw += f"{i+n_edge_chan}~{i+nchan-n_edge_chan};"
+    spw = spw[:-1]
     return spw
 
 
