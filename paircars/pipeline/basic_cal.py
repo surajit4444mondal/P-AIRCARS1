@@ -7,13 +7,6 @@ import traceback
 import time
 import sys
 import os
-from casatasks import casalog
-
-try:
-    logfile = casalog.logfile()
-    os.remove(logfile)
-except BaseException:
-    pass
 from casatools import msmetadata
 from dask import delayed
 from paircars.utils import *
@@ -196,7 +189,7 @@ def single_ms_cal_and_flag(
         Caltables
     """
     try:
-        caltable_prefix = msname.split(".ms")[0] + "_caltable"
+        caltable_prefix = os.path.basename(msname).split(".ms")[0] + "_caltable"
         msmd = msmetadata()
         msmd.open(msname)
         npol = msmd.ncorrforpol()[0]
@@ -637,7 +630,7 @@ def main(
             cpu_frac=cpu_frac,
             mem_frac=mem_frac,
         )
-        nworker = min(len(mslist), int(psutil.cpu_count() * cpu_frac))
+        nworker = min(len(mslist), int(psutil.cpu_count() * cpu_frac) - 1)
         scale_worker_and_wait(dask_cluster, nworker + 1)
 
     try:
@@ -657,7 +650,7 @@ def main(
                 cpu_frac=float(cpu_frac),
                 mem_frac=float(mem_frac),
             )
-            print(f"Caltables: {caltables}")
+            print(f"All caltables: {caltables}")
             for caltable in caltables:
                 if caltable is not None and os.path.exists(caltable):
                     dest = caldir + "/" + os.path.basename(caltable)

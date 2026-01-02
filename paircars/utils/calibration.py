@@ -5,13 +5,6 @@ import traceback
 import warnings
 import glob
 import os
-from casatasks import casalog
-
-try:
-    logfile = casalog.logfile()
-    os.remove(logfile)
-except BaseException:
-    pass
 from casatools import msmetadata, ms as casamstool, table
 from .basic_utils import *
 from .ms_metadata import *
@@ -202,7 +195,7 @@ def get_caltable_metadata(caltable):
     caltype = tb.getkeywords()["VisCal"]
     msname = tb.getkeywords()["MSName"]
     tb.close()
-    tb.open(caltable + " / SPECTRAL_WINDOW")
+    tb.open(f"{caltable}/SPECTRAL_WINDOW")
     ch0 = (tb.getcol("REF_FREQUENCY")[0]) / 10**6  # In MHz
     chanwidth = (tb.getcol("CHAN_WIDTH")[0] / 10**3)[0]  # In kHz
     freqlist = tb.getcol("CHAN_FREQ")
@@ -211,12 +204,8 @@ def get_caltable_metadata(caltable):
     tb.close()
     tb.open(caltable)
     timerange = tb.getcol("TIME")
-    start_time = mjdsec_to_timestamp(
-        int(np.min(timerange)), includedate=True, date_format=0
-    )
-    end_time = mjdsec_to_timestamp(
-        int(np.max(timerange)), includedate=True, date_format=0
-    )
+    start_time = mjdsec_to_timestamp(int(np.min(timerange)), str_format=0)
+    end_time = mjdsec_to_timestamp(int(np.max(timerange)), str_format=0)
     tb.close()
     result = {
         "MSNAME": msname,
@@ -228,7 +217,6 @@ def get_caltable_metadata(caltable):
         "Start time": start_time,
         "End time": end_time,
     }
-    os.system("rm - rf casa * log")
     return result
 
 

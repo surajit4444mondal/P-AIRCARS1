@@ -5,13 +5,6 @@ import glob
 import os
 import traceback
 import time
-from casatasks import casalog
-
-try:
-    logfile = casalog.logfile()
-    os.remove(logfile)
-except BaseException:
-    pass
 from casatools import msmetadata, ms as casamstool, table
 from .basic_utils import *
 from .resource_utils import *

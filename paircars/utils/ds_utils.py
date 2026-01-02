@@ -3,13 +3,6 @@ import numpy as np
 import warnings
 import types
 from scipy.interpolate import interp1d
-from casatasks import casalog
-
-try:
-    logfile = casalog.logfile()
-    os.remove(logfile)
-except BaseException:
-    pass
 from casatools import msmetadata, table, ms as casamstool
 from astropy.wcs import FITSFixedWarning
 from .basic_utils import *
@@ -17,10 +10,11 @@ from .ms_metadata import *
 from .mwa_utils import *
 from .mwapb_utils import *
 from .imaging import *
+from .sunpos_utils import *
 
 warnings.simplefilter("ignore", category=FITSFixedWarning)
 kb = 1.38e-23  # Boltzmann constant
-c = 3.0e8  # Speed of light in vacuum
+light_speed = 3.0e8  # Speed of light in vacuum
 
 
 def fill_nan(arr):
@@ -63,12 +57,12 @@ def calc_T_rec(freq):
     Parameters
     ----------
     freq : float
-            Frequency in MHz
+        Frequency in MHz
 
     Returns
     -------
     float
-            Receiver temperature in K
+        Receiver temperature in K
     """
     x = [
         50.1336,
@@ -221,12 +215,12 @@ def calc_T_pickup(freq):
     Parameters
     ----------
     freq : float
-            Frequency in MHz
+        Frequency in MHz
 
     Returns
     -------
     float
-            Pickup temperature in K
+        Pickup temperature in K
     """
     x = [
         75.0,
@@ -288,65 +282,6 @@ def calc_T_pickup(freq):
     return tpick
 
 
-def calc_T_sky(
-    msname,
-    metafits,
-    baselines,
-    freq,
-    nthreads=1,
-    iau_order=False,
-    calc_fringe_temp=True,
-):
-    """
-    A static function to calculate sky temperature at a certain frequency
-
-    Parameters
-    ----------
-    msname : str
-        Measurement set
-    metafits : str
-        Metafits file
-    baselines : list
-        Baseline list
-    freq : float
-        Frequency in MHz
-    nthreads : int, optional
-        Number of CPU threads to use
-    iau_order : bool, optional
-        IAU convention
-    calc_fringe_temp : bool, optional
-        Calculate fringe temperature
-
-    Returns
-    -------
-    float
-        Sum of full Beam*Sky (XX)
-    float
-        Sum of full Beam (XX)
-    float
-        Antenna temperature (XX)
-    float
-        Total beam area (XX)
-    float
-        Sum of full Beam*Sky (YY)
-    float
-        Sum of full Beam (YY)
-    float
-        Antenna temperature (YY)
-    float
-        Total beam area (YY)
-    """
-    return make_primarybeammap(
-        msname,
-        metafits,
-        baselines=baselines,
-        freq=freq,
-        nthreads=nthreads,
-        iau_order=iau_order,
-        calc_fringe_temp=calc_fringe_temp,
-    )
-
-
 def cal_sun_solid_angle(freq):
     """
     Function to calculate the diameter of the Sun at a given frequency (White 2016)
@@ -354,12 +289,12 @@ def cal_sun_solid_angle(freq):
     Parameters
     ----------
     freq : float
-            Frequency in MHz
+        Frequency in MHz
 
     Returns
     -------
     float
-            Solid angle of the Sun
+        Solid angle of the Sun
     """
     dia = calc_sun_dia(freq)
     solidangle_sun = np.pi * ((dia * np.pi / (180 * 60)) ** 2)
@@ -399,7 +334,6 @@ def cal_norm_crosscorr(msname, ant1, ant2):
     mstool.select({"antenna1": ant1, "antenna2": ant2})
     dataij = mstool.getdata("DATA")["data"]
     flag = mstool.getdata("FLAG")["flag"]
-    dataij[flag] = np.nan
     mstool.close()
     mstool.open(msname)
     mstool.select({"antenna1": ant1, "antenna2": ant1})
@@ -433,7 +367,7 @@ def get_short_baselines(msname, max_uv=100.0, nmax=6):
     msname : str
         Measurement set
     max_uv : float
-        Maximum UV in meter
+        Maximum UV in lambda
     nmax : int
         Number of baselines
 
@@ -448,6 +382,12 @@ def get_short_baselines(msname, max_uv=100.0, nmax=6):
     ant1 = tb.getcol("ANTENNA1")
     ant2 = tb.getcol("ANTENNA2")
     tb.close()
+    msmd = msmetadata()
+    msmd.open(msname)
+    freq = msmd.meanfreq(0)
+    msmd.close()
+    wavelength = light_speed / freq
+    sun_taper = max_uv * wavelength
     # UV distance
     uvdist = np.hypot(uvw[0], uvw[1])
     # Valid short baselines
@@ -460,16 +400,17 @@ def get_short_baselines(msname, max_uv=100.0, nmax=6):
     baselines = []
     for a1, a2, uv in zip(ant1, ant2, uvdist):
         key = (int(a1), int(a2))
-        if key not in seen:
+        key_inv = (int(a2), int(a1))
+        if key not in seen and key_inv not in seen:
             seen.add(key)
-            seen.add(int(a2), int(a1))
+            seen.add(key_inv)
             baselines.append([key[0], key[1]])
         if len(baselines) >= nmax:
             break
     return baselines
 
 
-def calc_dynamic_spectrum(msname, metafits, outdir):
+def calc_dynamic_spectrum(msname, metafits, outdir, nthreads=1):
     """
     Function to calculate MWA dynamic spectrum of the Sun
 
@@ -481,6 +422,8 @@ def calc_dynamic_spectrum(msname, metafits, outdir):
         Metafits file
     outdir : str
         Name of the output directory
+    nthreads : int, optional
+        Number of CPU threads to use
 
     Returns
     -------
@@ -494,14 +437,13 @@ def calc_dynamic_spectrum(msname, metafits, outdir):
     ##################################
     msmd = msmetadata()
     msmd.open(msname)
-    freqs = msmd.chanfreqs(0)
+    freqs = msmd.chanfreqs(0,unit="MHz")
     npol = int(msmd.ncorrforpol()[0])
     msmd.close()
     highest_freq = np.nanmax(freqs)
-    smallest_wavelength = 299792458.0 / highest_freq
+    smallest_wavelength = 299792458.0 / (highest_freq*(10**6))
     max_uv = 100 / smallest_wavelength
     baselines = get_short_baselines(msname, max_uv=max_uv, nmax=3)
-
     sun_radec_string, sun_ra, sun_dec, radeg, decdeg = radec_sun(msname)
 
     ######################################################
@@ -537,8 +479,9 @@ def calc_dynamic_spectrum(msname, metafits, outdir):
         ###################################
         # Normalised cross-correlation
         ###################################
+        print(f"Extracting normalised cross-correlation from ms: {msname} for baseline: {baseline}.")
         result_rn = cal_norm_crosscorr(msname, baseline[0], baseline[1])
-        rn_dic[baseline] = result_rn
+        rn_dic[tuple(baseline)] = result_rn
         rn_xx = result_rn[0]
         rn_yy = result_rn[-1]
         rn_xx_list.append(rn_xx)
@@ -550,27 +493,32 @@ def calc_dynamic_spectrum(msname, metafits, outdir):
         ########################################s
         # Sun btightness temperature calculation
         ########################################
-        T_sun_xx_spectrum = []
-        T_sun_yy_spectrum = []
-        S_sun_xx_spectrum = []
-        S_sun_yy_spectrum = []
+        T_ant_xx_spectrum = []
+        T_ant_yy_spectrum = []
+        T_fringe_xx_spectrum = []
+        T_fringe_yy_spectrum = []
+        sun_beam_xx_spectrum = []
+        sun_beam_yy_spectrum = []
+        beam_omega_xx_spectrum = []
+        beam_omega_yy_spectrum = []
+        print(f"Determining system and sky temperatures for ms: {msname} for baseline: {baseline}.")
         for i in range(len(freqs)):
             #################################
             # Each frequency calculations
             #################################
             freq = freqs[i]
             (
-                _,
-                _,
+                beamsky_sum_xx,
+                beam_sum_xx,
                 T_ant_xx,
                 beam_dOMEGA_sum_xx,
-                _,
-                _,
+                beamsky_sum_yy,
+                beam_sum_yy,
                 T_ant_yy,
                 beam_dOMEGA_sum_yy,
                 T_fringe_xx,
-                T_fringe_xx,
-            ) = calc_T_sky(
+                T_fringe_yy,
+            ) = make_primarybeammap(
                 msname,
                 metafits,
                 baseline,
@@ -586,50 +534,66 @@ def calc_dynamic_spectrum(msname, metafits, outdir):
             sun_beam_xx = sun_beam[3]
             sun_beam_yy = sun_beam[4]
 
-            ################################################
-            # Temperature and flux of Sun for X polarisation
-            #################################################
-            T_sun_xx = ((rn_xx / (1 - rn_xx)) * (T_ant_xx + T_rec + T_pick)) - (
-                T_fringe_xx / (1 - rn_xx)
-            )
-            T_sun_xx_avg = T_sun_xx / sun_beam_xx
-            T_sun_xx = T_sun_xx_avg * beam_dOMEGA_sum_xx / solar_solid_angle[i]
-            S_sun_xx = (
-                2 * kb * T_sun_xx_avg * beam_dOMEGA_sum_xx / (c / (freq * (10**6))) ** 2
-            ) / (10 ** (-22))
+            ########################################
+            # Making spectrum of various quantities
+            ########################################
+            T_ant_xx_spectrum.append(T_ant_xx)
+            T_ant_yy_spectrum.append(T_ant_yy)
+            T_fringe_xx_spectrum.append(T_fringe_xx)
+            T_fringe_yy_spectrum.append(T_fringe_yy)
+            sun_beam_xx_spectrum.append(sun_beam_xx)
+            sun_beam_yy_spectrum.append(sun_beam_yy)
+            beam_omega_xx_spectrum.append(beam_dOMEGA_sum_xx)
+            beam_omega_yy_spectrum.append(beam_dOMEGA_sum_yy)
 
-            ################################################
-            # Temperature and flux of  Sun for Y polarisation
-            ################################################
-            T_sun_yy = ((rn_yy / (1 - rn_yy)) * (T_ant_yy + T_rec + T_pick)) - (
-                T_fringe_yy / (1 - rn_yy)
-            )
-            T_sun_yy_avg = T_sun_yy / sun_beam_yy
-            T_sun_yy = T_sun_yy_avg * beam_dOMEGA_sum_yy / solar_solid_angle[i]
-            S_sun_yy = (
-                2 * kb * T_sun_yy_avg * beam_dOMEGA_sum_yy / (c / (freq * (10**6))) ** 2
-            ) / (10 ** (-22))
+        T_ant_xx_spectrum = np.array(T_ant_xx_spectrum)
+        T_ant_yy_spectrum = np.array(T_ant_yy_spectrum)
+        T_fringe_xx_spectrum = np.array(T_fringe_xx_spectrum)
+        T_fringe_yy_spectrum = np.array(T_fringe_yy_spectrum)
+        sun_beam_xx_spectrum = np.array(sun_beam_xx_spectrum)
+        sun_beam_yy_spectrum = np.array(sun_beam_yy_spectrum)
+        beam_omega_xx_spectrum = np.array(beam_omega_xx_spectrum)
+        beam_omega_yy_spectrum = np.array(beam_omega_yy_spectrum)
 
-            ############################################
-            # Temperayre and flux of Sun spectrum array
-            ############################################
-            T_sun_xx_spectrum.append(T_sun_xx)
-            T_sun_yy_spectrum.append(T_sun_yy)
-            S_sun_xx_spectrum.append(S_sun_xx)
-            S_sun_yy_spectrum.append(S_sun_yy)
+        ################################################
+        # Temperature and flux of Sun for X polarisation
+        #################################################
+        T_sun_xx = (
+            (rn_xx/ (1 - rn_xx)) * (T_ant_xx_spectrum[:,None] + T_rec[:,None] + T_pick[:,None])
+        ) - (T_fringe_xx_spectrum[:,None] / (1 - rn_xx))
+        T_sun_xx_avg = T_sun_xx / sun_beam_xx_spectrum[:,None]
+        T_sun_xx = T_sun_xx_avg * beam_omega_xx_spectrum[:,None] / solar_solid_angle[:,None]
+        S_sun_xx = (
+            2
+            * kb
+            * T_sun_xx_avg
+            * beam_omega_xx_spectrum[:,None]
+            / (light_speed / (freqs[:,None] * (10**6))) ** 2
+        ) / (10 ** (-22))
 
-        ######################################################
-        # All baseline spectrum (shape: freq, time, baselines)
-        ######################################################
-        T_sun_xx_spectrum = np.array(T_sun_xx_spectrum)
-        T_sun_yy_spectrum = np.array(T_sun_yy_spectrum)
-        S_sun_xx_spectrum = np.array(S_sun_xx_spectrum)
-        S_sun_yy_spectrum = np.array(S_sun_yy_spectrum)
+        ################################################
+        # Temperature and flux of  Sun for Y polarisation
+        ################################################
+        T_sun_yy = ((rn_yy / (1 - rn_yy)) * (T_ant_yy_spectrum[:,None] + T_rec[:,None] + T_pick[:,None])) - (
+            T_fringe_yy_spectrum[:,None] / (1 - rn_yy)
+        )
+        T_sun_yy_avg = T_sun_yy / sun_beam_yy_spectrum[:,None]
+        T_sun_yy = T_sun_yy_avg * beam_omega_yy_spectrum[:,None] / solar_solid_angle[:,None]
+        S_sun_yy = (
+            2
+            * kb
+            * T_sun_yy_avg
+            * beam_omega_yy_spectrum[:,None]
+            / (light_speed / (freqs[:,None] * (10**6))) ** 2
+        ) / (10 ** (-22))
 
-        T_sun_xx_list.append(T_sun_xx_spectrum)
-        T_sun_yy_list.append(T_sun_yy_spectrum)
-        S_sun_xx_list.append(S_sun_xx_spectrum)
-        S_sun_yy_list.append(S_sun_yy_spectrum)
+        ###################################################
+        # Making ds per baseline
+        ###################################################
+        T_sun_xx_list.append(T_sun_xx)
+        T_sun_yy_list.append(T_sun_yy)
+        S_sun_xx_list.append(S_sun_xx)
+        S_sun_yy_list.append(S_sun_yy)
 
     ########################################
     # Baslines averaged spectrum
@@ -639,10 +603,10 @@ def calc_dynamic_spectrum(msname, metafits, outdir):
     S_sun_xx_list = np.array(S_sun_xx_list)
     S_sun_yy_list = np.array(S_sun_yy_list)
 
-    T_sun_xx = np.nanmedian(T_sun_xx_list, axis=-1)
-    T_sun_yy = np.nanmedian(T_sun_yy_list, axis=-1)
-    S_sun_xx = np.nanmedian(S_sun_xx_list, axis=-1)
-    S_sun_yy = np.nanmedian(S_sun_yy_list, axis=-1)
+    T_sun_xx = np.nanmean(T_sun_xx_list, axis=0)
+    T_sun_yy = np.nanmean(T_sun_yy_list, axis=0)
+    S_sun_xx = np.nanmean(S_sun_xx_list, axis=0)
+    S_sun_yy = np.nanmean(S_sun_yy_list, axis=0)
 
     T_sun = (T_sun_xx + T_sun_yy) / 2.0
     S_sun = (S_sun_xx + S_sun_yy) / 2.0
@@ -661,7 +625,7 @@ def calc_dynamic_spectrum(msname, metafits, outdir):
     msmd.open(msname)
     freqs = msmd.chanfreqs(0, unit="MHz")
     mid_freq = msmd.meanfreq(0, unit="MHz")
-    times = msmd.timesforscans(int(scan))
+    times = msmd.timesforspws(0)
     timestamps = [mjdsec_to_timestamp(mjdsec, str_format=0) for mjdsec in times]
     t_string = "".join(timestamps[0].split("T")[0].split("-")) + "".join(
         timestamps[0].split("T")[-1].split(".")[0].split(":")
@@ -670,7 +634,7 @@ def calc_dynamic_spectrum(msname, metafits, outdir):
     save_file = f"freq_{mid_freq}MHz_time_{t_string}"
     np.save(
         f"{outdir}/{save_file}_ds.npy",
-        np.array([freqs, times, timestamps, T_sun, S_sun], dtype="object"),
+        np.array([freqs, times[1:], timestamps[1:], T_sun[:,1:], S_sun[:,1:]], dtype="object"),
     )
 
     np.save(f"{outdir}/{save_file}_rn.npy", np.array(rn_dic, dtype="object"))

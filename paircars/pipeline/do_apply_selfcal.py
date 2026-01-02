@@ -7,14 +7,6 @@ import time
 import glob
 import sys
 import os
-from casatasks import casalog
-
-try:
-    logfile = casalog.logfile()
-    os.remove(logfile)
-except BaseException:
-    pass
-from casatasks import casalog
 from casatools import msmetadata
 from dask import delayed
 from paircars.utils import *
@@ -287,8 +279,8 @@ def main(
             cpu_frac=cpu_frac,
             mem_frac=mem_frac,
         )
-        nworker = max(2, int(psutil.cpu_count() * cpu_frac))
-        scale_worker_and_wait(dask_cluster, nworker)
+        nworker = min(len(mslist), int(psutil.cpu_count() * cpu_frac) - 1)
+        scale_worker_and_wait(dask_cluster, nworker + 1)
 
     try:
         print("###################################")

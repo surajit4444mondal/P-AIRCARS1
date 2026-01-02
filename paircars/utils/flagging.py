@@ -4,13 +4,6 @@ import numpy as np
 import traceback
 import glob
 import os
-from casatasks import casalog
-
-try:
-    logfile = casalog.logfile()
-    os.remove(logfile)
-except BaseException:
-    pass
 from datetime import datetime as dt, timezone
 from .basic_utils import *
 from .resource_utils import *

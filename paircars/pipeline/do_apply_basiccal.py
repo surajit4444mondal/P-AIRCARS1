@@ -10,14 +10,7 @@ import time
 import glob
 import sys
 import os
-from casatasks import casalog
-
-try:
-    logfile = casalog.logfile()
-    os.remove(logfile)
-except BaseException:
-    pass
-from casatools import table
+from casatools import table, msmetadata
 from dask import delayed
 from astropy.io import fits
 from paircars.utils import *
@@ -26,7 +19,7 @@ logging.getLogger("distributed").setLevel(logging.ERROR)
 logging.getLogger("tornado.application").setLevel(logging.CRITICAL)
 
 
-def scale_bandpass(bandpass_table, cal_attn, target_attn):
+def scale_bandpass(bandpass_table, cal_attn, target_attn, only_amplitude=False):
     """
     Scale a bandpass calibration table using attenuation data.
 
@@ -38,6 +31,8 @@ def scale_bandpass(bandpass_table, cal_attn, target_attn):
         Calibrator attenuation
     target_attn : float
         Target attenuation
+    only_amplitude : bool, optional
+        Apply only amplitude
 
     Returns
     -------
@@ -45,24 +40,27 @@ def scale_bandpass(bandpass_table, cal_attn, target_attn):
         Name of the output table.
     """
     warnings.filterwarnings("ignore", category=RuntimeWarning)
-    output_table = bandpass_table.split(".bcal")[0] + "_att.bcal"
+    bandpass_table = bandpass_table.rstrip("/")
+    output_table = f"{bandpass_table}.att"
     # Prepare output table
     if os.path.exists(output_table):
         os.system(f"rm -rf {output_table}")
     os.system(f"cp -r {bandpass_table} {output_table}")
+    tb = table()
+    tb.open(output_table, nomodify=False)
+    gain = tb.getcol("CPARAM")
+    flag = tb.getcol("FLAG")
     if cal_attn == target_attn:
-        return output_table
+        scaling = 1.0
     else:
-        tb = table()
-        tb.open(output_table, nomodify=False)
-        gain = tb.getcol("CPARAM")
-        flag = tb.getcol("FLAG")
         scaling = 10 ** (-(target_attn - cal_attn) / 20.0)
-        gain *= scaling
-        tb.putcol("CPARAM", gain)
-        tb.flush()
-        tb.close()
-        return output_table
+    gain *= scaling
+    if only_amplitude:
+        gain = np.abs(gain)
+    tb.putcol("CPARAM", gain)
+    tb.flush()
+    tb.close()
+    return output_table
 
 
 def applysol(
@@ -70,7 +68,6 @@ def applysol(
     gaintable=[],
     gainfield=[],
     interp=[],
-    parang=False,
     applymode="calflag",
     overwrite_datacolumn=False,
     n_threads=-1,
@@ -91,8 +88,6 @@ def applysol(
         Gain field list
     interp : list, optional
         Gain interpolation
-    parang : bool, optional
-        Parallactic angle apply or not
     applymode : str, optional
         Apply mode
     overwrite_datacolumn : bool, optional
@@ -129,6 +124,9 @@ def applysol(
                     flagdata(vis=msname, mode="unflag", spw="0", flagbackup=False)
                 if os.path.exists(msname + ".flagversions"):
                     os.system("rm -rf " + msname + ".flagversions")
+            print(
+                f"Applying solution on ms: {msname} from gaintables: {','.join(gaintable)}."
+            )
             with suppress_output():
                 applycal(
                     vis=msname,
@@ -137,10 +135,10 @@ def applysol(
                     applymode=applymode,
                     interp=interp,
                     calwt=[False] * len(gaintable),
-                    parang=parang,
                     flagbackup=False,
                 )
         if overwrite_datacolumn:
+            print(f"Over writing data column with corrected data for ms: {msname}.")
             outputvis = msname.split(".ms")[0] + "_cor.ms"
             if os.path.exists(outputvis):
                 os.system(f"rm -rf {outputvis}")
@@ -170,6 +168,7 @@ def run_all_applysol(
     caldir,
     overwrite_datacolumn=False,
     applymode="calflag",
+    only_amplitude=False,
     force_apply=False,
     cpu_frac=0.8,
     mem_frac=0.8,
@@ -195,6 +194,8 @@ def run_all_applysol(
         Overwrite data column or not
     applymode : str, optional
         Apply mode
+    only_amplitude: bool, optional
+        Apply only amplitude
     force_apply : bool, optional
         Force to apply solutions even already applied
     cpu_frac : float, optional
@@ -222,9 +223,14 @@ def run_all_applysol(
         calibrator_obsid = calibrator_header["GPSTIME"]
         cal_attn = calibrator_header["ATTEN_DB"]
         target_attn = target_header["ATTEN_DB"]
+        print(
+            f"Calibrator attenuation: {cal_attn}dB, Target attenuation: {target_attn}dB."
+        )
+        if only_amplitude:
+            print("Applying only amplitude.")
 
-        bandpass_table = glob.glob(caldir + f"/{calibrator_obsid}_caltable.bcal")
-        crossphase_table = glob.glob(caldir + f"/{calibrator_obsid}_caltable.kcrosscal")
+        bandpass_table = glob.glob(caldir + f"/{calibrator_obsid}*.bcal")
+        crossphase_table = glob.glob(caldir + f"/{calibrator_obsid}*.kcrosscal")
 
         if len(bandpass_table) == 0:
             print(f"No bandpass table is present in calibration directory : {caldir}.")
@@ -239,7 +245,9 @@ def run_all_applysol(
         ################################
         att_caltables = []
         for bpass_table in bandpass_table:
-            att_caltable = scale_bandpass(bpass_table, cal_attn, target_attn)
+            att_caltable = scale_bandpass(
+                bpass_table, cal_attn, target_attn, only_amplitude=only_amplitude
+            )
             att_caltables.append(att_caltable)
 
         ####################################
@@ -252,7 +260,7 @@ def run_all_applysol(
                 filtered_mslist.append(ms)
             else:
                 print(f"Issue in : {ms}")
-                os.system("rm -rf {ms}")
+                os.system(f"rm -rf {ms}")
         mslist = filtered_mslist
         if len(mslist) == 0:
             print("No valid measurement set.")
@@ -274,7 +282,7 @@ def run_all_applysol(
         print("#################################")
 
         for ms in mslist:
-            msmd = msmetdata()
+            msmd = msmetadata()
             msmd.open(ms)
             ms_freq = msmd.meanfreq(0, unit="MHz")
             msmd.close()
@@ -286,7 +294,7 @@ def run_all_applysol(
                     crossphase_table, ms_freq
                 )
                 final_gaintable.append(final_crossphasetable)
-                interp.append(nearest, nearestflag)
+                interp.append("nearest, nearestflag")
             tasks.append(
                 delayed(applysol)(
                     ms,
@@ -295,12 +303,10 @@ def run_all_applysol(
                     applymode=applymode,
                     interp=interp,
                     n_threads=n_threads,
-                    parang=parang,
                     memory_limit=mem_limit,
                     force_apply=force_apply,
                 )
             )
-        print(f"Applying solutions")
         results = list(dask_client.gather(dask_client.compute(tasks)))
         if np.nansum(results) == 0:
             print("##################")
@@ -318,7 +324,6 @@ def run_all_applysol(
             return 1
     except Exception as e:
         traceback.print_exc()
-        os.system("rm -rf casa*log")
         print("##################")
         print(
             "Applying basic calibration solutions for target scans are not done successfully."
@@ -334,6 +339,7 @@ def main(
     workdir,
     caldir,
     applymode="calflag",
+    only_amplitude=False,
     overwrite_datacolumn=False,
     force_apply=False,
     do_post_flag=False,
@@ -361,6 +367,8 @@ def main(
         Path to directory containing calibration tables (e.g., bandpass, gain, polarization).
     applymode : str, optional
         CASA calibration application mode (e.g., "calonly", "calflag", "flagonly"). Default is "calflag".
+    only_amplitude : bool, optional
+        Apply only amplitude
     overwrite_datacolumn : bool, optional
         If True, overwrites the CORRECTED column during calibration. Default is False.
     force_apply : bool, optional
@@ -421,8 +429,8 @@ def main(
             cpu_frac=cpu_frac,
             mem_frac=mem_frac,
         )
-        nworker = max(2, int(psutil.cpu_count() * cpu_frac))
-        scale_worker_and_wait(dask_cluster, nworker)
+        nworker = min(len(mslist), int(psutil.cpu_count() * cpu_frac) - 1)
+        scale_worker_and_wait(dask_cluster, nworker + 1)
 
     try:
         print("###################################")
@@ -435,13 +443,14 @@ def main(
         else:
             msg = run_all_applysol(
                 mslist,
-                calibrator_metafits,
                 target_metafits,
+                calibrator_metafits,
                 dask_client,
                 workdir,
                 caldir,
                 overwrite_datacolumn=overwrite_datacolumn,
                 applymode=applymode,
+                only_amplitude=only_amplitude,
                 force_apply=force_apply,
                 cpu_frac=cpu_frac,
                 mem_frac=mem_frac,
@@ -515,6 +524,11 @@ def cli():
         help="Applycal mode (e.g. 'calonly', 'calflag')",
     )
     adv_args.add_argument(
+        "--only_amplitude",
+        action="store_true",
+        help="Apply only amplitude",
+    )
+    adv_args.add_argument(
         "--overwrite_datacolumn",
         action="store_true",
         help="Overwrite corrected data column in MS",
@@ -559,6 +573,7 @@ def cli():
         args.caldir,
         applymode=args.applymode,
         overwrite_datacolumn=args.overwrite_datacolumn,
+        only_amplitude=args.only_amplitude,
         force_apply=args.force_apply,
         start_remote_log=args.start_remote_log,
         cpu_frac=float(args.cpu_frac),

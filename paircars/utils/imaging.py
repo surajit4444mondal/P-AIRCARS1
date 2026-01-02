@@ -2,13 +2,6 @@ import types
 import numpy as np
 import glob
 import os
-from casatasks import casalog
-
-try:
-    logfile = casalog.logfile()
-    os.remove(logfile)
-except BaseException:
-    pass
 from casatools import msmetadata, ms as casamstool, table
 from .basic_utils import *
 

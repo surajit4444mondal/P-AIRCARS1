@@ -18,6 +18,7 @@ datadir = get_datadir()
 
 def make_solar_DS(
     mslist,
+    dask_client,
     metafits,
     workdir,
     outdir,
@@ -34,6 +35,8 @@ def make_solar_DS(
     ----------
     mslist : list
         Measurement set list (Provide only same obsid measurement set list)
+    dask_client: dask.client
+        Dask client
     metafits : str
         Metafits file
     workdir : str
@@ -66,16 +69,18 @@ def make_solar_DS(
     warnings.filterwarnings("ignore", category=RuntimeWarning)
     os.makedirs(f"{outdir}/dynamic_spectra", exist_ok=True)
     print("##############################################")
-    print(f"Start making dynamic spectra for ms: {msname}")
+    print(f"Start making dynamic spectra for ms: {mslist}")
     print("##############################################")
 
     ########################################
     # Number of worker limit based on memory
     ########################################
-    mem_limit = min(total_mem, max(mslist))
-    njobs = min(len(mslist), int(total_mem / mem_limit))
-    njobs = max(1, min(total_cpu, njobs))
-    n_threads = max(1, int(total_cpu / njobs))
+    ms_sizes = [get_ms_size(ms) for ms in mslist]
+    per_job_mem = 2 * max(ms_sizes)
+    mem_limit = (psutil.virtual_memory().available * mem_frac) / (1024**3)
+    max_njobs = int(mem_limit / per_job_mem)
+    njobs = max(1, min(max_njobs, len(mslist)))
+    n_threads = max(1, int(psutil.cpu_count() * cpu_frac / njobs))
 
     print("#################################")
     print(f"Total dask worker: {njobs}")
@@ -89,7 +94,7 @@ def make_solar_DS(
         for msname in mslist:
             tasks.append(
                 delayed(calc_dynamic_spectrum)(
-                    msname, metafits, f"{outdir}/dynamic_spectra"
+                    msname, metafits, f"{outdir}/dynamic_spectra", nthreads=n_threads
                 )
             )
         results = []
@@ -218,14 +223,16 @@ def main(
             cpu_frac=cpu_frac,
             mem_frac=mem_frac,
         )
-        nworker = max(2, int(psutil.cpu_count() * cpu_frac))
-        scale_worker_and_wait(dask_cluster, nworker)
+        nworker = min(len(mslist), int(psutil.cpu_count() * cpu_frac) - 1)
+        scale_worker_and_wait(dask_cluster, nworker + 1)
 
     try:
         if len(mslist) > 0:
             ds_plot_file = make_solar_DS(
                 mslist,
+                dask_client,
                 metafits,
+                workdir,
                 outdir,
                 plot_quantity=plot_quantity,
                 extension=extension,
@@ -336,6 +343,7 @@ def cli():
         args.mslist,
         args.metafits,
         args.workdir,
+        args.outdir,
         plot_quantity=args.plot_quantity,
         extension=args.extension,
         cpu_frac=args.cpu_frac,

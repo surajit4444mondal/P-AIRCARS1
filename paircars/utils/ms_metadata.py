@@ -3,13 +3,6 @@ import psutil
 import numpy as np
 import glob
 import os
-from casatasks import casalog
-
-try:
-    logfile = casalog.logfile()
-    os.remove(logfile)
-except BaseException:
-    pass
 from casatools import msmetadata, ms as casamstool, table, measures
 from .basic_utils import *
 from .resource_utils import *

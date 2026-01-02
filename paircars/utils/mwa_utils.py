@@ -14,13 +14,6 @@ from astropy.wcs import FITSFixedWarning
 from astropy.io import fits
 from astropy.time import Time
 from astropy.coordinates import SkyCoord
-from casatasks import casalog
-
-try:
-    logfile = casalog.logfile()
-    os.remove(logfile)
-except BaseException:
-    pass
 from casatools import msmetadata, ms as casamstool, table
 from datetime import datetime as dt, timedelta
 from .basic_utils import *
@@ -95,27 +88,6 @@ def freq_to_MWA_coarse(freq):
     return int(freq // 1.28)
 
 
-def get_MWA_bad_freqs():
-    """
-    Get bad frequencies of the MWA band
-
-    Returns
-    -------
-    list
-        Bad frequency range in MHz
-    """
-    coarse_channels = np.arange(55, 235)
-    bad_freqs = []
-    for coarse_chan in coarse_channels:
-        cent_freq = coarse_chan * 1.28
-        start_freq = cent_freq - 0.64
-        end_freq = cent_freq + 0.64
-        bad_freqs.append([start_freq, start_freq + 0.16])
-        bad_freqs.append([cent_freq])
-        bad_freqs.append([end_freq - 0.16, end_freq])
-    return bad_freqs
-
-
 def get_MWA_coarse_bands(msname):
     """
     Get coarse channel bands of the MWA
@@ -155,27 +127,7 @@ def get_MWA_coarse_bands(msname):
                 end_chan = max((end_chan // nchan_coarse) * nchan_coarse, nchan_coarse)
             coarse_chans.append([start_chan, end_chan])
     return coarse_chans
-
-
-def get_MWA_good_freqs():
-    """
-    Get good frequencies of the MWA band
-
-    Returns
-    -------
-    list
-        Good frequency range in MHz
-    """
-    coarse_channels = np.arange(55, 235)
-    good_freqs = []
-    for coarse_chan in coarse_channels:
-        cent_freq = coarse_chan * 1.28
-        start_freq = cent_freq - 0.64
-        end_freq = end_freq + 0.64
-        good_freqs.append([start_freq + 0.16, cent_freq - 0.01])
-        good_freqs.append([cent_freq + 0.01, end_freq - 0.16])
-    return good_freqs
-
+    
 
 def get_bad_chans(msname):
     """
@@ -193,34 +145,24 @@ def get_bad_chans(msname):
     """
     msmd = msmetadata()
     msmd.open(msname)
-    chanfreqs = msmd.chanfreqs(0) / 10**6
+    chanres = msmd.chanres(0,unit="MHz")[0]
+    nchan = msmd.nchan(0)
     msmd.close()
     msmd.done()
-    bad_freqs = get_MWA_bad_freqs()
-    if min(chanfreqs) <= bad_freqs[0][1] and max(chanfreqs) >= bad_freqs[-1][0]:
-        spw = "0:"
-        count = 0
-        for freq_range in bad_freqs:
-            start_freq = freq_range[0]
-            end_freq = freq_range[1]
-            if start_freq == -1:
-                start_chan = 0
-            else:
-                start_chan = np.argmin(np.abs(start_freq - chanfreqs))
-            if count > 0 and start_chan <= end_chan:
-                break
-            if end_freq == -1:
-                end_chan = len(chanfreqs) - 1
-            else:
-                end_chan = np.argmin(np.abs(end_freq - chanfreqs))
-            if end_chan > start_chan:
-                spw += str(start_chan) + "~" + str(end_chan) + ";"
-            else:
-                spw += str(start_chan) + ";"
-            count += 1
-        spw = spw[:-1]
-    else:
-        spw = ""
+    n_per_coarse_chan=int(1.28/chanres)
+    n_edge_chan=int(0.16/chanres)
+    spw = "0:"
+    for i in range(0,nchan,n_per_coarse_chan):
+        if i==i+n_edge_chan-1:
+            spw+=f"{i};"
+        else:
+            spw+=f"{i}~{i+n_edge_chan-1};"
+        spw+=f"{i+int(n_per_coarse_chan/2)};"
+        if i+nchan-n_edge_chan==i+nchan-1:
+            spw+=f"{i+nchan-1};"
+        else:
+            spw+=f"{i+nchan-n_edge_chan}~{i+nchan-1};"
+    spw=spw[:-1]
     return spw
 
 
@@ -240,22 +182,16 @@ def get_good_chans(msname):
     """
     msmd = msmetadata()
     msmd.open(msname)
-    chanfreqs = msmd.chanfreqs(0) / 10**6
-    meanfreq = msmd.meanfreq(0) / 10**6
+    chanres = msmd.chanres(0,unit="MHz")[0]
+    nchan = msmd.nchan(0)
     msmd.close()
     msmd.done()
-    bad_freqs = get_MWA_good_freqs()
-    if min(chanfreqs) <= good_freqs[0][1] and max(chanfreqs) >= good_freqs[-1][0]:
-        spw = "0:"
-        for freq_range in good_freqs:
-            start_freq = freq_range[0]
-            end_freq = freq_range[1]
-            start_chan = np.argmin(np.abs(start_freq - chanfreqs))
-            end_chan = np.argmin(np.abs(end_freq - chanfreqs))
-            spw += str(start_chan) + "~" + str(end_chan) + ";"
-        spw = spw[:-1]
-    else:
-        spw = f"0:0~{len(chanfreqs)-1}"
+    n_per_coarse_chan=int(1.28/chanres)
+    n_edge_chan=int(0.16/chanres)
+    spw = "0:"
+    for i in range(0,nchan,n_per_coarse_chan):
+        spw+=f"{i+n_edge_chan}~{i+int(n_per_coarse_chan/2)-1};{i+int(n_per_coarse_chan/2)+1}~{i+nchan};"
+    spw=spw[:-1]
     return spw
 
 

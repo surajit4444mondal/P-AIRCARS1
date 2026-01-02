@@ -14,18 +14,12 @@ from dask import delayed, compute
 from multiprocessing.pool import ThreadPool
 from sunpy.net import Fido, attrs as a
 from sunpy.map import Map
+from sunpy.timeseries import TimeSeries
 from astropy.visualization import ImageNormalize, PowerStretch, LogStretch
 from astropy.io import fits
 from astropy.time import Time
 from astropy.coordinates import EarthLocation, SkyCoord
 from astropy.wcs import FITSFixedWarning
-from casatasks import casalog
-
-try:
-    logfile = casalog.logfile()
-    os.remove(logfile)
-except BaseException:
-    pass
 from casatools import msmetadata, ms as casamstool, table
 from datetime import datetime as dt, timedelta
 from dask import delayed
@@ -1309,7 +1303,7 @@ def make_ds_plot(dsfiles, plot_file=None, plot_quantity="TB", showgui=False):
             dsfile, allow_pickle=True
         )
         if plot_quantity == "TB":
-            data_i = T_data_i
+            data_i = T_data_i/10**6
         else:
             data_i = S_data_i
         if i == 0:
@@ -1318,35 +1312,39 @@ def make_ds_plot(dsfiles, plot_file=None, plot_quantity="TB", showgui=False):
             timestamps = timestamps_i
             data = data_i
         else:
-            gapsize = int(
-                (np.nanmin(times_i) - np.nanmax(times)) / (times[1] - times[0])
-            )
-            if gapsize < 10:
-                last_time_median = np.nanmedian(data[:, -1], axis=0)
-                new_time_median = np.nanmedian(data_i[:, 0], axis=0)
-                data_i = (data_i / new_time_median) * last_time_median
-            # Insert vertical NaN gap (1 column wide)
-            gap = np.full((data.shape[0], gapsize), np.nan)
-            data = np.concatenate([data, gap, data_i], axis=1)
-            # Insert dummy time and timestamp
-            times = np.append(times, np.nan)
-            timestamps = np.append(timestamps, "GAP")
-            # Append new values
-            times = np.append(times, times_i)
-            timestamps = np.append(timestamps, timestamps_i)
-            # (Optional) Check or merge freqs if needed — assuming same across files
+            df = np.nanmedian(np.diff(freqs))
+            gapsize = int(np.round((np.nanmin(freqs_i) - np.nanmax(freqs)) / df))
+            gapsize = 1#max(gapsize, 0)
+
+            if 0 < gapsize < 5:
+                last_freq_median = np.nanmedian(data[-1, :])
+                new_freq_median  = np.nanmedian(data_i[0, :])
+                if np.isfinite(new_freq_median) and new_freq_median != 0:
+                    data_i = (data_i / new_freq_median) * last_freq_median
+
+            if gapsize > 0:
+                gap = np.full((gapsize, data.shape[1]), np.nan)
+                data = np.concatenate([data, gap, data_i], axis=0)
+                freqs = np.append(freqs, np.full(gapsize, np.nan))
+            else:
+                data = np.concatenate([data, data_i], axis=0)
+
+            freqs = np.append(freqs, freqs_i)
+
     ########################################
     # Time and frequency range
     ########################################
-    data = data[min(pos) : max(pos), :]
-    freqs = freqs[min(pos) : max(pos)]
+    median_bandshape = np.nanmedian(data, axis=-1)
+    pos = np.where(np.isnan(median_bandshape) == False)[0]
+    if len(pos)>0:
+        data = data[min(pos) : max(pos), :]
+        freqs = freqs[min(pos) : max(pos)]
     temp_times = times[np.isnan(times) == False]
     maxtimepos = np.argmax(temp_times)
     mintimepos = np.argmin(temp_times)
     datestamp = f"{timestamps[mintimepos].split('T')[0]}"
     tstart = f"{timestamps[mintimepos].split('T')[0]} {':'.join(timestamps[mintimepos].split('T')[-1].split(':')[:2])}"
     tend = f"{timestamps[maxtimepos].split('T')[0]} {':'.join(timestamps[maxtimepos].split('T')[-1].split(':')[:2])}"
-    print(f"Time range : {tstart}~{tend}")
     results = Fido.search(
         a.Time(tstart, tend), a.Instrument("XRS"), a.Resolution("avg1m")
     )
@@ -1390,7 +1388,10 @@ def make_ds_plot(dsfiles, plot_file=None, plot_quantity="TB", showgui=False):
         # Plot time series
         ax_ts.plot(timeseries)
         ax_ts.set_xlim(0, len(timeseries) - 1)
-        ax_ts.set_ylabel("Mean \n flux density")
+        if plot_quantity == "TB":
+            ax_ts.set_ylabel("TB (MK)")
+        else:
+            ax_ts.set_ylabel("S (SFU)")
         goes_tseries.plot(axes=ax_goes)
         goes_times = goes_tseries.time
         times_dt = goes_times.to_datetime()
@@ -1406,7 +1407,10 @@ def make_ds_plot(dsfiles, plot_file=None, plot_quantity="TB", showgui=False):
         ax_ts.set_xticklabels([])
         # Colorbar
         cbar = fig.colorbar(im, cax=cax)
-        cbar.set_label("Flux density (arb. unit)")
+        if plot_quantity == "TB":
+            cbar.set_label("Brightness temperature (MK)")
+        else:
+            cbar.set_label("Flux density (SFU)")
         plt.tight_layout()
         # Save or show
         if plot_file:

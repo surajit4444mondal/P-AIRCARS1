@@ -10,7 +10,7 @@ import astropy.units as u
 import astropy.wcs as pywcs
 import mwa_hyperbeam
 import skyfield.api as si
-from scipy.interpolate import RectBivariateSpline
+from scipy.interpolate import RectBivariateSpline, RegularGridInterpolator
 from joblib import Parallel, delayed as jobdelayed
 from astropy.io import fits
 from astropy.time import Time
@@ -146,7 +146,7 @@ def B2IQUV(B, iau_order=False):
     ----------
     B : numpy.array
         Brightness matrix array
-    iau_order : bool
+    iau_order : bool, optional
         Whether brightness matrix is in IAU or MWA convention
 
     Returns
@@ -397,11 +397,11 @@ def get_pb_radec(
         MWA metafits file
     ncpu : int, optional
         Number of CPU threads
-    MWA_PB_file : str
+    MWA_PB_file : str, optional
         MWA primary beam file path
-    sweet_spot_file : str
+    sweet_spot_file : str, optional
         Sweetspot file name
-    iau_order : bool
+    iau_order : bool, optional
         Beam Jones in IAU order or not
 
     Returns
@@ -497,17 +497,17 @@ def get_haslam(freq, scaling=-2.55):
     Parameters
     ----------
     freq : float
-            Frequency in MHz
-    scaling : float
-            Power law index for extrapolation (default : -2.55)
+        Frequency in MHz
+    scaling : float, optional
+        Power law index for extrapolation (default : -2.55)
 
     Returns
     -------
     dict
-            A python dictionary
-                    i) Haslam map at given frequency in 10xK unit
-                    ii) RA in degree
-                    iii) DEC in degree
+        A python dictionary
+        i) Haslam map at given frequency in 10xK unit
+        ii) RA in degree
+        iii) DEC in degree
     """
     if not os.path.exists(haslam_map_paircars):
         print(f"Could not find 408 MHz image: {haslam_map_paircars}.")
@@ -535,17 +535,17 @@ def map_sky_haslam(skymap, RA, dec, az_grid, za_grid, obstime=""):
     Parameters
     ----------
     skymap : np.array
-            Haslam map in RA DEC
+        Haslam map in RA DEC
     RA : np.array
-            1D range of RAs (deg)
+        1D range of RAs (deg)
     dec : np.array
-            1D range of decs (deg)
+        1D range of decs (deg)
     az_grid : np.array
-            Grid of azes onto which we map sky
+        Grid of azes onto which we map sky
     za_grid : np.array
-            Grid of ZAs onto which we map sky
-    obstime : str
-            Time of the observation in 'yyyy-mm-dd hh:mm:ss' format
+        Grid of ZAs onto which we map sky
+    obstime : str, optional
+        Time of the observation in 'yyyy-mm-dd hh:mm:ss' format
 
     Returns
     -------
@@ -572,17 +572,17 @@ def map_sky(skymap, RA, dec, az_grid, za_grid, obstime=""):
     Parameters
     ----------
     skymap : np.array
-            Haslam map in RA DEC
+        Haslam map in RA DEC
     RA : np.array
-            1D range of RAs (deg)
+        1D range of RAs (deg)
     dec : np.array
-            1D range of decs (deg)
+        1D range of decs (deg)
     az_grid : np.array
-            Grid of azes onto which we map sky
+        Grid of azes onto which we map sky
     za_grid : np.array
-            Grid of ZAs onto which we map sky
-    obstime : str
-            Time of the observation in 'yyyy-mm-dd hh:mm:ss' format
+        Grid of ZAs onto which we map sky
+    obstime : str, optional
+        Time of the observation in 'yyyy-mm-dd hh:mm:ss' format
 
     Returns
     -------
@@ -607,16 +607,16 @@ def horz2eq(az, ZA, obstime):
     Parameters
     ----------
     az : np.array
-            Grid of azes onto which we map sky
+        Grid of azes onto which we map sky
     za : np.array
-            Grid of ZAs onto which we map sky
+        Grid of ZAs onto which we map sky
     obstime : str
-            Time of the observation in 'yyyy-mm-dd hh:mm:ss' format
+        Time of the observation in 'yyyy-mm-dd hh:mm:ss' format
 
     Returns
     -------
     dict
-            A python dictionary {'RA' : degress, 'DEC' : degrees}
+        A python dictionary {'RA' : degress, 'DEC' : degrees}
     """
     MWA_TOPO = si.Topos(
         longitude=(116, 40, 14.93), latitude=(-26, 42, 11.95), elevation_m=377.8
@@ -641,15 +641,15 @@ def get_image_info(image):
     Parameters
     ----------
     image : str
-            Name of the image
+        Name of the image
 
     Returns
     -------
     dict
-            A python dictionary
-                    i) Map
-                    ii) RA in degree
-                    iii) DEC in degree
+        A python dictionary
+            i) Map
+            ii) RA in degree
+            iii) DEC in degree
     """
     if not os.path.exists(image):
         print("Could not find 408 MHz image: %s\n" % (image))
@@ -671,27 +671,27 @@ def get_image_info(image):
     return {"skymap": skymap, "RA": RA_1D, "dec": dec_1D}  # RA, dec in degs
 
 
-def makeAZZA_dOMEGA(npix=256, projection="SIN"):
+def makeAZZA_dOMEGA(npix, projection="SIN"):
     """
     Make azimuth and zenith angle arrays for a square image of side npix
 
     Parameters
     ----------
     npix : int
-            Number of pixels of the grid
-    projection : str
-            SIN or ZEA
+        Number of pixels of the grid
+    projection : str, optional
+        SIN or ZEA
 
     Returns
     -------
     list
-            Azimuth angles in radians
+        Azimuth angles in radians
     list
-            Zenith angle in radians
+        Zenith angle in radians
     int
-            Total number of pixels above the horizon
+        Total number of pixels above the horizon
     float
-            Differential solid angle (dOMEGA)
+        Differential solid angle (dOMEGA)
     """
     # build az and za arrays
     # use linspace to ensure we go to horizon on all sides
@@ -736,11 +736,11 @@ def get_fringe(msname, freq, metafits, resolution=1, nthreads=1, baseline=[]):
         Frequency in MHz
     metafits : str
         Name of the metafits file
-    resolution : float
+    resolution : float, optional
         Beam resolution in degree (default : 1deg)
-    nthreads : int
+    nthreads : int, optional
         Number of cpu threads use for parallel computing
-    baseline : list
+    baseline : list, optional
         Antenna list of a baseline
 
     Returns
@@ -817,28 +817,33 @@ def make_primarybeammap(
     obstime="",
     resolution=1,
     iau_order=True,
-    MWA_PB_path="",
+    MWA_PB_file="",
+    sweet_spot_file="",
     nthreads=1,
     calc_fringe_temp=False,
 ):
     """
     Parameters
     ----------
-    freq : float
-        Frequency in MHz
+    msname : str
+        Measurement set
     metafits : str
         Metafits file
-    obstime : str
+    freq : float, optional
+        Frequency in MHz
+    obstime : str, optional
         Time of the observation in 'yyyy-mm-dd hh:mm:ss' format (If not given automatically obtain from metafits file)
-    resolution : float
+    resolution : float, optional
         Beam resolution in degree (default : 1deg)
-    iau_order : bool
+    iau_order : bool, optional
         Beam in IAU order or not
-    MWA_PB_path : str
+    MWA_PB_file : str, optional
         MWA primary beam file path
-    nthreads : int
+    sweet_spot_file: str, optional
+        MWA sweet spot file
+    nthreads : int, optional
         Number of cpu threads use for parallel computing
-    calc_fringe_temp : bool
+    calc_fringe_temp : bool, optional
         Calculate temperature contribution of the baseline
 
     Returns

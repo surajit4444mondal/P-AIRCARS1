@@ -10,13 +10,6 @@ import glob
 import sys
 import os
 import socket
-from casatasks import casalog
-
-try:
-    logfile = casalog.logfile()
-    os.remove(logfile)
-except BaseException:
-    pass
 from casatools import msmetadata
 from datetime import datetime as dt
 from multiprocessing import Process, Event
