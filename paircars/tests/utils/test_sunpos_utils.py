@@ -2,7 +2,7 @@ import pytest
 import glob
 import os
 from unittest.mock import patch, MagicMock
-from meersolar.utils.sunpos_utils import *
+from paircars.utils.sunpos_utils import *
 
 
 def test_get_solar_elevation():
@@ -21,9 +21,9 @@ def test_radec_sun(dummy_msname):
     assert isinstance(decdeg, float)
 
 
-@patch("meersolar.utils.sunpos_utils.run_chgcenter", return_value=0)
+@patch("paircars.utils.sunpos_utils.run_chgcenter", return_value=0)
 @patch(
-    "meersolar.utils.sunpos_utils.radec_sun",
+    "paircars.utils.sunpos_utils.radec_sun",
     return_value=("RADEC_STRING", "12h00m00s", "-20d00m00s", 180.0, -20.0),
 )
 def test_move_to_sun(mock_radec_sun, mock_run_chgcenter):
@@ -39,9 +39,9 @@ def test_move_to_sun(mock_radec_sun, mock_run_chgcenter):
     assert result == 0
 
 
-@patch("meersolar.utils.sunpos_utils.run_solar_sidereal_cor", return_value=0)
-@patch("meersolar.utils.sunpos_utils.os.system")
-@patch("meersolar.utils.sunpos_utils.os.path.exists", return_value=False)
+@patch("paircars.utils.sunpos_utils.run_solar_sidereal_cor", return_value=0)
+@patch("paircars.utils.sunpos_utils.os.system")
+@patch("paircars.utils.sunpos_utils.os.path.exists", return_value=False)
 def test_correct_solar_sidereal_motion(mock_exists, mock_system, mock_run):
     msname = "mock.ms"
     result = correct_solar_sidereal_motion(msname, verbose=True)

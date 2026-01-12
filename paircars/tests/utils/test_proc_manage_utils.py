@@ -10,7 +10,7 @@ from dask.distributed import Client, LocalCluster
 from datetime import datetime as dt
 from unittest.mock import patch, MagicMock, mock_open, call
 from itertools import chain, repeat
-from meersolar.utils.proc_manage_utils import *
+from paircars.utils.proc_manage_utils import *
 
 
 def test_get_total_worker():
@@ -37,9 +37,9 @@ def test_scale_worker_and_wait(current_workers, expected_result, description):
 
     with (
         patch(
-            "meersolar.utils.proc_manage_utils.get_total_worker"
+            "paircars.utils.proc_manage_utils.get_total_worker"
         ) as mock_get_total_worker,
-        patch("meersolar.utils.proc_manage_utils.time.sleep", return_value=None),
+        patch("paircars.utils.proc_manage_utils.time.sleep", return_value=None),
     ):
 
         mock_get_total_worker.side_effect = lambda cluster: len(
@@ -62,29 +62,29 @@ def test_save_pid():
     os.system(f"rm -rf /tmp/test_pid.txt")
 
 
-@patch("meersolar.utils.proc_manage_utils.psutil.pid_exists")
-@patch("meersolar.utils.proc_manage_utils.np.loadtxt")
-@patch("meersolar.utils.proc_manage_utils.get_cachedir")
+@patch("paircars.utils.proc_manage_utils.psutil.pid_exists")
+@patch("paircars.utils.proc_manage_utils.np.loadtxt")
+@patch("paircars.utils.proc_manage_utils.get_cachedir")
 def get_nprocess_solarpipe(mock_get_cachedir, mock_loadtxt, mock_pid_exists):
-    mock_get_cachedir.return_value = "/mock/.meersolar"
+    mock_get_cachedir.return_value = "/mock/.paircars"
     mock_loadtxt.return_value = [101, 102, 103]
     mock_pid_exists.side_effect = lambda pid: pid in [102, 103]
     result = get_nprocess_solarpipe(jobid=42)
     assert result == 2
     mock_loadtxt.assert_called_once_with(
-        "/mock/.meersolar/pids/pids_42.txt", unpack=True
+        "/mock/.paircars/pids/pids_42.txt", unpack=True
     )
 
 
-@patch("meersolar.utils.proc_manage_utils.np.savetxt")
-@patch("meersolar.utils.proc_manage_utils.np.loadtxt")
-@patch("meersolar.utils.proc_manage_utils.os.path.exists")
-@patch("meersolar.utils.proc_manage_utils.get_cachedir")
-@patch("meersolar.utils.proc_manage_utils.dt")
+@patch("paircars.utils.proc_manage_utils.np.savetxt")
+@patch("paircars.utils.proc_manage_utils.np.loadtxt")
+@patch("paircars.utils.proc_manage_utils.os.path.exists")
+@patch("paircars.utils.proc_manage_utils.get_cachedir")
+@patch("paircars.utils.proc_manage_utils.dt")
 def test_get_jobid(mock_dt, mock_getdir, mock_exists, mock_loadtxt, mock_savetxt):
     fake_time = dt(2025, 7, 1, 15, 30, 45, 123456)
     mock_dt.utcnow.return_value = fake_time
-    mock_getdir.return_value = "/mock/.meersolar"
+    mock_getdir.return_value = "/mock/.paircars"
     mock_exists.return_value = False
     mock_loadtxt.return_value = []
     jobid = get_jobid()
@@ -93,14 +93,14 @@ def test_get_jobid(mock_dt, mock_getdir, mock_exists, mock_loadtxt, mock_savetxt
     mock_savetxt.assert_called_once()
 
 
-@patch("meersolar.utils.proc_manage_utils.dt")
+@patch("paircars.utils.proc_manage_utils.dt")
 @patch("builtins.open", new_callable=mock_open)
-@patch("meersolar.utils.proc_manage_utils.os.system")
-@patch("meersolar.utils.proc_manage_utils.os.path.exists")
-@patch("meersolar.utils.proc_manage_utils.glob.glob")
+@patch("paircars.utils.proc_manage_utils.os.system")
+@patch("paircars.utils.proc_manage_utils.os.path.exists")
+@patch("paircars.utils.proc_manage_utils.glob.glob")
 @patch(
-    "meersolar.utils.proc_manage_utils.get_cachedir",
-    return_value="/mock/.meersolar",
+    "paircars.utils.proc_manage_utils.get_cachedir",
+    return_value="/mock/.paircars",
 )
 def test_save_main_process_info(
     mock_get_cachedir,
@@ -110,7 +110,7 @@ def test_save_main_process_info(
     mock_openfile,
     mock_dt,
 ):
-    mock_glob.return_value = ["/mock/.meersolar/main_pids_20250625000000000000.txt"]
+    mock_glob.return_value = ["/mock/.paircars/main_pids_20250625000000000000.txt"]
     mock_exists.return_value = True
     fake_now = dt(2025, 7, 1, 0, 0, 0)
     mock_dt.utcnow.return_value = fake_now
@@ -124,17 +124,17 @@ def test_save_main_process_info(
         cpu_frac=0.5,
         mem_frac=0.6,
     )
-    expected_file = "/mock/.meersolar/main_pids_20250701010101010101.txt"
+    expected_file = "/mock/.paircars/main_pids_20250701010101010101.txt"
     assert result == expected_file
     mock_openfile().write.assert_called_once_with(
         "20250701010101010101 1234 test.ms /mock/workdir /mock/outdir 0.5 0.6"
     )
-    mock_glob.return_value = ["/mock/.meersolar/main_pids_20250625000000000000.txt"]
+    mock_glob.return_value = ["/mock/.paircars/main_pids_20250625000000000000.txt"]
     mock_system.assert_any_call(
-        "rm -rf /mock/.meersolar/main_pids_20250625000000000000.txt"
+        "rm -rf /mock/.paircars/main_pids_20250625000000000000.txt"
     )
     mock_system.assert_any_call(
-        "rm -rf /mock/.meersolar/pids/pids_20250625000000000000.txt"
+        "rm -rf /mock/.paircars/pids/pids_20250625000000000000.txt"
     )
 
 

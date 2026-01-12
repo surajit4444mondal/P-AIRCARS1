@@ -6,7 +6,7 @@ import traceback
 from casatasks import casalog
 from casatools import ms as casamstool, table
 from unittest.mock import patch, MagicMock, mock_open, call
-from meersolar.utils.meer_utils import *
+from paircars.utils.meer_utils import *
 
 try:
     casalogfile = casalog.logfile()
@@ -44,12 +44,12 @@ def test_get_pol_names(dummy_msname):
     assert get_pol_names(dummy_msname) == ["XX", "XY", "YX", "YY"]
 
 
-@patch("meersolar.utils.meer_utils.get_datadir", return_value="/mock/datadir")
-@patch("meersolar.utils.meer_utils.get_band_name", return_value="L")
-@patch("meersolar.utils.meer_utils.np.load")
-@patch("meersolar.utils.meer_utils.glob.glob")
-@patch("meersolar.utils.meer_utils.os.path.exists")
-@patch("meersolar.utils.meer_utils.msmetadata")
+@patch("paircars.utils.meer_utils.get_datadir", return_value="/mock/datadir")
+@patch("paircars.utils.meer_utils.get_band_name", return_value="L")
+@patch("paircars.utils.meer_utils.np.load")
+@patch("paircars.utils.meer_utils.glob.glob")
+@patch("paircars.utils.meer_utils.os.path.exists")
+@patch("paircars.utils.meer_utils.msmetadata")
 def test_get_phasecals(
     mock_msmetadata,
     mock_exists,
@@ -82,14 +82,14 @@ def test_get_phasecals(
     assert mock_np_load.call_args_list.count(expected_call) == 2
 
 
-@patch("meersolar.utils.meer_utils.np.load")
+@patch("paircars.utils.meer_utils.np.load")
 def test_get_valid_scans(mock_npload, dummy_msname, mock_npy_data):
     mock_npload.return_value = mock_npy_data
     assert get_valid_scans(dummy_msname, field="J0408-6545") == [1, 3]
     assert get_valid_scans(dummy_msname, field="J0431+2037") == [5, 12, 19, 26]
 
 
-@patch("meersolar.utils.meer_utils.np.load")
+@patch("paircars.utils.meer_utils.np.load")
 def test_get_target_fields(mock_npload, dummy_msname, mock_npy_data):
     mock_npload.return_value = mock_npy_data
     fields, scans = get_target_fields(dummy_msname)
@@ -101,7 +101,7 @@ def test_get_caltable_fields(dummy_caltables):
     assert get_caltable_fields(dummy_caltables[0]) == ["J0408-6545", "J0431+2037"]
 
 
-@patch("meersolar.utils.meer_utils.np.load")
+@patch("paircars.utils.meer_utils.np.load")
 def test_get_cal_target_scans(mock_npload, dummy_msname, mock_npy_data):
     mock_npload.return_value = mock_npy_data
     targets, cals, fluxcals, phasecals, polcals = get_cal_target_scans(dummy_msname)
@@ -112,12 +112,12 @@ def test_get_cal_target_scans(mock_npload, dummy_msname, mock_npy_data):
     assert polcals == []
 
 
-@patch("meersolar.utils.meer_utils.os.system")
-@patch("meersolar.utils.meer_utils.os.path.exists", return_value=False)
+@patch("paircars.utils.meer_utils.os.system")
+@patch("paircars.utils.meer_utils.os.path.exists", return_value=False)
 @patch("casatasks.split")
-@patch("meersolar.utils.meer_utils.table")
-@patch("meersolar.utils.meer_utils.casamstool")
-@patch("meersolar.utils.meer_utils.mjdsec_to_timestamp")
+@patch("paircars.utils.meer_utils.table")
+@patch("paircars.utils.meer_utils.casamstool")
+@patch("paircars.utils.meer_utils.mjdsec_to_timestamp")
 def test_split_noise_diode_scans(
     mock_timestamp,
     mock_mstool,

@@ -6,7 +6,7 @@ import traceback
 from casatasks import casalog
 from casatools import ms as casamstool, table
 from unittest.mock import patch, MagicMock
-from meersolar.utils.casatasks import *
+from paircars.utils.casatasks import *
 
 try:
     casalogfile = casalog.logfile()
@@ -35,12 +35,12 @@ def test_correct_missing_col_subms(dummy_submsname):
 @patch("casatasks.flagdata")
 @patch("casatasks.initweights")
 @patch("casatasks.mstransform")
-@patch("meersolar.utils.casatasks.suppress_output")
-@patch("meersolar.utils.casatasks.limit_threads")
-@patch("meersolar.utils.casatasks.os.system")
-@patch("meersolar.utils.casatasks.os.path.exists", return_value=False)
-@patch("meersolar.utils.casatasks.psutil.Process")
-@patch("meersolar.utils.casatasks.msmetadata")
+@patch("paircars.utils.casatasks.suppress_output")
+@patch("paircars.utils.casatasks.limit_threads")
+@patch("paircars.utils.casatasks.os.system")
+@patch("paircars.utils.casatasks.os.path.exists", return_value=False)
+@patch("paircars.utils.casatasks.psutil.Process")
+@patch("paircars.utils.casatasks.msmetadata")
 def test_single_mstransform(
     mock_msmetadata,
     mock_psutil_process,

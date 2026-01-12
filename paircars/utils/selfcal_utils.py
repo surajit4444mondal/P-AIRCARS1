@@ -4,7 +4,7 @@ import traceback
 import copy
 import glob
 import os
-from casatools import msmetadata, table
+from casatools import msmetadata, table, componentlist, ms as casamstool
 from .basic_utils import *
 from .resource_utils import *
 from .proc_manage_utils import *
@@ -16,6 +16,231 @@ from .imaging import *
 from .image_utils import *
 from .udocker_utils import *
 
+def determine_disk_visibility(msname):
+    """
+    Determine whether solar disk is visible or not
+    
+    Parameters
+    ----------
+    msname : str
+        Measurement set
+        
+    Returns
+    -------
+    numpy.array
+        Channel list where disk may not be detected
+    numpy.array
+        Timestamp list where disk may not be detected
+    """
+    msmd=msmetadata()
+    msmd.open(msname)
+    freq = msmd.meanfreq(0)
+    msmd.close()
+    wavelength = (3*10**8)/freq
+    uvdist = 10.0*wavelength
+    mstool = casamstool()
+    mstool.open(msname)
+    mstool.select({"uvdist":[0.0,uvdist]})
+    data_short = np.nanmean(np.abs(mstool.getdata("DATA",ifraxis=True)["data"]),axis=2)
+    mstool.close()
+    uvdist = 150.0*wavelength
+    mstool.open(msname)
+    mstool.select({"uvdist":[uvdist-10.0,uvdist+10.0]})
+    data_first_lobe = np.nanmean(np.abs(mstool.getdata("DATA",ifraxis=True)["data"]),axis=2)
+    mstool.close()
+    r=data_first_lobe/data_short
+    r_I = (r[0,...]+r[-1,...])/2.0
+    pos=np.where(r_I>=0.03)
+    chans = pos[0]
+    timestamps = pos[1]
+    r_I[pos]=np.nan
+    return chans, timestamps
+   
+
+def flag_non_disk(msname):
+    """
+    Flag spectro-temporal blocks when solar disk is not visible
+    
+    Parameters
+    ----------
+    msname : str
+        Measurement set
+    """
+    from casatasks import flagdata
+    try:
+        chans, timestamps = determine_disk_visibility(msname)
+        msmd=msmetadata()
+        msmd.open(msname)
+        times=msmd.timesforspws(0)
+        msmd.close()
+        
+        for i in range(len(chans)):
+            spw=f"0:{chans[i]}"
+            timerange=f"{mjdsec_to_timestamp(times[timestamps[i]], str_format=1)}"
+            flagdata(vis=msname,mode="manual",spw=spw,timerange=timerange,flagbackup=False)
+            
+        return 0    
+    except Exception as e:
+        traceback.print_exc()
+        return 1
+        
+
+def get_quiet_sun_flux(freq):
+    """
+    Get quiet Sun flux density in Jy.
+
+    Parameters
+    ----------
+    freq : float
+        Frequency in MHz
+        
+    Returns
+    -------
+    float
+        Flux density in Jy
+    """
+    p = np.poly1d([-1.93715165e-06, 7.84627718e-04, -3.15744433e-02, 2.32834400e-01])
+    flux = p(freq) * 10 ** 4  # Polynomial return in SFU
+    return flux
+    
+    
+def make_qs_model(msname, clname="quiet_sun.cl"):
+    """
+    Make CASA component list of quiet Sun model
+    
+    Parameters
+    ----------
+    msname : str
+        Name of the measurement set
+    clname : str, optional
+        Name of the component list
+        
+    Returns
+    -------
+    str
+        Name of the component list file
+    """
+    msmd = msmetadata()
+    msmd.open(msname)
+    freq = msmd.meanfreq(0, unit="MHz")
+    phasecenter = msmd.phasecenter(0)
+    msmd.close()
+    
+    radeg = np.rad2deg(phasecenter["m0"]["value"])
+    decdeg = np.rad2deg(phasecenter["m1"]["value"])
+    rahms, decdms = ra_dec_to_hms_dms(radeg, decdeg)
+    radec_str=f"J2000 {rahms} {decdms}"
+    sun_size = calc_sun_dia(freq)  # In arcmin
+    QS_flux = get_quiet_sun_flux(freq)  # In Jy
+    
+    # Make sure the component list does not already exist. The tool will complain otherwise.
+    os.system("rm -rf " + clname)
+    cl = componentlist()
+    cl.addcomponent(
+        dir=radec_str,
+        flux=QS_flux,  # For a gaussian, this is the integrated area.
+        fluxunit="Jy",
+        freq=f"{freq}MHz",
+        shape="gaussian",  ## Gaussian
+        majoraxis=f"{sun_size}arcmin",
+        minoraxis=f"{sun_size}arcmin",
+        positionangle="0deg",
+        spectrumtype="spectral index",
+        index=0.0,
+    )
+    # Save the file
+    cl.rename(filename=clname)
+    cl.done()
+    return clname
+
+
+def quiet_sun_selfcal(msname,logger,selfcaldir,refant="1",solint="60s"):
+    """
+    Perform quiet Sun Gaussian model based self-calibration
+    
+    Parameters
+    ----------
+    msname : str
+        Measurement set
+    logger : str
+        Python logger
+    selfcaldir : str
+        Self-calibration directory
+    refant : str, optional
+        Reference antenna
+    solint : str, optional
+        Solution interval
+        
+    Returns
+    -------
+    int
+        Success message
+    str
+        Caltable name
+    """
+    from casatasks import ft, delmod, gaincal, applycal
+    prefix = (
+            selfcaldir
+            + "/"
+            + os.path.basename(msname).split(".ms")[0]
+            + "_selfcal_present"
+        )
+    bpass_caltable = prefix.replace("present", f"{0}") + ".gcal"
+    if os.path.exists(bpass_caltable):
+        os.system("rm -rf " + bpass_caltable)
+    
+    try:
+        ###################################
+        # Import simulated QS model
+        ###################################
+        qs_model = make_qs_model(msname,clname=f"{os.path.basename(msname).split('.ms')[0]}_qs.cl")
+        delmod(vis=msname,otf=True,scr=True)
+        ft(vis=msname,complist=qs_model,usescratch=True)
+        os.system(f"rm -rf {qs_model}")
+
+        #####################
+        # Perform calibration
+        #####################
+        logger.info(
+            f"gaincal(vis='{msname}',caltable='{bpass_caltable}',uvrange='<100lambda',refant='{refant}',solint='{solint}',minsnr=1,calmode='p')\n"
+        )
+        with suppress_output():
+            gaincal(
+                vis=msname,
+                caltable=bpass_caltable,
+                uvrange="<100lambda",
+                refant=refant,
+                minsnr=1,
+                solint=f"{solint}",
+                solnorm=True,
+                calmode="p"
+            )
+        if os.path.exists(bpass_caltable) == False:
+            logger.info(f"No gain solutions are found.\n")
+            return 2, ""
+
+        ########################
+        # Applying solutions
+        ########################
+
+        logger.info(
+            f"applycal(vis={msname},gaintable=[{bpass_caltable}],interp=['linear'],applymode='calonly',calwt=[False])\n"
+        )
+        with suppress_output():
+            applycal(
+                vis=msname,
+                gaintable=[bpass_caltable],
+                interp=["linear"],
+                applymode="calonly",
+                calwt=[False],
+            )
+        msg=0
+    except Exception as e:
+        traceback.print_exc()
+        msg=1
+    finally:
+        return msg, bpass_caltable
+    
 
 def intensity_selfcal(
     msname,
@@ -134,31 +359,23 @@ def intensity_selfcal(
 
         freq = msmd.meanfreq(0, unit="MHz")
         nchan = msmd.nchan(0)
-        freqres = msmd.chanres(0, unit="MHz")
+        freqres = msmd.chanres(0, unit="MHz")[0]
 
         times = msmd.timesforspws(0)
         ntime = len(times)
         total_time = max(times) - min(times)
-        max_intervals = min(1, int(total_time // 10))  # Minimum 10s chunk
 
         msmd.close()
-
-        ########################################
-        # Scale bias determination
-        ########################################
-        scale_bias = round(get_multiscale_bias(freq), 2)
 
         ###############################
         # Determine temporal chunking
         ###############################
         if min_tol_factor <= 0:
             min_tol_factor = 1.0  # In percentage
-        nintervals, _ = get_optimal_image_interval(
+        nintervals, nchans = get_optimal_image_interval(
             msname,
             temporal_tol_factor=float(min_tol_factor / 100.0),
             spectral_tol_factor=0.1,
-            max_nchan=-1,
-            max_ntime=max_intervals,
         )
 
         os.system(f"rm -rf {prefix}*image.fits {prefix}*residual.fits")
@@ -171,7 +388,7 @@ def intensity_selfcal(
             "-scale " + str(cellsize) + "asec",
             "-size " + str(imsize) + " " + str(imsize),
             "-no-dirty",
-            "-gridder tuned-wgridder",
+            "-gridder wgridder",
             "-weight " + weight,
             "-niter 10000",
             "-mgain 0.85",
@@ -209,14 +426,22 @@ def intensity_selfcal(
         sun_dia = calc_sun_dia(freq)  # Sun diameter in arcmin
         sun_rad = sun_dia / 2
         multiscale_scales = calc_multiscale_scales(msname, 3, max_scale=sun_rad)
+        scale_bias = round(get_multiscale_bias(freq), 2)
         wsclean_args.append("-multiscale")
         wsclean_args.append("-multiscale-gain 0.1")
         wsclean_args.append(
             "-multiscale-scales " + ",".join([str(s) for s in multiscale_scales])
         )
-        wsclean_args.append(f"-multiscale-scale-bias {scale_bias_list[i]}")
+        wsclean_args.append(f"-multiscale-scale-bias {scale_bias}")
         if imsize >= 2048 and 4 * max(multiscale_scales) < 1024:
             wsclean_args.append("-parallel-deconvolution 1024")
+            
+        #####################################
+        # Spectral imaging configuration
+        #####################################
+        if nchans > 1:
+            wsclean_args.append(f"-channels-out {nchans}")
+            wsclean_args.append("-no-mf-weighting")
 
         #####################################
         # Temporal imaging configuration
@@ -332,16 +557,16 @@ def intensity_selfcal(
             os.system("rm -rf " + bpass_caltable)
 
         logger.info(
-            f"bandpass(vis='{msname}',caltable='{bpass_caltable}',uvrange='{uvrange}',refant='{refant}',solint='{solint},{freqres}MHz',minsnr=1,solnorm=True)\n"
+            f"bandpass(vis='{msname}',caltable='{bpass_caltable}',uvrange='{uvrange}',refant='{refant}',solint='{solint}',minsnr=1,solnorm=True)\n"
         )
         with suppress_output():
-            bandpass(
+            gaincal(
                 vis=msname,
                 caltable=bpass_caltable,
                 uvrange=uvrange,
                 refant=refant,
                 minsnr=1,
-                solint=f"{solint},{freqres}MHz",
+                solint=f"{solint}",
                 solnorm=True,
             )
         if os.path.exists(bpass_caltable) == False:
@@ -364,20 +589,20 @@ def intensity_selfcal(
         gain[flag] = 1.0
         pos = np.where(np.abs(gain) == 0.0)
         gain[pos] = 1.0
-        flag *= False
+        flag[pos] = True
         tb.putcol("CPARAM", gain)
         tb.putcol("FLAG", flag)
         tb.flush()
         tb.close()
 
         logger.info(
-            f"applycal(vis={msname},gaintable=[{bpass_caltable}],interp=['linear,nearestflag'],applymode='{applymode}',calwt=[False])\n"
+            f"applycal(vis={msname},gaintable=[{bpass_caltable}],interp=['linear,linearflag'],applymode='{applymode}',calwt=[False])\n"
         )
         with suppress_output():
             applycal(
                 vis=msname,
                 gaintable=[bpass_caltable],
-                interp=["linear,nearestflag"],
+                interp=["linear,linearflag"],
                 applymode=applymode,
                 calwt=[False],
             )

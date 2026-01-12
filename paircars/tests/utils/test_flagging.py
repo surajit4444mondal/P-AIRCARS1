@@ -4,7 +4,7 @@ import os
 from casatasks import casalog
 from casatools import table
 from unittest.mock import patch, MagicMock, call
-from meersolar.utils.flagging import *
+from paircars.utils.flagging import *
 
 try:
     casalogfile = casalog.logfile()

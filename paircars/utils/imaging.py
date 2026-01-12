@@ -2,6 +2,7 @@ import types
 import numpy as np
 import glob
 import os
+import traceback
 from casatools import msmetadata, ms as casamstool, table
 from .basic_utils import *
 
@@ -237,8 +238,8 @@ def get_optimal_image_interval(
     if max_ntime > 0 and n_time_interval > max_ntime:
         n_time_interval = max_ntime
     return n_time_interval, n_spectral_interval
-
-
+        
+    
 def calc_psf(msname, chan_number=-1):
     """
     Function to calculate PSF size in arcsec

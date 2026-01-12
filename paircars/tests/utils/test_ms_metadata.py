@@ -1,7 +1,7 @@
 import pytest
 import os
 from unittest.mock import patch
-from meersolar.utils.ms_metadata import *
+from paircars.utils.ms_metadata import *
 
 
 @pytest.mark.parametrize(

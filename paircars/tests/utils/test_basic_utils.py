@@ -1,7 +1,7 @@
 import pytest
 import os
 from unittest.mock import patch, MagicMock, mock_open, call
-from meersolar.utils.basic_utils import *
+from paircars.utils.basic_utils import *
 
 
 def test_suppress_output_fd():
@@ -30,9 +30,9 @@ def test_get_cachedir(mocker):
         ("/custom/data", "/mock/cache", "/custom/data"),  # user-provided
     ],
 )
-@patch("meersolar.utils.basic_utils.open", new_callable=mock_open)
-@patch("meersolar.utils.basic_utils.os.makedirs")
-@patch("meersolar.utils.basic_utils.get_cachedir")
+@patch("paircars.utils.basic_utils.open", new_callable=mock_open)
+@patch("paircars.utils.basic_utils.os.makedirs")
+@patch("paircars.utils.basic_utils.get_cachedir")
 def test_create_datadir(
     mock_get_cachedir,
     mock_makedirs,
@@ -57,9 +57,9 @@ def test_create_datadir(
         (False, "", None),
     ],
 )
-@patch("meersolar.utils.basic_utils.get_cachedir", return_value="/mock/cache")
-@patch("meersolar.utils.basic_utils.os.makedirs")
-@patch("meersolar.utils.basic_utils.os.path.exists")
+@patch("paircars.utils.basic_utils.get_cachedir", return_value="/mock/cache")
+@patch("paircars.utils.basic_utils.os.makedirs")
+@patch("paircars.utils.basic_utils.os.path.exists")
 def test_get_datadir(
     mock_exists,
     mock_makedirs,
@@ -68,7 +68,7 @@ def test_get_datadir(
     file_contents,
     expected_result,
 ):
-    open_path = "meersolar.utils.basic_utils.open"
+    open_path = "paircars.utils.basic_utils.open"
     with patch(open_path, mock_open(read_data=file_contents)) as mock_open_func:
         mock_exists.return_value = file_exists
 

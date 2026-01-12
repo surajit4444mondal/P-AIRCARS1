@@ -6,6 +6,8 @@ import os
 import traceback
 import warnings
 import astropy.units as u
+import requests
+from urllib.request import urlretrieve
 from sunpy.net import Fido, attrs as a
 from sunpy.timeseries import TimeSeries
 from astroquery.jplhorizons import Horizons
@@ -125,7 +127,8 @@ def get_MWA_coarse_bands(msname):
                 )
             if end_chan > 0:
                 end_chan = max((end_chan // nchan_coarse) * nchan_coarse, nchan_coarse)
-            coarse_chans.append([start_chan, end_chan])
+            if end_chan>start_chan:
+                coarse_chans.append([start_chan, end_chan])
     return coarse_chans
 
 
@@ -152,13 +155,13 @@ def get_bad_chans(msname):
     n_per_coarse_chan = int(1.28 / chanres)
     n_edge_chan = int(0.16 / chanres)
     spw = "0:"
-    for i in range(0, nchan, n_per_coarse_chan):
+    for i in range(0, nchan-n_per_coarse_chan, n_per_coarse_chan):
         if i == i + n_edge_chan - 1:
             spw += f"{i};"
         else:
             spw += f"{i}~{i+n_edge_chan-1};"
-        if n_edge_chan > 1:
-            spw += f"{i+int(n_per_coarse_chan/2)};"
+        if n_edge_chan >= 1:
+            spw += f"{i+int(nchan/2)};"
         if i + nchan - n_edge_chan == i + nchan - 1:
             spw += f"{i+nchan-1};"
         else:
@@ -192,7 +195,7 @@ def get_good_chans(msname):
     spw = "0:"
     for i in range(0, nchan, n_per_coarse_chan):
         if n_edge_chan > 1:
-            spw += f"{i+n_edge_chan}~{i+int(n_per_coarse_chan/2)-1};{i+int(n_per_coarse_chan/2)+1}~{i+nchan-n_edge_chan};"
+            spw += f"{i+n_edge_chan}~{i+int(n_chan/2)-1};{i+int(n_chan/2)+1}~{i+nchan-n_edge_chan};"
         else:
             spw += f"{i+n_edge_chan}~{i+nchan-n_edge_chan};"
     spw = spw[:-1]
@@ -227,6 +230,40 @@ def get_mwa_bad_ants(metafits):
     return bad_antennas
 
 
+def download_MWA_metafits(OBSID, outdir="."):
+    """
+    Download MWA metafits file for a given OBSID.
+
+    Parameters
+    ----------
+    OBSID : int
+        MWA observation ID
+    outdir : str
+        Output directory
+
+    Returns
+    -------
+    str or None
+        Path to metafits file or None if failed
+    """
+    os.makedirs(outdir, exist_ok=True)
+    metafits = os.path.join(outdir, f"{OBSID}.metafits")
+    if os.path.isfile(metafits):
+        return metafits
+    url = f"https://ws.mwatelescope.org/metadata/fits?obs_id={OBSID}"
+    for attempt in range(5):
+        try:
+            r = requests.get(url, timeout=30)
+            if r.status_code == 200:
+                with open(metafits, "wb") as f:
+                    f.write(r.content)
+                return metafits
+        except Exception:
+            pass
+    print(f"Metafits file could not be downloaded after {max_tries} tries.")
+    return None
+
+    
 # Expose functions and classes
 __all__ = [
     name

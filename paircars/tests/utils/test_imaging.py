@@ -1,7 +1,7 @@
 import pytest
 import os
 import traceback
-from meersolar.utils.imaging import *
+from paircars.utils.imaging import *
 
 
 def test_calc_sun_dia():

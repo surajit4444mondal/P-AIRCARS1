@@ -4,18 +4,18 @@ import os
 import numpy as np
 from astropy.io import fits
 from unittest.mock import patch, MagicMock
-from meersolar.utils.meer_ploting_utils import *
+from paircars.utils.meer_ploting_utils import *
 
 
-@patch("meersolar.utils.meer_ploting_utils.os.system")
-@patch("meersolar.utils.meer_ploting_utils.drop_cache")
-@patch("meersolar.utils.meer_ploting_utils.run_shadems")
-@patch("meersolar.utils.meer_ploting_utils.glob.glob")
-@patch("meersolar.utils.meer_ploting_utils.Image.open")
-@patch("meersolar.utils.meer_ploting_utils.psutil")
-@patch("meersolar.utils.meer_ploting_utils.get_ms_scan_size")
-@patch("meersolar.utils.meer_ploting_utils.casamstool")
-@patch("meersolar.utils.meer_ploting_utils.msmetadata")
+@patch("paircars.utils.meer_ploting_utils.os.system")
+@patch("paircars.utils.meer_ploting_utils.drop_cache")
+@patch("paircars.utils.meer_ploting_utils.run_shadems")
+@patch("paircars.utils.meer_ploting_utils.glob.glob")
+@patch("paircars.utils.meer_ploting_utils.Image.open")
+@patch("paircars.utils.meer_ploting_utils.psutil")
+@patch("paircars.utils.meer_ploting_utils.get_ms_scan_size")
+@patch("paircars.utils.meer_ploting_utils.casamstool")
+@patch("paircars.utils.meer_ploting_utils.msmetadata")
 def test_plot_ms_diagnostics(
     mock_msmetadata,
     mock_casamstool,
@@ -30,16 +30,17 @@ def test_plot_ms_diagnostics(
 ):
     mock_psutil.cpu_count.return_value = 4
     vm = MagicMock()
-    vm.available = 8 * 1024**3  
+    vm.available = 8 * 1024**3
     mock_psutil.virtual_memory.return_value = vm
     mstool = MagicMock()
     mstool.nrow.return_value = 1000
     mock_casamstool.return_value = mstool
     msmd = MagicMock()
-    msmd.ncorrforpol.return_value = [4]      
+    msmd.ncorrforpol.return_value = [4]
     msmd.scannumbers.return_value = [1, 2, 3]
     mock_msmetadata.return_value = msmd
     mock_get_ms_scan_size.side_effect = [300, 400, 300]
+
     def glob_side_effect(pattern):
         if pattern.endswith("_plots*.pdf"):
             return []
@@ -52,9 +53,11 @@ def test_plot_ms_diagnostics(
         if "imag" in pattern and pattern.endswith("*.png"):
             return []
         return []
+
     mock_glob.side_effect = glob_side_effect
-    mock_img_converted_primary = MagicMock()   
-    mock_img_converted_extra = MagicMock()    
+    mock_img_converted_primary = MagicMock()
+    mock_img_converted_extra = MagicMock()
+
     def image_open_side_effect(path):
         m = MagicMock()
         if os.path.basename(path) in {"amp1.png", "phase1.png"}:
@@ -62,13 +65,16 @@ def test_plot_ms_diagnostics(
         else:
             m.convert.return_value = mock_img_converted_extra
         return m
+
     mock_Image_open.side_effect = image_open_side_effect
     outdir = tmp_path / "out"
     outdir.mkdir()
-    code, output_pdf_list = plot_ms_diagnostics("test.ms", str(outdir), dask_client=None)
+    code, output_pdf_list = plot_ms_diagnostics(
+        "test.ms", str(outdir), dask_client=None
+    )
     assert code == 0
     assert isinstance(output_pdf_list, list)
-    assert len(output_pdf_list) >= 1  
+    assert len(output_pdf_list) >= 1
     assert mock_img_converted_primary.save.call_count >= 1
     assert mock_run_shadems.call_count > 0
     rm_calls = [c for c in mock_os_system.call_args_list if "rm -rf" in c.args[0]]
@@ -80,10 +86,10 @@ def test_plot_ms_diagnostics(
     msmd.close.assert_called_once()
 
 
-@patch("meersolar.utils.meer_ploting_utils.Image.open")
-@patch("meersolar.utils.meer_ploting_utils.table")
-@patch("meersolar.utils.meer_ploting_utils.os")
-@patch("meersolar.utils.meer_ploting_utils.plt")
+@patch("paircars.utils.meer_ploting_utils.Image.open")
+@patch("paircars.utils.meer_ploting_utils.table")
+@patch("paircars.utils.meer_ploting_utils.os")
+@patch("paircars.utils.meer_ploting_utils.plt")
 def test_plot_caltable_diagnostics(
     mock_plt, mock_os, mock_table, mock_image_open, tmp_path
 ):
@@ -194,9 +200,9 @@ def test_make_ds_plot(dummy_submsname):
     assert os.path.exists(result) == False
 
 
-@patch("meersolar.utils.meer_ploting_utils.get_valid_scans", return_value=[3])
+@patch("paircars.utils.meer_ploting_utils.get_valid_scans", return_value=[3])
 @patch(
-    "meersolar.utils.meer_ploting_utils.get_cal_target_scans",
+    "paircars.utils.meer_ploting_utils.get_cal_target_scans",
     return_value=([3], [3], [3], [3], [3]),
 )
 def test_plot_goes_full_timeseries(
@@ -229,18 +235,18 @@ def test_plot_goes_full_timeseries(
         ("mock_image.fits", ".fits"),  # No _MFS
     ],
 )
-@patch("meersolar.utils.meer_ploting_utils.make_meer_overlay")
-@patch("meersolar.utils.meer_ploting_utils.plot_in_hpc")
-@patch("meersolar.utils.meer_ploting_utils.save_in_hpc")
-@patch("meersolar.utils.meer_ploting_utils.os.makedirs")
-@patch("meersolar.utils.meer_ploting_utils.os.system")
-@patch("meersolar.utils.meer_ploting_utils.fits.open")
-@patch("meersolar.utils.meer_ploting_utils.fits.getheader")
-@patch("meersolar.utils.meer_ploting_utils.Horizons")
-@patch("meersolar.utils.meer_ploting_utils.SkyCoord")
-@patch("meersolar.utils.meer_ploting_utils.Time")
-@patch("meersolar.utils.meer_ploting_utils.cutout_image")
-@patch("meersolar.utils.meer_ploting_utils.calc_solar_image_stat")
+@patch("paircars.utils.meer_ploting_utils.make_meer_overlay")
+@patch("paircars.utils.meer_ploting_utils.plot_in_hpc")
+@patch("paircars.utils.meer_ploting_utils.save_in_hpc")
+@patch("paircars.utils.meer_ploting_utils.os.makedirs")
+@patch("paircars.utils.meer_ploting_utils.os.system")
+@patch("paircars.utils.meer_ploting_utils.fits.open")
+@patch("paircars.utils.meer_ploting_utils.fits.getheader")
+@patch("paircars.utils.meer_ploting_utils.Horizons")
+@patch("paircars.utils.meer_ploting_utils.SkyCoord")
+@patch("paircars.utils.meer_ploting_utils.Time")
+@patch("paircars.utils.meer_ploting_utils.cutout_image")
+@patch("paircars.utils.meer_ploting_utils.calc_solar_image_stat")
 def test_rename_meersolar_image(
     mock_calc_stats,
     mock_cutout,

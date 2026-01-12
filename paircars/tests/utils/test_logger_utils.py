@@ -7,7 +7,7 @@ import requests
 import os
 import urllib.error
 from watchdog.observers import Observer
-from meersolar.utils.logger_utils import *
+from paircars.utils.logger_utils import *
 from unittest.mock import MagicMock, mock_open, patch
 from watchdog.events import FileModifiedEvent
 
@@ -54,7 +54,7 @@ def test_generate_password_properties(length):
     ],
 )
 @patch("os.getlogin", return_value="dummyuser")
-@patch("meersolar.utils.get_cachedir", return_value="/mock/cache")
+@patch("paircars.utils.get_cachedir", return_value="/mock/cache")
 def test_get_remote_logger_link(
     mock_get_cachedir,
     mock_getlogin,
@@ -88,20 +88,20 @@ def test_get_remote_logger_link(
         ("", False, ""),
     ],
 )
-@patch("meersolar.utils.logger_utils.os.getlogin", return_value="testuser")
+@patch("paircars.utils.logger_utils.os.getlogin", return_value="testuser")
 @patch(
-    "meersolar.utils.logger_utils.get_cachedir",
-    return_value="/mock/.meersolar",
+    "paircars.utils.logger_utils.get_cachedir",
+    return_value="/mock/.paircars",
 )
 def test_get_emails_all_cases(
     mock_cachedir, mock_getlogin, file_content, file_exists, expected_result
 ):
     if file_exists:
         m = mock_open(read_data=file_content)
-        open_patch = patch("meersolar.utils.logger_utils.open", m)
+        open_patch = patch("paircars.utils.logger_utils.open", m)
     else:
         open_patch = patch(
-            "meersolar.utils.logger_utils.open", side_effect=FileNotFoundError
+            "paircars.utils.logger_utils.open", side_effect=FileNotFoundError
         )
 
     with open_patch:
@@ -109,7 +109,7 @@ def test_get_emails_all_cases(
         assert result == expected_result
 
 
-@patch("meersolar.utils.logger_utils.requests.post")
+@patch("paircars.utils.logger_utils.requests.post")
 def test_remote_logger_emit_success(mock_post):
     logger = RemoteLogger(
         job_id="job123",
@@ -145,7 +145,7 @@ def test_remote_logger_emit_success(mock_post):
 
 
 @patch(
-    "meersolar.utils.logger_utils.requests.post",
+    "paircars.utils.logger_utils.requests.post",
     side_effect=Exception("Connection error"),
 )
 def test_remote_logger_emit_failure(mock_post):
@@ -185,13 +185,13 @@ def test_log_tail_handler_reads_new_lines():
     os.remove(log_path)
 
 
-@patch("meersolar.utils.logger_utils.requests.post")
-@patch("meersolar.utils.logger_utils.save_pid")
+@patch("paircars.utils.logger_utils.requests.post")
+@patch("paircars.utils.logger_utils.save_pid")
 @patch(
-    "meersolar.utils.logger_utils.get_cachedir",
-    return_value="/mock/.meersolar",
+    "paircars.utils.logger_utils.get_cachedir",
+    return_value="/mock/.paircars",
 )
-@patch("meersolar.utils.logger_utils.os.getpid", return_value=12345)
+@patch("paircars.utils.logger_utils.os.getpid", return_value=12345)
 def test_ping_logger(mock_getpid, mock_cachedir, mock_save_pid, mock_post):
     stop_event = MagicMock()
     stop_event.is_set.side_effect = [False, True]
@@ -203,7 +203,7 @@ def test_ping_logger(mock_getpid, mock_cachedir, mock_save_pid, mock_post):
         remote_link="https://mock-logger.com",
     )
     mock_save_pid.assert_called_once_with(
-        12345, "/mock/.meersolar/pids/pids_local123.txt"
+        12345, "/mock/.paircars/pids/pids_local123.txt"
     )
     mock_post.assert_called_once_with(
         "https://mock-logger.com/api/ping/remote456", timeout=2
@@ -250,14 +250,14 @@ def test_get_logid(logfile, expected):
     assert get_logid(logfile) == expected
 
 
-@patch("meersolar.utils.logger_utils.Observer")
-@patch("meersolar.utils.logger_utils.requests.post")
-@patch("meersolar.utils.logger_utils.get_logid", return_value="MyLogID")
+@patch("paircars.utils.logger_utils.Observer")
+@patch("paircars.utils.logger_utils.requests.post")
+@patch("paircars.utils.logger_utils.get_logid", return_value="MyLogID")
 @patch(
-    "meersolar.utils.logger_utils.get_remote_logger_link",
+    "paircars.utils.logger_utils.get_remote_logger_link",
     return_value="https://mock-logger.com",
 )
-@patch("meersolar.utils.logger_utils.RemoteLogger")
+@patch("paircars.utils.logger_utils.RemoteLogger")
 def test_init_logger_remote_success(
     mock_remote_logger, mock_getlink, mock_logid, mock_post, mock_observer
 ):

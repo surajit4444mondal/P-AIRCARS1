@@ -133,8 +133,6 @@ def correct_missing_col_subms(msname):
 def single_mstransform(
     msname="",
     outputms="",
-    field="",
-    scan="",
     width=1,
     timebin="",
     datacolumn="DATA",
@@ -145,7 +143,7 @@ def single_mstransform(
     n_threads=-1,
 ):
     """
-    Perform mstransform of a single scan
+    Perform mstransform 
 
     Parameters
     ----------
@@ -153,10 +151,6 @@ def single_mstransform(
         Name of the measurement set
     outputms : str
         Output ms name
-    scan : int
-        Scan to split (a single scan)
-    field : str, optional
-        Field name
     width : int, optional
         Number of channels to average
     timebin : str, optional
@@ -169,8 +163,6 @@ def single_mstransform(
         Correlation to split
     timerange : str, optional
         Time range
-    numsubms : str, optional
-        Number of subms
     n_threads : int, optional
         Number of CPU threads
 
@@ -200,31 +192,22 @@ def single_mstransform(
             n_threads = 2
         else:
             n_threads = min(n_threads, 2)
-        if field == "":
-            msmd = msmetadata()
-            msmd.open(msname)
-            field = str(msmd.fieldsforscan(int(scan))[0])
-            msmd.close()
+        print (f"Spliting ms: {msname}, Outputvis: {outputms}.")
         with suppress_output():
             mstransform(
                 vis=msname,
                 outputvis=outputms,
                 spw=spw,
                 timerange=timerange,
-                field=field,
-                scan=scan,
                 datacolumn=datacolumn,
-                createmms=True,
                 correlation=corr,
                 timeaverage=timeaverage,
                 timebin=timebin,
                 chanaverage=chanaverage,
                 chanbin=int(width),
                 nthreads=n_threads,
-                separationaxis="scan",
-                numsubms=numsubms,
             )
-            time.sleep(5)
+        time.sleep(5)
         if os.path.exists(outputms):
             with suppress_output():
                 initweights(vis=outputms, wtmode="ones", dowtsp=True)

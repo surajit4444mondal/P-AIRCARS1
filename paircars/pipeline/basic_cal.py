@@ -17,13 +17,11 @@ logging.getLogger("tornado.application").setLevel(logging.CRITICAL)
 
 
 def run_bandpass(
-    msname="",
-    field="",
-    scan="",
+    msname,
+    workdir,
     uvrange="",
     refant="",
     solint="inf",
-    solnorm=False,
     combine="",
     gaintable=[],
     gainfield=[],
@@ -36,17 +34,14 @@ def run_bandpass(
     limit_threads(n_threads=n_threads)
     from casatasks import bandpass, flagdata
 
-    caltable_prefix = os.path.basename(msname).split(".ms")[0]
+    caltable_prefix = f"{workdir}/{os.path.basename(msname).split('.ms')[0]}"
     with suppress_output():
         bandpass(
             vis=msname,
             caltable=f"{caltable_prefix}.bcal",
-            field=str(field),
-            scan=str(scan),
             uvrange=uvrange,
             refant=refant,
             solint=solint,
-            solnorm=solnorm,
             combine=combine,
             gaintable=gaintable,
             gainfield=gainfield,
@@ -58,11 +53,15 @@ def run_bandpass(
             datacolumn="CPARAM",
             flagbackup=False,
         )
-    return caltable_prefix + ".bcal"
+    if os.path.exists(caltable_prefix + ".bcal"):
+        return caltable_prefix + ".bcal"
+    else:
+        return
 
 
 def run_crossphasecal(
-    msname="",
+    msname,
+    workdir,
     uvrange="",
     gaintable=[],
     n_threads=-1,
@@ -71,9 +70,7 @@ def run_crossphasecal(
     Perform crosshand phase calibration
     """
     limit_threads(n_threads=n_threads)
-    from casatasks import polcal, flagdata
-
-    caltable_prefix = os.path.basename(msname).split(".ms")[0]
+    caltable_prefix = f"{workdir}/{os.path.basename(msname).split('.ms')[0]}"
     with suppress_output():
         crossphasecal(
             msname,
@@ -81,13 +78,14 @@ def run_crossphasecal(
             uvrange=uvrange,
             gaintable=gaintable[0],
         )
-    return caltable_prefix + ".kcrosscal"
+    if os.path.exists(caltable_prefix + ".kcrosscal"):
+        return caltable_prefix + ".kcrosscal"
+    else:
+        return
 
 
 def run_applycal(
-    msname="",
-    field="",
-    scan="",
+    msname,
     applymode="",
     flagbackup=True,
     gaintable=[],
@@ -105,8 +103,6 @@ def run_applycal(
     with suppress_output():
         applycal(
             vis=msname,
-            field=str(field),
-            scan=str(scan),
             gaintable=gaintable,
             gainfield=gainfield,
             interp=interp,
@@ -147,6 +143,7 @@ def run_postcal_flag(
 
 def single_ms_cal_and_flag(
     msname,
+    workdir,
     cal_round,
     refant,
     uvrange,
@@ -164,6 +161,8 @@ def single_ms_cal_and_flag(
     ----------
     msname : str
         Name of the measurement set
+    workdir : str
+        Work directory
     cal_round : int
         Calibration round number
     refant : str
@@ -189,7 +188,7 @@ def single_ms_cal_and_flag(
         Caltables
     """
     try:
-        caltable_prefix = os.path.basename(msname).split(".ms")[0] + "_caltable"
+        caltable_prefix = f"{workdir}/{os.path.basename(msname).split('.ms')[0]}_caltable"
         msmd = msmetadata()
         msmd.open(msname)
         npol = msmd.ncorrforpol()[0]
@@ -221,6 +220,7 @@ def single_ms_cal_and_flag(
         print(f"Performing bandpass calibrations on: {msname}")
         bpass_caltable = run_bandpass(
             msname,
+            workdir,
             uvrange=uvrange,
             refant=refant,
             solint="inf",
@@ -246,6 +246,7 @@ def single_ms_cal_and_flag(
                 print(f"Performing crosshand phase calibrations on: {msname}")
                 crossphase_caltable = run_crossphasecal(
                     msname,
+                    workdir,
                     uvrange=uvrange,
                     gaintable=applycal_gaintable,
                     n_threads=n_threads,
@@ -373,6 +374,7 @@ def single_round_cal_and_flag(
     tasks = [
         delayed(single_ms_cal_and_flag)(
             msname,
+            workdir,
             cal_round,
             refant,
             uvrange,
@@ -703,7 +705,6 @@ def cli():
         "--outdir",
         type=str,
         default="",
-        required=True,
         help="Output directory (default: auto-created in the workdir)",
     )
 
@@ -719,7 +720,7 @@ def cli():
         help="UV range for calibration (e.g. '>100lambda')",
     )
     adv_args.add_argument(
-        "--no-perform_polcal",
+        "--no_perform_polcal",
         dest="perform_polcal",
         action="store_false",
         help="Disable polarization calibration",

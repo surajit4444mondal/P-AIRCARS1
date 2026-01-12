@@ -3,14 +3,14 @@ import shutil
 import tempfile
 import os
 from unittest.mock import patch, MagicMock
-from meersolar.utils.resource_utils import *
+from paircars.utils.resource_utils import *
 
 
-@patch("meersolar.utils.resource_utils.platform.system", return_value="Linux")
-@patch("meersolar.utils.resource_utils.os.path.isfile", return_value=True)
-@patch("meersolar.utils.resource_utils.os.open", return_value=42)
-@patch("meersolar.utils.resource_utils.os.close")
-@patch("meersolar.utils.resource_utils.libc.posix_fadvise", return_value=0)
+@patch("paircars.utils.resource_utils.platform.system", return_value="Linux")
+@patch("paircars.utils.resource_utils.os.path.isfile", return_value=True)
+@patch("paircars.utils.resource_utils.os.open", return_value=42)
+@patch("paircars.utils.resource_utils.os.close")
+@patch("paircars.utils.resource_utils.libc.posix_fadvise", return_value=0)
 def test_drop_file_cache(
     mock_advise, mock_close, mock_open, mock_isfile, mock_platform, capsys
 ):
@@ -22,10 +22,10 @@ def test_drop_file_cache(
     assert "[cache drop] Released: /dummy/file" in out
 
 
-@patch("meersolar.utils.resource_utils.platform.system", return_value="Linux")
-@patch("meersolar.utils.resource_utils.drop_file_cache")
-@patch("meersolar.utils.resource_utils.os.path.isfile", return_value=True)
-@patch("meersolar.utils.resource_utils.os.path.isdir", return_value=False)
+@patch("paircars.utils.resource_utils.platform.system", return_value="Linux")
+@patch("paircars.utils.resource_utils.drop_file_cache")
+@patch("paircars.utils.resource_utils.os.path.isfile", return_value=True)
+@patch("paircars.utils.resource_utils.os.path.isdir", return_value=False)
 def test_drop_cache(mock_isdir, mock_isfile, mock_drop, mock_platform):
     drop_cache("/some/file", verbose=True)
     mock_drop.assert_called_once_with("/some/file", verbose=True)
@@ -37,10 +37,10 @@ def test_has_space():
     assert has_space("/tmp1", 0.0) == False
 
 
-@patch("meersolar.utils.resource_utils.has_space")
-@patch("meersolar.utils.resource_utils.tempfile.mkdtemp")
-@patch("meersolar.utils.resource_utils.shutil.rmtree")
-@patch("meersolar.utils.resource_utils.os.getcwd", return_value="/fallback")
+@patch("paircars.utils.resource_utils.has_space")
+@patch("paircars.utils.resource_utils.tempfile.mkdtemp")
+@patch("paircars.utils.resource_utils.shutil.rmtree")
+@patch("paircars.utils.resource_utils.os.getcwd", return_value="/fallback")
 def test_shm_or_tmp(mock_getcwd, mock_rmtree, mock_mkdtemp, mock_has_space):
     mock_has_space.side_effect = lambda path, gb: path == "/dev/shm"
     mock_mkdtemp.return_value = "/dev/shm/solar_temp123"
@@ -59,9 +59,9 @@ def test_shm_or_tmp(mock_getcwd, mock_rmtree, mock_mkdtemp, mock_has_space):
 @pytest.mark.parametrize(
     "platform_name, should_call_drop", [("Linux", True), ("Darwin", False)]
 )
-@patch("meersolar.utils.resource_utils.shm_or_tmp")
-@patch("meersolar.utils.resource_utils.drop_cache")
-@patch("meersolar.utils.resource_utils.platform.system")
+@patch("paircars.utils.resource_utils.shm_or_tmp")
+@patch("paircars.utils.resource_utils.drop_cache")
+@patch("paircars.utils.resource_utils.platform.system")
 def test_tmp_with_cache_rel(
     mock_platform, mock_drop_cache, mock_shm_or_tmp, platform_name, should_call_drop
 ):

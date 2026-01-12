@@ -95,8 +95,6 @@ def split_target_scans(
         total_mem = (psutil.virtual_memory().available * mem_frac) / (1024**3)  # In GB
 
         os.chdir(workdir)
-        print(f"Spliting ms : {msname}")
-
         #######################################
         # Extracting time frequency information
         #######################################
@@ -124,7 +122,7 @@ def split_target_scans(
         coarse_channel_bands = get_MWA_coarse_bands(msname)
         chanlist = []
         for chan in coarse_channel_bands:
-            chanlist.append(f"{chan[0]}~{chan[1]}")
+            chanlist.append(f"{chan[0]}~{chan[1]-1}")
 
         ##################################
         # Parallel spliting
@@ -139,9 +137,8 @@ def split_target_scans(
 
         tasks = []
         splited_ms_list = []
-        timerange_list = get_timeranges_for_scan(
+        timerange_list = get_timeranges(
             msname,
-            scan,
             time_interval,
             time_window,
             quack_timestamps=quack_timestamps,
@@ -156,8 +153,6 @@ def split_target_scans(
                 task = delayed(single_mstransform)(
                     msname=msname,
                     outputms=outputvis,
-                    field="",
-                    scan=scan,
                     width=chanwidth,
                     timebin=timebin,
                     datacolumn=datacolumn,
@@ -168,7 +163,6 @@ def split_target_scans(
                 )
                 tasks.append(task)
         if len(tasks):
-            print("Start spliting..")
             futures = dask_client.compute(tasks)
             results = list(dask_client.gather(futures))
             for splited_ms in results:
@@ -220,11 +214,11 @@ def main(
     scan : int, optional
         Scan numbers to split.
     time_window : float, optional
-        Time window in seconds to group scans. Set -1 to disable. Default is -1.
+        Time window in seconds for a single time chunk. Set -1 to disable. Default is -1.
     time_interval : float, optional
-        Integration time interval in seconds for time averaging. Set -1 to disable. Default is -1.
-    quack_timestamps : float, optional
-        Time in seconds to flag at the beginning of each scan ("quack"). -1 to disable. Default is -1.
+        Time interval in seconds between two time chunks. Set -1 to disable. Default is -1.
+    quack_timestamps : int, optional
+       Number of timestamps to flag at the beginning and end of each scan ("quack"). -1 to disable. Default is -1.
     freqres : float, optional
         Frequency resolution in MHz for spectral averaging. Set -1 to disable. Default is -1.
     timeres : float, optional
@@ -292,10 +286,10 @@ def main(
 
     try:
         if len(mslist) > 0:
+            print("###################################")
+            print(f"Start spliting measurement sets in coarse frequency bands.")
+            print("###################################")
             for msname in mslist:
-                print("###################################")
-                print(f"Start spliting: {msname} in coarse frequency bands.")
-                print("###################################")
                 msg, final_target_mslist = split_target_scans(
                     msname,
                     dask_client,
@@ -371,13 +365,13 @@ def cli():
         "--time_window",
         type=float,
         default=-1,
-        help="Time window in seconds",
+        help="Time window in seconds of a single time chunk",
     )
     adv_args.add_argument(
         "--time_interval",
         type=float,
         default=-1,
-        help="Time interval in seconds",
+        help="Time interval in seconds between two time chunks",
     )
     adv_args.add_argument(
         "--quack_timestamps",

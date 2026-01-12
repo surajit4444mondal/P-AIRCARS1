@@ -98,6 +98,30 @@ def single_ms_flag(
                     )
             except BaseException:
                 pass
+                
+        #################################
+        # Flag quack timestamps
+        #################################
+        try:
+            with suppress_output():
+                flagdata(
+                    vis=msname,
+                    mode="quack",
+                    quackmode="beg",
+                    quackinterval=4.0,
+                    datacolumn=datacolumn,
+                    flagbackup=False,
+                )
+                flagdata(
+                    vis=msname,
+                    mode="quack",
+                    quackmode="endb",
+                    quackinterval=4.0,
+                    datacolumn=datacolumn,
+                    flagbackup=False,
+                )
+        except BaseException:
+            pass
 
         #################################
         # Clip zero amplitude data points

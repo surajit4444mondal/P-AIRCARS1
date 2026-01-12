@@ -97,8 +97,8 @@ def import_model(msname, metafits, beamfile="", sourcelist="", ncpu=-1):
         subprocess.run(
             hyperdrive_cmd,
             check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            #stdout=subprocess.DEVNULL,
+            #stderr=subprocess.DEVNULL,
         )
         model_msname = msname.split(".ms")[0] + "_model.ms"
         ########################
@@ -288,15 +288,13 @@ def cli():
         "###################\nEssential parameters\n###################"
     )
     basic_args.add_argument(
-        "--mslist",
+        "mslist",
         type=str,
-        required=True,
         help="Name of the measurement sets (comma seperated)",
     )
     basic_args.add_argument(
-        "--metafits",
+        "metafits",
         type=str,
-        required=True,
         help="Name of the metafits file",
     )
     basic_args.add_argument(

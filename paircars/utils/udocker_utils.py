@@ -70,31 +70,29 @@ def initialize_wsclean_container(name="solarwsclean", update=False):
     bool
         Whether initialized successfully or not
     """
+    print("Initializing wsclean container.")
     set_udocker_env()
     image_name = "devojyoti96/wsclean-solar:latest"
     check_cmd = f"udocker images | grep -q '{image_name}'"
     image_exists = os.system(check_cmd) == 0
     if not image_exists:
-        with suppress_output():
-            a = os.system(f"udocker pull {image_name}")
+        a = os.system(f"udocker pull {image_name}")
     else:
         if update:
-            with suppress_output():
-                os.system(f"udocker rm {name}")
-                os.system(f"udocker rmi {image_name}")
-                print("Re-downloading docker image.")
-                a = os.system(f"udocker pull {image_name}")
-                if a == 0:
-                    print("Re-downloaded docker image.")
-                else:
-                    print("Re-downloading container image is failed.")
-                    return
+            os.system(f"udocker rm {name}")
+            os.system(f"udocker rmi {image_name}")
+            print("Re-downloading docker image.")
+            a = os.system(f"udocker pull {image_name}")
+            if a == 0:
+                print("Re-downloaded docker image.")
+            else:
+                print("Re-downloading container image is failed.")
+                return
         else:
             print(f"Image '{image_name}' already present.")
             a = 0
     if a == 0:
-        with suppress_output():
-            a = os.system(f"udocker create --name={name} {image_name}")
+        a = os.system(f"udocker create --name={name} {image_name}")
         print(f"Container started with name : {name}")
         return name
     else:
@@ -118,31 +116,29 @@ def initialize_shadems_container(name="solarshadems", update=False):
     bool
         Whether initialized successfully or not
     """
+    print("Initializing shadems container.")
     set_udocker_env()
     image_name = "devojyoti96/shadems:v0.5.4"
     check_cmd = f"udocker images | grep -q '{image_name}'"
     image_exists = os.system(check_cmd) == 0
     if not image_exists:
-        with suppress_output():
-            a = os.system(f"udocker pull {image_name}")
+        a = os.system(f"udocker pull {image_name}")
     else:
         if update:
-            with suppress_output():
-                os.system(f"udocker rm {name}")
-                os.system(f"udocker rmi {image_name}")
-                print("Re-downloading docker image.")
-                a = os.system(f"udocker pull {image_name}")
-                if a == 0:
-                    print("Re-downloaded docker image.")
-                else:
-                    print("Re-downloading container image is failed.")
-                    return
+            os.system(f"udocker rm {name}")
+            os.system(f"udocker rmi {image_name}")
+            print("Re-downloading docker image.")
+            a = os.system(f"udocker pull {image_name}")
+            if a == 0:
+                print("Re-downloaded docker image.")
+            else:
+                print("Re-downloading container image is failed.")
+                return
         else:
             print(f"Image '{image_name}' already present.")
             a = 0
     if a == 0:
-        with suppress_output():
-            a = os.system(f"udocker create --name={name} {image_name}")
+        a = os.system(f"udocker create --name={name} {image_name}")
         print(f"Container started with name : {name}")
         return name
     else:

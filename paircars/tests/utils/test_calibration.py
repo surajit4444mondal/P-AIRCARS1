@@ -3,7 +3,7 @@ import traceback
 import os
 from casatasks import casalog
 from casatools import table
-from meersolar.utils.calibration import *
+from paircars.utils.calibration import *
 from unittest.mock import MagicMock, patch
 
 try:

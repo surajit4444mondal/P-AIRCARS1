@@ -4,7 +4,7 @@ import threading
 import time
 from unittest.mock import patch, AsyncMock, MagicMock, mock_open
 
-from meersolar.utils.prefect_logger_utils import (
+from paircars.utils.prefect_logger_utils import (
     save_logs_by_task_id,
     save_logs_by_flow_id,
     start_log_task_saver,
@@ -26,7 +26,7 @@ async def test_save_logs_by_task_id():
     mock_client.read_logs.return_value = [mock_log]
 
     with patch(
-        "meersolar.utils.prefect_logger_utils.get_client",
+        "paircars.utils.prefect_logger_utils.get_client",
         return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_client)),
     ):
         with patch("builtins.open", mock_open()) as m:
@@ -63,7 +63,7 @@ async def test_save_logs_by_flow_id():
     mock_client.read_logs.return_value = [mock_log]
 
     with patch(
-        "meersolar.utils.prefect_logger_utils.get_client",
+        "paircars.utils.prefect_logger_utils.get_client",
         return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_client)),
     ):
         with patch("builtins.open", mock_open()) as m:
@@ -90,7 +90,7 @@ def test_start_log_task_saver():
     stop_event = threading.Event()
 
     with patch(
-        "meersolar.utils.prefect_logger_utils.save_logs_by_task_id",
+        "paircars.utils.prefect_logger_utils.save_logs_by_task_id",
         new_callable=AsyncMock,
     ) as mock_async:
         thread = start_log_task_saver(
@@ -111,7 +111,7 @@ def test_start_flow_log_saver():
     stop_event = threading.Event()
 
     with patch(
-        "meersolar.utils.prefect_logger_utils.save_logs_by_flow_id",
+        "paircars.utils.prefect_logger_utils.save_logs_by_flow_id",
         new_callable=AsyncMock,
     ) as mock_async:
         thread = start_flow_log_saver(

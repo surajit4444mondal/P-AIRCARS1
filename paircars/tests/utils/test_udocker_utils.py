@@ -4,11 +4,11 @@ import traceback
 import tempfile
 import os
 from unittest.mock import patch, MagicMock
-from meersolar.utils.udocker_utils import *
+from paircars.utils.udocker_utils import *
 
 
-@patch("meersolar.utils.udocker_utils.os.makedirs")
-@patch("meersolar.utils.udocker_utils.get_datadir", return_value="/mock/data")
+@patch("paircars.utils.udocker_utils.os.makedirs")
+@patch("paircars.utils.udocker_utils.get_datadir", return_value="/mock/data")
 def test_set_udocker_env(mock_get_datadir, mock_makedirs):
     # Backup original env
     original_env = dict(os.environ)
@@ -26,7 +26,7 @@ def test_set_udocker_env(mock_get_datadir, mock_makedirs):
         os.environ.update(original_env)
 
 
-@patch("meersolar.utils.udocker_utils.set_udocker_env")
+@patch("paircars.utils.udocker_utils.set_udocker_env")
 def test_init_udocker(mock_env):
     init_udocker()
 
@@ -38,8 +38,8 @@ def test_init_udocker(mock_env):
         (1, False),  # Container absent
     ],
 )
-@patch("meersolar.utils.udocker_utils.os.system")
-@patch("meersolar.utils.udocker_utils.set_udocker_env")
+@patch("paircars.utils.udocker_utils.os.system")
+@patch("paircars.utils.udocker_utils.set_udocker_env")
 def test_check_udocker_container(mock_env, system_mock, system_return, expected):
     # First call: udocker inspect, Second call: cleanup
     system_mock.side_effect = [system_return, None]
@@ -55,18 +55,18 @@ def test_check_udocker_container(mock_env, system_mock, system_return, expected)
         (False, True, 0),  # skip check, run successfully
     ],
 )
-@patch("meersolar.utils.udocker_utils.traceback.print_exc")
-@patch("meersolar.utils.udocker_utils.psutil.Process")
-@patch("meersolar.utils.udocker_utils.os.system")
-@patch("meersolar.utils.udocker_utils.initialize_wsclean_container")
-@patch("meersolar.utils.udocker_utils.check_udocker_container")
-@patch("meersolar.utils.udocker_utils.tempfile.mkdtemp", return_value="/mock/temp")
-@patch("meersolar.utils.udocker_utils.os.getcwd", return_value="/mock")
+@patch("paircars.utils.udocker_utils.traceback.print_exc")
+@patch("paircars.utils.udocker_utils.psutil.Process")
+@patch("paircars.utils.udocker_utils.os.system")
+@patch("paircars.utils.udocker_utils.initialize_wsclean_container")
+@patch("paircars.utils.udocker_utils.check_udocker_container")
+@patch("paircars.utils.udocker_utils.tempfile.mkdtemp", return_value="/mock/temp")
+@patch("paircars.utils.udocker_utils.os.getcwd", return_value="/mock")
 @patch(
-    "meersolar.utils.udocker_utils.os.path.abspath", side_effect=lambda x: f"/abs/{x}"
+    "paircars.utils.udocker_utils.os.path.abspath", side_effect=lambda x: f"/abs/{x}"
 )
-@patch("meersolar.utils.udocker_utils.os.path.dirname", side_effect=lambda x: "/abs")
-@patch("meersolar.utils.udocker_utils.set_udocker_env")
+@patch("paircars.utils.udocker_utils.os.path.dirname", side_effect=lambda x: "/abs")
+@patch("paircars.utils.udocker_utils.set_udocker_env")
 def test_run_wsclean_param_cases(
     mock_env,
     mock_dirname,
@@ -102,18 +102,18 @@ def test_run_wsclean_param_cases(
         (True, 0),  # Normal run success
     ],
 )
-@patch("meersolar.utils.udocker_utils.traceback.print_exc")
-@patch("meersolar.utils.udocker_utils.psutil.Process")
-@patch("meersolar.utils.udocker_utils.os.system")
-@patch("meersolar.utils.udocker_utils.initialize_wsclean_container")
-@patch("meersolar.utils.udocker_utils.check_udocker_container")
-@patch("meersolar.utils.udocker_utils.tempfile.mkdtemp", return_value="/mock/temp")
-@patch("meersolar.utils.udocker_utils.os.getcwd", return_value="/mock")
+@patch("paircars.utils.udocker_utils.traceback.print_exc")
+@patch("paircars.utils.udocker_utils.psutil.Process")
+@patch("paircars.utils.udocker_utils.os.system")
+@patch("paircars.utils.udocker_utils.initialize_wsclean_container")
+@patch("paircars.utils.udocker_utils.check_udocker_container")
+@patch("paircars.utils.udocker_utils.tempfile.mkdtemp", return_value="/mock/temp")
+@patch("paircars.utils.udocker_utils.os.getcwd", return_value="/mock")
 @patch(
-    "meersolar.utils.udocker_utils.os.path.abspath", side_effect=lambda x: f"/abs/{x}"
+    "paircars.utils.udocker_utils.os.path.abspath", side_effect=lambda x: f"/abs/{x}"
 )
-@patch("meersolar.utils.udocker_utils.os.path.dirname", side_effect=lambda x: "/abs")
-@patch("meersolar.utils.udocker_utils.set_udocker_env")
+@patch("paircars.utils.udocker_utils.os.path.dirname", side_effect=lambda x: "/abs")
+@patch("paircars.utils.udocker_utils.set_udocker_env")
 def test_run_solar_sidereal_cor(
     mock_env,
     mock_dirname,
@@ -148,18 +148,18 @@ def test_run_solar_sidereal_cor(
         (True, 0),  # normal run, successful
     ],
 )
-@patch("meersolar.utils.udocker_utils.traceback.print_exc")
-@patch("meersolar.utils.udocker_utils.psutil.Process")
-@patch("meersolar.utils.udocker_utils.os.system")
-@patch("meersolar.utils.udocker_utils.initialize_wsclean_container")
-@patch("meersolar.utils.udocker_utils.check_udocker_container")
-@patch("meersolar.utils.udocker_utils.tempfile.mkdtemp", return_value="/mock/temp")
-@patch("meersolar.utils.udocker_utils.os.getcwd", return_value="/mock")
+@patch("paircars.utils.udocker_utils.traceback.print_exc")
+@patch("paircars.utils.udocker_utils.psutil.Process")
+@patch("paircars.utils.udocker_utils.os.system")
+@patch("paircars.utils.udocker_utils.initialize_wsclean_container")
+@patch("paircars.utils.udocker_utils.check_udocker_container")
+@patch("paircars.utils.udocker_utils.tempfile.mkdtemp", return_value="/mock/temp")
+@patch("paircars.utils.udocker_utils.os.getcwd", return_value="/mock")
 @patch(
-    "meersolar.utils.udocker_utils.os.path.abspath", side_effect=lambda x: f"/abs/{x}"
+    "paircars.utils.udocker_utils.os.path.abspath", side_effect=lambda x: f"/abs/{x}"
 )
-@patch("meersolar.utils.udocker_utils.os.path.dirname", side_effect=lambda x: "/abs")
-@patch("meersolar.utils.udocker_utils.set_udocker_env")
+@patch("paircars.utils.udocker_utils.os.path.dirname", side_effect=lambda x: "/abs")
+@patch("paircars.utils.udocker_utils.set_udocker_env")
 def test_run_chgcenter_param_cases(
     mock_env,
     mock_dirname,

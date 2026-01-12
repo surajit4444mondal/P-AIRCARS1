@@ -12,7 +12,7 @@ import copy
 from casatools import msmetadata, table
 from dask import delayed
 from functools import partial
-from meersolar.utils import *
+from paircars.utils import *
 
 logging.getLogger("distributed").setLevel(logging.ERROR)
 logging.getLogger("tornado.application").setLevel(logging.CRITICAL)
@@ -180,10 +180,16 @@ def do_selfcal(
                 )
         msname = selfcalms
 
-        ##########################################
-        # Initiate proper weighting
-        ##########################################
+        ##############################################
+        # Initial flagging -- zeros and non-disk data
+        #############################################
         with suppress_output():
+            result = flag_non_disk(msname)
+            if result!=0:
+                print(f"Could not flag non-disk time properly.")
+                start_gauss_source=False
+            else:
+                start_gauss_source=True
             flagdata(
                 vis=msname,
                 mode="clip",
@@ -191,7 +197,7 @@ def do_selfcal(
                 datacolumn="data",
                 flagbackup=False,
             )
-
+     
         ############################################
         # Imaging and calibration parameters
         ############################################
@@ -235,6 +241,18 @@ def do_selfcal(
         use_previous_model = False
         os.system("rm -rf *_selfcal_present*")
 
+        ###########################################
+        # Starting using Gaussian model
+        ###########################################
+        if start_gauss_source:
+            print (f"Starting self-calibration using Gaussian source model.")
+            msg, caltable = quiet_sun_selfcal(msname,logger,selfcaldir,refant=str(refant),solint=solint)
+            if msg==0:
+                num_iter+=1
+                print ("Starting self-calibration using Gaussian model is successful.")
+            else:
+                print ("Starting self-calibration using Gaussian model is not successful.")
+                
         ##########################################
         # Starting selfcal loops
         ##########################################
@@ -250,7 +268,7 @@ def do_selfcal(
                 + str(threshold)
                 + ", Calibration mode: "
                 + str(calmode)
-            )
+            )    
             msg, gaintable, dyn, rms, final_image, final_model, final_residual = (
                 intensity_selfcal(
                     msname,
@@ -534,7 +552,7 @@ def main(
     mslist,
     workdir,
     caldir,
-    cal_applied,  # TODO
+    #cal_applied,  # TODO
     start_thresh=5,
     stop_thresh=3,
     max_iter=100,
@@ -765,7 +783,8 @@ def main(
                 print(f"Memory per worker: {round(mem_limit,2)} GB")
                 print("#################################")
 
-                #####################################
+                #####################################s
+                os.makedirs(f"{workdir}/logs",exist_ok=True)
                 tasks = []
                 for ms in mslist:
                     logfile = (
