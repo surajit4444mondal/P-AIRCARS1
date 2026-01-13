@@ -461,8 +461,8 @@ def perform_imaging(
                                 if renamed_res is not None:
                                     final_res_list.append(renamed_res)
                             final_list_dic["residual"] = final_res_list
-            os.system("rm -rf aia.lev1_euv*.fits")
-            os.system("rm -rf *suvi-l2*.fits")
+            os.system(f"rm -rf {imagedir}/images/aia.lev1_euv*.fits")
+            os.system(f"rm -rf {v}/images/*suvi-l2*.fits")
             if os.path.exists(f"{imagedir}/images/dask-scratch-space"):
                 os.system(f"rm -rf {imagedir}/images/dask-scratch-space")
             if use_solar_mask and os.path.exists(fits_mask):
