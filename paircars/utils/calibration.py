@@ -14,6 +14,42 @@ from .imaging import *
 # Calibration related
 #####################################
 
+def fluxcal_caltable(caltable, attn=10):
+    """
+    Function to scale scale MWA bandpass table for attenuation (Digital gain corrections should already been applied)
+    
+    Parameters
+    ----------
+    caltable : str
+        Name of the caltable
+    attn : float, optional
+        Attenuation in dB
+        
+    Returns
+    -------
+    str
+        Flux calibrated caltable
+    """
+    datadir = get_datadir()
+    tb = table()
+    tb.open(f"{caltable}/SPECTRAL_WINDOW")
+    freqlist = tb.getcol("CHAN_FREQ")/10**6  # In MHz
+    tb.close()
+    fluxscale_poly = np.poly1d(
+        np.load(f"{datadir}/Ref_mean_bandpass_final.npy", allow_pickle=True)[0]
+    )
+    gain_scale = fluxscale_poly(freqlist)
+    att_scaling = 10 ** (-(attn -1) / 10.0)
+    gain_scale_att = gain_scale * np.sqrt(att_scaling)
+    tb.open(caltable, nomodify=False)
+    gain = tb.getcol("CPARAM")
+    for i in range(gain.shape[1]):
+        gain[:, i, :]*=gain_scale_att[i]
+    tb.putcol("CPARAM", gain)
+    tb.flush()
+    tb.close()
+    return caltable
+
 
 def merge_caltables(caltables, merged_caltable, append=False, keepcopy=False):
     """
@@ -200,7 +236,7 @@ def get_caltable_metadata(caltable):
     chanwidth = (tb.getcol("CHAN_WIDTH")[0] / 10**3)[0]  # In kHz
     freqlist = tb.getcol("CHAN_FREQ")
     chm = (freqlist[int(len(freqlist) / 2)] / 10**6)[0]  # In MHz
-    bw = tb.getcol("TOTAL_BANDWIDTH")[0] / 10**6  # In MHz
+    bw = np.nanmean(tb.getcol("EFFECTIVE_BW")) / 10**6  # In MHz
     tb.close()
     tb.open(caltable)
     timerange = tb.getcol("TIME")

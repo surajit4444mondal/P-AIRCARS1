@@ -145,7 +145,7 @@ def split_target_scans(
         )
         timerange = ",".join(timerange_list)
         for chanrange in chanlist:
-            outputvis = f"{workdir}/{prefix}_spw_{chanrange}.ms"
+            outputvis = f"{workdir}/{prefix}_{os.path.basename(msname).split('.ms')[0]}_spw_{chanrange}.ms"
             if os.path.exists(f"{outputvis}/.splited"):
                 print(f"{outputvis} is already splited successfully.")
                 splited_ms_list.append(outputvis)

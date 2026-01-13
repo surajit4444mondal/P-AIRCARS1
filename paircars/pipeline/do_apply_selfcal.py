@@ -66,7 +66,8 @@ def run_all_applysol(
         os.chdir(workdir)
         mslist = np.unique(mslist).tolist()
         parang = False
-        selfcal_tables = glob.glob(caldir + "/selfcal_coarsechan*.gcal")
+        selfcal_tables = sorted(glob.glob(caldir + "/selfcal_coarsechan*.gcal"))
+        selfcal_bpass_tables = sorted(glob.glob(caldir + "/selfcal_coarsechan*.bcal"))
         print(f"Selfcal caltables: {selfcal_tables}")
         if len(selfcal_tables) == 0:
             print(f"No self-cal caltable is present in {caldir}.")
@@ -103,7 +104,7 @@ def run_all_applysol(
                 filtered_mslist.append(ms)
             else:
                 print(f"Issue in : {ms}")
-                os.system(f"rm -rf {ms}")
+
         mslist = filtered_mslist
         if len(mslist) == 0:
             print("No valid measurement set.")
@@ -135,12 +136,12 @@ def run_all_applysol(
                 s = selfcal_tables_start_chans[i]
                 e = selfcal_tables_end_chans[i]
                 if start_coarse_chan >= s and end_coarse_chan <= e:
-                    gaintable = [selfcal_tables[i]]
-            if len(gaintable):
+                    gaintable = [selfcal_tables[i],selfcal_bpass_tables[i]]
+                    
+            if len(gaintable)==0:
                 print(
                     f"Measurement set coarse channel : {start_coarse_chan} to {end_coarse_chan}. Corresponding self-calibration table is not present."
                 )
-                os.system(f"rm -rf {ms}")
             else:
                 tasks.append(
                     delayed(applysol)(
@@ -150,7 +151,6 @@ def run_all_applysol(
                         applymode=applymode,
                         interp=["linear,linearflag"],
                         n_threads=n_threads,
-                        parang=parang,
                         memory_limit=mem_limit,
                         force_apply=force_apply,
                         soltype="selfcal",

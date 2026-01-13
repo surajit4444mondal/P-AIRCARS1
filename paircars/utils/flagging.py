@@ -7,6 +7,7 @@ import os
 from datetime import datetime as dt, timezone
 from .basic_utils import *
 from .resource_utils import *
+from .imaging import *
 
 
 ###############################
@@ -85,6 +86,49 @@ def do_flag_backup(msname, flagtype="flagdata"):
         flagtype + "_" + str(version_num), "Flags autosave on " + dt_string
     )
     af.done()
+
+
+def uvbin_flag(msname,uvbin_size=50,mode="rflag",threshold=10.0,flagbackup=True):
+    """
+    Perform uv-bin flag
+        
+    Parameters
+    ----------
+    msname : str
+        Measurement set
+    uvbin_size : float, optional
+        UV-bin size in wavelength
+    mode : str, optional
+        Flag mode (rflag or tfcrop)
+    threshold : float, optional
+        Flagging threshold
+    flagbackup : bool, optional
+        Flag backup
+    """
+    from casatasks import flagdata, flagmanager
+    try:
+        maxuv_m, maxuv_l = calc_maxuv(msname)
+        if flagbackup:
+            do_flag_backup(msname, flagtype="uvbin_flagdata")
+        maxuv_l = int(maxuv_l)
+        uvbin_size = int(uvbin_size)
+        for i in range(0,maxuv_l,uvbin_size):
+            try:
+                with suppress_output():
+                    if mode=="rflag":
+                        flagdata(vis=msname,mode=mode,uvrange=f"{i}~{i+uvbin_size}lambda",timedevscale=threshold,freqdevscale=threshold,flagbackup=False)
+                    else:
+                        flagdata(vis=msname,mode=mode,uvrange=f"{i}~{i+uvbin_size}lambda",timecutoff=threshold,freqcutoff=threshold,flagbackup=False)
+            except:
+                pass
+        return 0
+    except Exception as e:
+        traceback.print_exc()
+        if flagbackup:
+            with suppress_output():
+                flagmanager(vis=msname,mode="restore",versionname="uvbin_flagdata_1")
+                flagmanager(vis=msname,mode="delete",versionname="uvbin_flagdata_1")
+        return 1   
 
 
 def get_unflagged_antennas(

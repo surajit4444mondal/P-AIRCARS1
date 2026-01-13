@@ -10,8 +10,10 @@ import sys
 import os
 import copy
 from casatools import msmetadata, table
+from casatasks import flagmanager
 from dask import delayed
 from functools import partial
+from astropy.io import fits
 from paircars.utils import *
 
 logging.getLogger("distributed").setLevel(logging.ERROR)
@@ -23,15 +25,17 @@ def do_selfcal(
     msname="",
     workdir="",
     selfcaldir="",
+    metafits="",
+    cal_applied=True,
     start_threshold=5,
     end_threshold=3,
     max_iter=100,
     max_DR=1000,
-    min_iter=2,
-    DR_convegerence_frac=0.3,
+    min_iter=5,
+    DR_convegerence_frac=0.1,
     uvrange="",
     minuv=0,
-    solint="60s",
+    solint="10s",
     weight="briggs",
     robust=0.0,
     do_apcal=True,
@@ -53,6 +57,10 @@ def do_selfcal(
         Work directory
     selfcaldir : str
         Working directory
+    metafits : str
+        Metafits file
+    cal_applied : bool, optional
+        Basic calibration applied or not
     start_threshold : int, optional
         Start CLEAN threhold
     end_threshold : int, optional
@@ -180,16 +188,11 @@ def do_selfcal(
                 )
         msname = selfcalms
 
-        ##############################################
-        # Initial flagging -- zeros and non-disk data
-        #############################################
+        ################################################################
+        # Initial flagging -- zeros, extreme bad data, and non-disk data
+        ################################################################
+        logger.info("Initial flagging -- zeros, extreme bad data, and non-disk data")
         with suppress_output():
-            result = flag_non_disk(msname)
-            if result!=0:
-                print(f"Could not flag non-disk time properly.")
-                start_gauss_source=False
-            else:
-                start_gauss_source=True
             flagdata(
                 vis=msname,
                 mode="clip",
@@ -197,7 +200,16 @@ def do_selfcal(
                 datacolumn="data",
                 flagbackup=False,
             )
-     
+            result = uvbin_flag(msname,uvbin_size=10,mode="rflag",threshold=10.0,flagbackup=True)
+            if result!=0:
+                logger.info(f"UV-bin flagging is not successful.")
+            result = flag_non_disk(msname)
+            if result!=0:
+                logger.info(f"Could not flag non-disk time properly.")
+                start_gauss_source=False
+            else:
+                start_gauss_source=True
+              
         ############################################
         # Imaging and calibration parameters
         ############################################
@@ -237,21 +249,28 @@ def do_selfcal(
         sigma_reduced_count = 0
         calmode = "p"
         threshold = start_threshold
-        last_round_gaintable = ""
+        last_round_gaintable = []
         use_previous_model = False
         os.system("rm -rf *_selfcal_present*")
-
+        fluxscale_mwa=False
+        solar_attn=1
+        if cal_applied is False:
+            fluxscale_mwa=True
+            if os.path.exists(metafits) is False:
+                logger.error("Calibration solutions were not applied and target metafits is also not supplied. Provide any one of them.")
+                return 1, []
+            solar_attn = float(fits.getheader(metafits)["ATTEN_DB"])
+            
         ###########################################
         # Starting using Gaussian model
         ###########################################
         if start_gauss_source:
-            print (f"Starting self-calibration using Gaussian source model.")
+            logger.info(f"Starting self-calibration using Gaussian source model.")
             msg, caltable = quiet_sun_selfcal(msname,logger,selfcaldir,refant=str(refant),solint=solint)
             if msg==0:
-                num_iter+=1
-                print ("Starting self-calibration using Gaussian model is successful.")
+                logger.info("Starting self-calibration using Gaussian model is successful.")
             else:
-                print ("Starting self-calibration using Gaussian model is not successful.")
+                logger.info("Starting self-calibration using Gaussian model is not successful.")
                 
         ##########################################
         # Starting selfcal loops
@@ -289,6 +308,8 @@ def do_selfcal(
                     weight=weight,
                     robust=robust,
                     use_solar_mask=solar_selfcal,
+                    fluxscale_mwa=fluxscale_mwa,
+                    solar_attn=solar_attn,
                     ncpu=ncpu,
                     mem=round(mem, 2),
                 )
@@ -325,6 +346,8 @@ def do_selfcal(
                         weight=weight,
                         robust=robust,
                         use_solar_mask=solar_selfcal,
+                        fluxscale_mwa=fluxscale_mwa,
+                        solar_attn=solar_attn,
                         ncpu=ncpu,
                         mem=round(mem, 2),
                     )
@@ -368,7 +391,7 @@ def do_selfcal(
             logger.info(
                 f"RMS of the images: " + str(RMS1) + "," + str(RMS2) + "," + str(RMS3)
             )
-            if DR3 > 0.9 * DR2:
+            if DR3 > 0.9 * DR2 and (calmode=="p" or (calmode=="ap" and num_iter_after_ap > min_iter)):
                 use_previous_model = True
             else:
                 use_previous_model = False
@@ -432,6 +455,7 @@ def do_selfcal(
                 time.sleep(5)
                 clean_shutdown(sub_observer)
                 return 0, last_round_gaintable
+                
             ###########################
             # Checking DR convergence
             ###########################
@@ -550,16 +574,17 @@ def do_selfcal(
 
 def main(
     mslist,
+    metafits,
     workdir,
     caldir,
-    #cal_applied,  # TODO
+    cal_applied=True,  
     start_thresh=5,
     stop_thresh=3,
     max_iter=100,
     max_DR=1000,
-    min_iter=2,
-    conv_frac=0.3,
-    solint="60s",
+    min_iter=5,
+    conv_frac=0.1,
+    solint="10s",
     uvrange="",
     minuv=0,
     weight="briggs",
@@ -583,10 +608,14 @@ def main(
     ----------
     mslist : str
         Comma-separated list of target measurement sets to be self-calibrated.
+    metafits : str
+        Metafits file
     workdir : str
         Path to the working directory for outputs, intermediate files, and logs.
     caldir : str
         Directory containing calibration tables (e.g., from flux or phase calibrators).
+    cal_applied : bool, optional
+        Basic initial calibration applied or not.
     start_thresh : float, optional
         Initial image dynamic range threshold to start self-calibration. Default is 5.
     stop_thresh : float, optional
@@ -598,9 +627,9 @@ def main(
     min_iter : int, optional
         Minimum number of iterations before checking for convergence. Default is 2.
     conv_frac : float, optional
-        Convergence criterion: fractional change in dynamic range below which iteration stops. Default is 0.3.
+        Convergence criterion: fractional change in dynamic range below which iteration stops. Default is 0.1.
     solint : str, optional
-        Solution interval for gain calibration (e.g., "inf", "60s", "int"). Default is "60s".
+        Solution interval for gain calibration (e.g., "inf", "10s", "int"). Default is "60s".
     uvrange : str, optional
         UV range to be used for imaging and calibration, in CASA format. Default is "" (all baselines).
     minuv : float, optional
@@ -702,6 +731,8 @@ def main(
         else:
             partial_do_selfcal = partial(
                 do_selfcal,
+                metafits=str(metafits),
+                cal_applied=bool(cal_applied),
                 start_threshold=float(start_thresh),
                 end_threshold=float(stop_thresh),
                 max_iter=int(max_iter),
@@ -729,7 +760,7 @@ def main(
                     filtered_mslist.append(ms)
                 else:
                     print(f"Issue in : {ms}")
-                    os.system("rm -rf {ms}")
+                    os.system(f"rm -rf {ms}")
             mslist = filtered_mslist
 
             ######################################
@@ -811,6 +842,7 @@ def main(
                 results = list(dask_client.gather(dask_client.compute(tasks)))
 
                 gcal_list = []
+                bpass_list = []
                 for i in range(len(results)):
                     r = results[i]
                     msg = r[0]
@@ -819,18 +851,27 @@ def main(
                             f"Self-calibration was not successful for ms: {mslist[i]}."
                         )
                     else:
-                        gcal = r[1]
-                        cal_metadata = get_caltable_metadata(gcal)
+                        gaintables = r[1]
+                        gcal = gaintables[0]
+                        bpass = gaintables[1]
+                        cal_metadata = get_caltable_metadata(bpass)
                         freq_start = cal_metadata["Channel 0 frequency (MHz)"]
                         bw = cal_metadata["Bandwidth (MHz)"]
                         freq_end = freq_start + bw
                         ch_start = freq_to_MWA_coarse(freq_start)
                         ch_end = freq_to_MWA_coarse(freq_end)
                         final_gain_caltable = (
-                            caldir + f"/selfcal_coarsechan_{ch1_start}_{ch_end}.gcal"
+                            caldir + f"/selfcal_coarsechan_{ch_start}_{ch_end}.gcal"
                         )
                         os.system(f"cp -r {gcal} {final_gain_caltable}")
                         gcal_list.append(final_gain_caltable)
+                        
+                        final_bpass_caltable = (
+                            caldir + f"/selfcal_coarsechan_{ch_start}_{ch_end}.bcal"
+                        )
+                        os.system(f"cp -r {bpass} {final_bpass_caltable}")
+                        bpass_list.append(final_bpass_caltable)
+                        
                 if not keep_backup:
                     for ms in mslist:
                         selfcaldir = (
@@ -841,8 +882,10 @@ def main(
                         )
                         os.system("rm -rf " + selfcaldir)
                 if len(gcal_list) > 0:
-                    print(f"Final selfcal caltables: {gcal_list}")
+                    print(f"Final gaincal selfcal caltables: {gcal_list}")
                     msg = 0
+                    if len(bpass_list) > 0:
+                        print(f"Final bandpass selfcal caltables: {bpass_list}")
                 else:
                     print("No self-calibration is successful.")
                     msg = 1
@@ -896,6 +939,19 @@ def cli():
         "###################\nAdvanced calibration and imaging parameters\n###################"
     )
     adv_args.add_argument(
+        "--metafits",
+        type=str,
+        default="",
+        help="Metafits file",
+        metavar="String",
+    )
+    adv_args.add_argument(
+        "--no_cal_applied",
+        action="store_false",
+        dest="cal_applied",
+        help="Basic calibration is not applied",
+    )
+    adv_args.add_argument(
         "--start_thresh",
         type=float,
         default=5,
@@ -926,18 +982,18 @@ def cli():
     adv_args.add_argument(
         "--min_iter",
         type=int,
-        default=2,
+        default=5,
         help="Minimum number of selfcal iterations",
         metavar="Integer",
     )
     adv_args.add_argument(
         "--conv_frac",
         type=float,
-        default=0.3,
+        default=0.1,
         help="Fractional change in DR to determine convergence",
         metavar="Float",
     )
-    adv_args.add_argument("--solint", type=str, default="60s", help="Solution interval")
+    adv_args.add_argument("--solint", type=str, default="10s", help="Solution interval")
     adv_args.add_argument(
         "--uvrange",
         type=str,
@@ -1022,7 +1078,9 @@ def cli():
 
     msg = main(
         mslist=args.mslist,
+        metafits=args.metafits,
         workdir=args.workdir,
+        cal_applied=args.cal_applied,
         caldir=args.caldir,
         start_thresh=args.start_thresh,
         stop_thresh=args.stop_thresh,

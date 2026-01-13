@@ -183,6 +183,7 @@ dependencies = [
     "numexpr==2.14.1",
     "mwa_hyperbeam==0.10.4",
     "skyfield==1.53",
+    "pycurl==7.45.7",
 ]
 urls = { "Homepage" = "https://github.com/devojyoti96/P-AIRCARS" }
 
@@ -228,13 +229,14 @@ show-paircars-ms="paircars.pipeline.show_msdetails:cli"
 show-paircars-status = "paircars.pipeline.show_status:cli"
 run-mwa-makeds = "paircars.pipeline.mwa_make_ds:cli"
 run-mwa-solar-siderealcor = "paircars.pipeline.do_sidereal_cor:cli"
-create-caltable = "paircars.utils.create_caltable:cli"
+run-mwa-fill-caltable = "paircars.casacoreutils.fill_caltable:cli"
 
 
 [tool.setuptools]
 packages = [
     "paircars",
     "paircars.utils",
+    "paircars.casacoreutils",
     "paircars.pipeline",
     "paircars.data"
 ]

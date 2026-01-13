@@ -87,7 +87,7 @@ def freq_to_MWA_coarse(freq):
     int
         MWA coarse channel number
     """
-    return int(freq // 1.28)
+    return int(round(freq // 1.28))
 
 
 def get_MWA_coarse_bands(msname):

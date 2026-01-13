@@ -260,7 +260,7 @@ def run_all_applysol(
                 filtered_mslist.append(ms)
             else:
                 print(f"Issue in : {ms}")
-                os.system(f"rm -rf {ms}")
+
         mslist = filtered_mslist
         if len(mslist) == 0:
             print("No valid measurement set.")

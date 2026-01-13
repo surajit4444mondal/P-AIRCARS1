@@ -120,7 +120,7 @@ def create_circular_mask_array(data, radius):
     return mask
 
 
-def calc_solar_image_stat(imagename, disc_size=18):
+def calc_solar_image_stat(imagename, disc_size=32):
     """
     Calculate solar image dynamic range
 
@@ -129,7 +129,7 @@ def calc_solar_image_stat(imagename, disc_size=18):
     imagename : str
         Fits image name
     disc_size : float, optional
-        Solar disc size in arcmin (default : 18)
+        Solar disc size in arcmin (default : 32)
 
     Returns
     -------
@@ -165,8 +165,14 @@ def calc_solar_image_stat(imagename, disc_size=18):
     minval = float(np.nanmin(masked_data))
     rms = float(np.nanstd(masked_data))
     total_val = float(np.nansum(unmasked_data))
-    rms_dyn = float(maxval / rms)
-    minmax_dyn = float(maxval / abs(minval))
+    if rms!=0:
+        rms_dyn = float(maxval / rms)
+    else:
+        rms_dyn = np.nan
+    if abs(minval)!=0:
+        minmax_dyn = float(maxval / abs(minval))
+    else:
+        minmax_dyn = np.nan
     mean_val = float(np.nanmean(unmasked_data))
     median_val = float(np.nanmedian(unmasked_data))
     del data, mask, unmasked_data, masked_data
@@ -349,14 +355,13 @@ def make_timeavg_image(wsclean_images, outfile_name, keep_wsclean_images=True):
         Output image name.
     """
     timestamps = []
+    data=[]
     for i in range(len(wsclean_images)):
         image = wsclean_images[i]
-        if i == 0:
-            data = fits.getdata(image)
-        else:
-            data += fits.getdata(image)
+        data.append(fits.getdata(image))
         timestamps.append(fits.getheader(image)["DATE-OBS"])
-    data /= len(wsclean_images)
+    data=np.array(data)
+    data=np.nanmean(data,axis=0)
     avg_timestamp = average_timestamp(timestamps)
     header = fits.getheader(wsclean_images[0])
     header["DATE-OBS"] = avg_timestamp

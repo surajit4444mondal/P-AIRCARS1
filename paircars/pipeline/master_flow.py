@@ -659,6 +659,7 @@ def run_selfcal_jobs(
     mslist,
     workdir,
     caldir,
+    metafits,
     cal_applied,
     start_thresh=5.0,
     stop_thresh=3.0,
@@ -692,6 +693,8 @@ def run_selfcal_jobs(
         Working directory
     caldir : str
         Caltable directory
+    metafits : str
+        Metafits file
     cal_applied : bool
         Whether calibration solutions are applied or not
     cpu_frac : float, optional
@@ -762,7 +765,8 @@ def run_selfcal_jobs(
                 mslist,
                 workdir,
                 caldir,
-                cal_applied,
+                metafits=metafits,
+                cal_applied=cal_applied,
                 start_thresh=float(start_thresh),
                 stop_thresh=float(stop_thresh),
                 max_iter=float(max_iter),
@@ -1912,6 +1916,7 @@ def master_control(
         #########################################################
         # Applying solutions on targets for self-calibration
         #########################################################
+        cal_applied=False
         if do_selfcal and has_cal:  # If calibrator solutions are available
             current_worker = get_total_worker(dask_cluster)
             nworker = min(max_worker, len(selfcal_mslist) + current_worker)
@@ -1934,12 +1939,14 @@ def master_control(
             )
             try:
                 msg = future_apply_basical_selfcal.result()
+                cal_applied=True
             except Exception as e:
                 print(
-                    "!!!! WARNING: Error in applying basic calibration solutions on target. Not continuing further for selfcal.!!!!"
+                    "!!!! WARNING: Error in applying basic calibration solutions on target. Continuing selfcal without basic calibration.!!!!"
                 )
-                do_selfcal = False
                 traceback.print_exc()
+                cal_applied=False
+                do_selfcal=True
             finally:
                 scale_worker_and_wait(dask_cluster, current_worker)
 
@@ -1981,7 +1988,8 @@ def master_control(
                 selfcal_mslist,
                 workdir,
                 caldir,
-                has_cal,
+                target_metafits,
+                cal_applied,
                 solint=solint,
                 do_apcal=do_ap_selfcal,
                 solar_selfcal=solar_selfcal,
@@ -2089,7 +2097,7 @@ def master_control(
                     filtered_mslist.append(ms)
                 else:
                     print(f"Issue in : {ms}")
-                    os.system("rm -rf {ms}")
+                    os.system(f"rm -rf {ms}")
             split_target_mslist = filtered_mslist
             if len(split_target_mslist) == 0:
                 print("No filtered target ms are available in work directory.")

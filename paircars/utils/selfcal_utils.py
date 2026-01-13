@@ -254,8 +254,6 @@ def intensity_selfcal(
     calmode="ap",
     solint="60s",
     refant="1",
-    solmode="",
-    gaintype="G",
     applymode="calonly",
     threshold=3,
     weight="briggs",
@@ -264,6 +262,8 @@ def intensity_selfcal(
     use_solar_mask=True,
     mask_radius=32,
     min_tol_factor=-1,
+    fluxscale_mwa=False,
+    solar_attn=10,
     ncpu=-1,
     mem=-1,
 ):
@@ -308,6 +308,10 @@ def intensity_selfcal(
         Mask radius in arcminute
     min_tol_factor : float, optional
         Minimum tolerance factor
+    fluxscale_mwa : bool, optional
+        Fluxscale caltable using reference bandpass
+    solar_attn : float, optional
+        Solar attenuation in dB (only used if fluxscale_mwa is True)
     ncpu : int, optional
         Number of CPUs to use in WSClean
     mem : float, optional
@@ -317,8 +321,8 @@ def intensity_selfcal(
     -------
     int
         Success message
-    str
-        Caltable name
+    list
+        Caltable name list
     float
         RMS based dynamic range
     float
@@ -350,7 +354,9 @@ def intensity_selfcal(
             + os.path.basename(msname).split(".ms")[0]
             + "_selfcal_present"
         )
-
+        applycal_gaintable=[]
+        interp=[]
+        
         ####################################
         # Determining ms metadata
         ####################################
@@ -372,7 +378,7 @@ def intensity_selfcal(
         ###############################
         if min_tol_factor <= 0:
             min_tol_factor = 1.0  # In percentage
-        nintervals, nchans = get_optimal_image_interval(
+        nintervals, _ = get_optimal_image_interval(
             msname,
             temporal_tol_factor=float(min_tol_factor / 100.0),
             spectral_tol_factor=0.1,
@@ -435,14 +441,7 @@ def intensity_selfcal(
         wsclean_args.append(f"-multiscale-scale-bias {scale_bias}")
         if imsize >= 2048 and 4 * max(multiscale_scales) < 1024:
             wsclean_args.append("-parallel-deconvolution 1024")
-            
-        #####################################
-        # Spectral imaging configuration
-        #####################################
-        if nchans > 1:
-            wsclean_args.append(f"-channels-out {nchans}")
-            wsclean_args.append("-no-mf-weighting")
-
+      
         #####################################
         # Temporal imaging configuration
         #####################################
@@ -464,7 +463,7 @@ def intensity_selfcal(
         msg = run_wsclean(wsclean_cmd, "solarwsclean", verbose=False)
         if msg != 0:
             logger.info(f"Imaging is not successful.\n")
-            return 1, "", 0, 0, "", "", ""
+            return 1, applycal_gaintable, 0, 0, "", "", ""
 
         #####################################
         # Analyzing images
@@ -491,7 +490,7 @@ def intensity_selfcal(
 
         if len(wsclean_images) == 0:
             print("No image is made.")
-            return 1, "", 0, 0, "", "", ""
+            return 1, applycal_gaintable, 0, 0, "", "", ""
         elif len(wsclean_images) == 1:
             os.system(f"cp -r {wsclean_images[0]} {final_image}")
         else:
@@ -547,62 +546,88 @@ def intensity_selfcal(
         )
         if model_flux == 0:
             logger.info(f"No model flux.\n")
-            return 1, "", 0, 0, "", "", ""
+            return 1, applycal_gaintable, 0, 0, "", "", ""
 
-        #####################
-        # Perform calibration
-        #####################
-        bpass_caltable = prefix.replace("present", f"{round_number}") + ".gcal"
-        if os.path.exists(bpass_caltable):
-            os.system("rm -rf " + bpass_caltable)
-
+        ##########################
+        # Perform gain calibration
+        ##########################
+        gain_caltable = prefix.replace("present", f"{round_number}") + ".gcal"
+        if os.path.exists(gain_caltable):
+            os.system("rm -rf " + gain_caltable)
+             
         logger.info(
-            f"bandpass(vis='{msname}',caltable='{bpass_caltable}',uvrange='{uvrange}',refant='{refant}',solint='{solint}',minsnr=1,solnorm=True)\n"
+            f"gaincal(vis='{msname}',caltable='{gain_caltable}',uvrange='{uvrange}',refant='{refant}',solint='{solint}',calmode='{calmode}',minsnr=1,solnorm=True)\n"
         )
         with suppress_output():
             gaincal(
                 vis=msname,
-                caltable=bpass_caltable,
+                caltable=gain_caltable,
                 uvrange=uvrange,
                 refant=refant,
                 minsnr=1,
+                calmode=calmode,
                 solint=f"{solint}",
                 solnorm=True,
             )
-        if os.path.exists(bpass_caltable) == False:
+       
+        if os.path.exists(gain_caltable) == False:
             logger.info(f"No gain solutions are found.\n")
-            return 2, "", 0, 0, "", "", ""
+            return 2, applycal_gaintable, 0, 0, "", "", ""
+        applycal_gaintable.append(gain_caltable)
+        interp.append("linear")
+            
+        ##################################
+        # Perform bandpass calibration
+        ##################################
+        if calmode=="ap":
+            bpass_caltable = prefix.replace("present", f"{round_number}") + ".bcal"
+            if os.path.exists(bpass_caltable):
+                os.system("rm -rf " + bpass_caltable)
+
+            logger.info(
+                f"bandpass(vis='{msname}',caltable='{bpass_caltable}',uvrange='{uvrange}',refant='{refant}',solint='inf',gaintable=['{gain_caltable}'],minsnr=1,solnorm=True)\n"
+            )
+            with suppress_output():
+                bandpass(
+                    vis=msname,
+                    caltable=bpass_caltable,
+                    uvrange=uvrange,
+                    refant=refant,
+                    minsnr=1,
+                    solint="inf",
+                    gaintable=[gain_caltable],
+                    solnorm=True,
+                )
+            if os.path.exists(bpass_caltable) == False:
+                logger.info(f"No bandpass solutions are found.\n")
+                return 2, applycal_gaintable, 0, 0, "", "", ""
+            
+            applycal_gaintable.append(bpass_caltable)
+            interp.append("linear,linearflag")
 
         #########################################
         # Flagging bad gains
         #########################################
-        with suppress_output():
-            flagdata(
-                vis=bpass_caltable, mode="rflag", datacolumn="CPARAM", flagbackup=False
-            )
-        tb = table()
-        tb.open(bpass_caltable, nomodify=False)
-        gain = tb.getcol("CPARAM")
-        if calmode == "p":
-            gain /= np.abs(gain)
-        flag = tb.getcol("FLAG")
-        gain[flag] = 1.0
-        pos = np.where(np.abs(gain) == 0.0)
-        gain[pos] = 1.0
-        flag[pos] = True
-        tb.putcol("CPARAM", gain)
-        tb.putcol("FLAG", flag)
-        tb.flush()
-        tb.close()
-
+        if calmode=="ap":
+            with suppress_output():
+                flagdata(
+                    vis=gain_caltable, mode="rflag", datacolumn="CPARAM", flagbackup=False
+                )
+                flagdata(
+                    vis=bpass_caltable, mode="rflag", datacolumn="CPARAM", flagbackup=False
+                )
+            if fluxscale_mwa:
+                logger.info("Flux scaled caltable using MWA reference bandpass.")
+                fluxcal_caltable(bpass_caltable,attn=solar_attn)
+            
         logger.info(
-            f"applycal(vis={msname},gaintable=[{bpass_caltable}],interp=['linear,linearflag'],applymode='{applymode}',calwt=[False])\n"
+            f"applycal(vis={msname},gaintable={applycal_gaintable},interp={interp},applymode='{applymode}',calwt=[False])\n"
         )
         with suppress_output():
             applycal(
                 vis=msname,
-                gaintable=[bpass_caltable],
-                interp=["linear,linearflag"],
+                gaintable=applycal_gaintable,
+                interp=interp,
                 applymode=applymode,
                 calwt=[False],
             )
@@ -620,7 +645,7 @@ def intensity_selfcal(
             )
         return (
             0,
-            bpass_caltable,
+            applycal_gaintable,
             rms_DR,
             rms,
             final_image,
@@ -628,6 +653,5 @@ def intensity_selfcal(
             final_residual,
         )
     except Exception as e:
-        print(e)
         traceback.print_exc()
-        return 3, "", 0, 0, "", "", ""
+        return 3, applycal_gaintable, 0, 0, "", "", ""

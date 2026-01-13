@@ -27,8 +27,8 @@ def perform_imaging(
     imagedir="",
     imsize=1024,
     cellsize=2,
-    nchan=1,
-    ntime=1,
+    image_freqres=-1,
+    image_timeres=-1,
     pol="I",
     weight="briggs",
     robust=0.0,
@@ -41,7 +41,7 @@ def perform_imaging(
     saveres=True,
     ncpu=-1,
     mem=-1,
-    cutout_rsun=2.5,
+    cutout_rsun=4.0,
     make_overlay=True,
     make_plots=True,
     logfile="imaging.log",
@@ -65,10 +65,10 @@ def perform_imaging(
         Image size in pixels
     cellsize : float, optional
         Cell size in arcseconds
-    nchan : int, optional
-        Number of spectral channels
-    ntime : int, optional
-        Number of temporal slices
+    image_freqres : float, optional
+        Frequency resolution of image in MHz
+    image_timeres : float, optional
+        Time resolution of image in seconds
     pol : str, optional
         Stokes parameters to image
     weight : str, optional
@@ -92,7 +92,7 @@ def perform_imaging(
     band : str, optional
         Band name
     cutout_rsun : float, optional
-        Cutout image size in solar radii from center (default: 2.5 solar radii)
+        Cutout image size in solar radii from center (default: 4.0 solar radii)
     make_overlay : bool, optional
         Make SUVI MWA overlay
     make_plots : bool, optional
@@ -136,6 +136,7 @@ def perform_imaging(
         msname = msname.rstrip("/")
         msname = os.path.abspath(msname)
         logger.info(f"{os.path.basename(msname)} --Perform imaging...\n")
+        
         #########
         # Imaging
         #########
@@ -143,9 +144,12 @@ def perform_imaging(
         msmd.open(msname)
         freq = msmd.meanfreq(0, unit="MHz")
         freqs = msmd.chanfreqs(0, unit="MHz")
+        freqres = msmd.chanres(0, unit="MHz")[0]
         times = msmd.timesforspws(0)
+        timeres = np.nanmin(np.diff(times))
         npol = msmd.ncorrforpol()[0]
         msmd.close()
+        
         ###################################
         # Finding channel and time ranges
         ###################################
@@ -169,6 +173,7 @@ def perform_imaging(
             time.sleep(5)
             clean_shutdown(sub_observer)
             return 1, []
+            
         if timerange != "":
             start_times = []
             end_times = []
@@ -234,20 +239,6 @@ def perform_imaging(
         if pol == "I":
             wsclean_args.append("-no-negative")
 
-        #####################################
-        # Spectral imaging configuration
-        #####################################
-        if nchan > 1:
-            wsclean_args.append(f"-channels-out {int(nchan)}")
-            wsclean_args.append("-no-mf-weighting")
-            wsclean_args.append("-join-channels")
-
-        #####################################
-        # Temporal imaging configuration
-        #####################################
-        if ntime > 1:
-            wsclean_args.append(f"-intervals-out {int(ntime)}")
-
         ################################################
         # Creating and using a solar mask
         ################################################
@@ -270,6 +261,23 @@ def perform_imaging(
                     f"-channel-range {start_chans[i]} {end_chans[i]}"
                 )
                 temp_wsclean_args.append(f"-interval {start_times[j]} {end_times[j]}")
+                
+                #####################################
+                # Spectral imaging configuration
+                #####################################
+                if image_freqres > 0:
+                    nchan = max(1,int(image_freqres/freqres))
+                    chan_chunk = int((end_chans[i]-start_chans[i])/nchan)
+                    temp_wsclean_args.append(f"-channels-out {chan_chunk}")
+                    temp_wsclean_args.append("-no-mf-weighting")
+
+                #####################################
+                # Temporal imaging configuration
+                #####################################
+                if image_timeres > 0:
+                    ntime = max(1,int(image_timeres/timeres))
+                    time_chunk = int((end_times[j]-start_times[j])/ntime) 
+                    temp_wsclean_args.append(f"-intervals-out {time_chunk}")
 
                 ######################################
                 # Multiscale configuration
@@ -403,15 +411,22 @@ def perform_imaging(
                         os.makedirs(imagedir + "/images", exist_ok=True)
                         final_image_list = []
                         for imagename in imagelist:
+                            if "MFS" not in imagename:
+                                temp_make_overlay=False
+                                temp_make_plots=False
+                            else:
+                                temp_make_overlay=make_overlay
+                                temp_make_plots=make_plots
                             renamed_image = rename_mwasolar_image(
                                 imagename,
                                 imagedir=imagedir + "/images",
                                 pol=pol,
                                 cutout_rsun=cutout_rsun,
-                                make_overlay=make_overlay,
-                                make_plots=make_plots,
+                                make_overlay=temp_make_overlay,
+                                make_plots=temp_make_plots,
                             )
-                            final_image_list.append(renamed_image)
+                            if renamed_image is not None:
+                                final_image_list.append(renamed_image)
                         final_list_dic["image"] = final_image_list
                         if savemodel and len(modellist) > 0:
                             final_model_list = []
@@ -425,7 +440,8 @@ def perform_imaging(
                                     make_overlay=False,
                                     make_plots=False,
                                 )
-                                final_model_list.append(renamed_model)
+                                if renamed_model is not None:
+                                    final_model_list.append(renamed_model)
                             final_list_dic["model"] = final_model_list
                         if saveres and len(reslist) > 0:
                             final_res_list = []
@@ -439,7 +455,8 @@ def perform_imaging(
                                     make_overlay=False,
                                     make_plots=False,
                                 )
-                                final_res_list.append(renamed_res)
+                                if renamed_res is not None:
+                                    final_res_list.append(renamed_res)
                             final_list_dic["residual"] = final_res_list
             if os.path.exists(f"{imagedir}/images/dask-scratch-space"):
                 os.system(f"rm -rf {imagedir}/images/dask-scratch-space")
@@ -550,9 +567,9 @@ def run_all_imaging(
     saveres : bool, optional
         Save residual images or not
     cutout_rsun : float, optional
-        Cutout image size (width ans height is : 2 times cutout_rsun)
-        Default value: 2 solar radii
-        Note: default FoV is 2 solar solar radii. If cutout_rsun is chosen larger than 2 solar radii, FoV will be increased accordingly.
+        Cutout image size (width and height is : 2 times cutout_rsun)
+        Default value: 4 solar radii
+        Note: default FoV is 8 solar solar radii. If cutout_rsun is chosen larger than 8 solar radii, FoV will be increased accordingly.
     make_overlay : bool, optional
         Make SUVI MWA overlay
     make_plots : bool, optional
@@ -610,15 +627,15 @@ def run_all_imaging(
                 filtered_mslist.append(ms)
             else:
                 print(f"Issue in : {ms}")
-                os.system(f"rm -rf {ms}")
+
         mslist = filtered_mslist
         if len(mslist) == 0:
             print("No valid measurement set is found.")
             return 1
 
-        #####################################
-        # Determining spectro-temporal chunks
-        #####################################
+        #################################################
+        # Determining maximum spectro-temporal chunks
+        #################################################
         if timeres < 0:
             ntime_list = [1] * len(mslist)
         else:
@@ -629,7 +646,7 @@ def run_all_imaging(
                 times = msmd.timesforspws(0)
                 msmd.close()
                 tw = max(times) - min(times)
-                ntime = max(1, int(tw / timeres))
+                ntime = max(1, min(len(times), int(tw / timeres)))
                 ntime_list.append(ntime)
         if freqres < 0:
             nchan_list = [1] * len(mslist)
@@ -641,7 +658,7 @@ def run_all_imaging(
                 freqs = msmd.chanfreqs(0, unit="MHz")
                 msmd.close()
                 bw = max(freqs) - min(freqs)
-                nchan = max(1, int(np.ceil(bw / freqres)))
+                nchan = max(1, min(len(freqs), int(np.ceil(bw / freqres))))
                 nchan_list.append(nchan)
 
         ######################################
@@ -689,8 +706,6 @@ def run_all_imaging(
         tasks = []
         for i in range(len(mslist)):
             ms = mslist[i]
-            nchan = nchan_list[i]
-            ntime = ntime_list[i]
             num_pixel_in_psf = calc_npix_in_psf(weight, robust=robust)
             cellsize = calc_cellsize(ms, num_pixel_in_psf)
             instrument_fov = calc_field_of_view(ms, FWHM=False)
@@ -703,7 +718,7 @@ def run_all_imaging(
                 instrument_fov, 3 * sun_size * 60
             )  # 3 times sun size at that frequency
             if cutout_rsun == -1:
-                cutout_rsun = 2 * round(
+                cutout_rsun = 4 * round(
                     sun_size / 32, 2
                 )  # Multiple of optical disk of the sun
             if fov < (2 * (cutout_rsun * 16) * 60):
@@ -734,8 +749,8 @@ def run_all_imaging(
                     imagedir=imagedir,
                     imsize=imsize,
                     cellsize=cellsize,
-                    nchan=nchan,
-                    ntime=ntime,
+                    image_freqres=freqres,
+                    image_timeres=timeres,
                     pol=pol,
                     weight=weight,
                     robust=robust,
@@ -996,7 +1011,6 @@ def cli():
     basic_args.add_argument(
         "--outdir",
         type=str,
-        required=True,
         default="",
         help="Output directory for imaging products",
     )
