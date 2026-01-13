@@ -73,26 +73,25 @@ def run_pbcor(
         Success message
     """
     freq = get_fits_freq(imagename)
-    outfile = f"{pbcor_dir}/{os.path.basename(imagename).split('fits')[0]}_pbcor.fits"
+    outfile = f"{pbcor_dir}/{os.path.basename(imagename).split('.fits')[0]}_pbcor.fits"
     pbfile = f"{pbdir}/freq_{freq}.npy"
     cmd = [
         "run-mwa-singlepbcor",
-        "--imagename",
-        str(imagename),
-        "--metafits",
-        str(metafits),
         "--num_threads",
         str(ncpu),
-        "--outfile",
-        str(outfile),
         "--interpolated",
     ]
     if os.path.exists(pbfile):
-        cmd.append("--pb_jones_file", pbfile)
+        cmd.append("--pb_jones_file")
+        cmd.append(pbfile)
     else:
-        cmd.append("--save_pb", pbfile)
+        cmd.append("--save_pb")
+        cmd.append(pbfile)
     if restore:
         cmd.append("--restore")
+    cmd.append(imagename)
+    cmd.append(metafits)
+    cmd.append(outfile)
 
     if verbose:
         print("Executing:", " ".join(cmd))

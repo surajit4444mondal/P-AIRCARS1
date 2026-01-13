@@ -3,6 +3,7 @@ import time
 import traceback
 import warnings
 import argparse
+import sys
 import numpy as np
 from numpy.linalg import inv
 from astropy.io import fits
@@ -77,15 +78,14 @@ def get_pbcor_image(
     if sweet_spot_file == "" or os.path.exists(sweet_spot_file) is False:
         sweet_spot_file = sweet_spot_file_paircars
     nthreads = max(1, nthreads)
-    outfile = os.path.basename(outfile)
 
     if restore == False:
         print(
-            "Correcting image : {os.path.basename(imagename)} for MWA primary beam response.\n"
+            f"Correcting image : {os.path.basename(imagename)} for MWA primary beam response.\n"
         )
     else:
         print(
-            "Undo the correction image : {os.path.basename(imagename)} for MWA primary beam response.\n"
+            f"Undo the correction image : {os.path.basename(imagename)} for MWA primary beam response.\n"
         )
 
     ###################################
@@ -127,17 +127,20 @@ def get_pbcor_image(
     ##############################
     if imageheader["CTYPE3"] == "STOKES":
         stokesaxis = 3
+        stokes="IQUV"
     elif imageheader["CTYPE4"] == "STOKES":
         stokesaxis = 4
+        stokes="IQUV"
     else:
         stokesaxis = 1
+        stokes="I"
 
     ####################################
     # Preparing data and data grid
     ####################################
     if stokes == "I":
         imagedata = np.repeat(imagedata, 4, 0)
-    alt_az_array = get_azza_from_fits(fitsfile)
+    alt_az_array = get_azza_from_fits(imagename, metafits)
 
     if pb_jones_file == "" or os.path.exists(pb_jones_file) is False:
         jones_array = get_jones_array(
@@ -181,7 +184,7 @@ def get_pbcor_image(
                 iau_order=iau_order,
             )
 
-    stokes = get_IQUV(fitsfile, stokesaxis=stokesaxis)
+    stokes = get_IQUV(imagename, stokesaxis=stokesaxis)
     Vij = get_inst_pols(stokes)
     Vij_reshaped = Vij.reshape(Vij.shape[0] * Vij.shape[1], 2, 2)
     jones_array_H = np.transpose(jones_array.conj(), axes=((0, 2, 1)))
@@ -212,7 +215,7 @@ def get_pbcor_image(
     if os.path.exists(outfile):
         os.system(f"rm -rf {outfile}")
     fits.writeto(outfile, data=imagedata, header=imageheader, overwrite=True)
-    print("Output image written to : {outfile}.\n")
+    print(f"Output image written to : {outfile}\n")
     return outfile
 
 
@@ -220,69 +223,87 @@ def cli():
     parser = argparse.ArgumentParser(
         description="Correct images for MWA primary beam response"
     )
-
-    parser.add_argument(
-        "--imagename",
-        required=True,
+    # Essential parameters
+    basic_args = parser.add_argument_group(
+        "###################\nEssential parameters\n###################"
+    )
+    basic_args.add_argument(
+        "imagename",
+        type=str,
         help="Name of the image file",
     )
-    parser.add_argument(
-        "--metafits",
-        required=True,
+    basic_args.add_argument(
+        "metafits",
+        type=str,
         help="Name of the metafits file",
     )
-    parser.add_argument(
+    basic_args.add_argument(
+        "outfile",
+        type=str,
+        help="Output file name",
+    )
+    
+    # Advanced parameters
+    adv_args = parser.add_argument_group(
+        "###################\nAdvanced parameters\n###################"
+    )
+    adv_args.add_argument(
         "--MWA_PB_file",
         default="",
         help="MWA primary beam file",
     )
-    parser.add_argument(
+    adv_args.add_argument(
         "--sweetspot_file",
         default="",
         help="MWA primary beam sweetspot file path",
     )
-    parser.add_argument(
+    adv_args.add_argument(
         "--iau_order",
         action="store_true",
         help="PB Jones in IAU order",
     )
-    parser.add_argument(
+    adv_args.add_argument(
         "--gridpoint",
         type=int,
         default=-1,
         help="MWA sweet spot pointing number",
     )
-    parser.add_argument(
+    adv_args.add_argument(
+        "--restore",
+        action="store_true",
+        help="Restore the primary beam correction",
+    )
+    adv_args.add_argument(
+        "--pb_jones_file",
+        default="mwapb.npy",
+        help="Input NumPy file of PB Jones matrices",
+    )
+    adv_args.add_argument(
+        "--save_pb",
+        default="mwapb.npy",
+        help="Save PB Jones matrices to this file",
+    )
+    adv_args.add_argument(
+        "--interpolated",
+        action="store_true",
+        help="Use interpolated beam model",
+    )
+    
+    # Resource management parameters
+    hard_args = parser.add_argument_group(
+        "###################\nHardware resource management parameters\n###################"
+    )
+    hard_args.add_argument(
         "--num_threads",
         type=int,
         default=1,
         help="Number of CPU threads to use",
     )
-    parser.add_argument(
-        "--outfile",
-        default="",
-        help="Output file name",
-    )
-    parser.add_argument(
-        "--restore",
-        action="store_true",
-        help="Restore the primary beam correction",
-    )
-    parser.add_argument(
-        "--pb_jones_file",
-        default="mwapb.npy",
-        help="Input NumPy file of PB Jones matrices",
-    )
-    parser.add_argument(
-        "--save_pb",
-        default="mwapb.npy",
-        help="Save PB Jones matrices to this file",
-    )
-    parser.add_argument(
-        "--interpolated",
-        action="store_true",
-        help="Use interpolated beam model",
-    )
+    
+    if len(sys.argv) == 1:
+        parser.print_help(sys.stderr)
+        return 1
+        
     args = parser.parse_args()
 
     start_time = time.time()

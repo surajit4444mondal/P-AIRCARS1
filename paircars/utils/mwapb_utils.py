@@ -33,7 +33,7 @@ MWAPOS = EarthLocation.from_geodetic(
 )
 
 
-def get_azza_from_fits(filename):
+def get_azza_from_fits(filename, metafits):
     """
     Get azimuith and zenith angle arrays from fits file
 
@@ -41,6 +41,8 @@ def get_azza_from_fits(filename):
     ----------
     filename : str
         Name of the fits file
+    metafits : str
+        Metafits file
 
     Returns
     -------
@@ -90,7 +92,7 @@ def get_azza_from_fits(filename):
     # Transform to Alt-Az
     #############################
     source = SkyCoord(
-        ra=RA, dec=Dec, frame="icrs", unit=(astropy.units.deg, astropy.units.deg)
+        ra=RA, dec=Dec, frame="icrs", unit=(u.deg, u.deg)
     )
     source.location = MWAPOS
     source.obstime = mwatime
