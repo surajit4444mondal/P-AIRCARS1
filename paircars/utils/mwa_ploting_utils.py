@@ -750,6 +750,8 @@ def get_aia_map(obs_date, obs_time, workdir, aia_wavelength=193, keep_aia_fits=F
         Sunpy AIAMap
     """
     logging.getLogger("sunpy").setLevel(logging.ERROR)
+    logging.getLogger("drms").setLevel(logging.ERROR)
+    logging.getLogger("drms.client").setLevel(logging.ERROR)
     warnings.filterwarnings(
         "ignore",
         message="This download has been started in a thread which is not the main thread",
@@ -931,7 +933,7 @@ def make_mwa_overlay(
     wavelength=195,
     plot_file_prefix=None,
     plot_mwa_colormap=True,
-    enhance_offdisk=True,
+    enhance_offdisk=False,
     contour_levels=[0.05, 0.1, 0.2, 0.4, 0.6, 0.8],
     euv_image_scaling=0.25,
     do_sharpen_euv=True,
@@ -1022,7 +1024,6 @@ def make_mwa_overlay(
         if euv_map is None:
             print ("Could not get either SUVI or AIA images.")
             return
-    print ("EUV image is obtained.")
     if enhance_offdisk:
         euv_map = enhance_offlimb(euv_map, do_sharpen=do_sharpen_euv)
     
@@ -1288,6 +1289,7 @@ def rename_mwasolar_image(
     cutout_rsun=4.0,
     make_overlay=True,
     make_plots=True,
+    keep_euv_fits=False,
 ):
     """
     Rename and move image to image directory
@@ -1306,6 +1308,8 @@ def rename_mwasolar_image(
         Make overlay on SUVI/AIA
     make_plots : bool, optional
         Make radio map plot in helioprojective coordinates
+    keep_euv_fits : bool, optional
+        Keep EUV images or not
 
     Returns
     -------
@@ -1317,7 +1321,7 @@ def rename_mwasolar_image(
         imagename, imagename, x_deg=(cutout_rsun * 2 * 16.0) / 60.0
     )
     maxval, minval, rms, total_val, mean_val, median_val, rms_dyn, minmax_dyn = (
-        calc_solar_image_stat(imagename, disc_size=32)
+        calc_solar_image_stat(imagename, disc_size=35)
     )
     if np.isnan(rms_dyn):
         os.system(f"rm -rf {imagename}")
@@ -1385,6 +1389,7 @@ def rename_mwasolar_image(
                 + "_euv_mwa_overlay",
                 extensions=["png"],
                 outdirs=[overlay_pngdir],
+                keep_euv_fits=keep_euv_fits,
                 verbose=False,
             )
         except Exception:

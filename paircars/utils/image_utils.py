@@ -120,7 +120,7 @@ def create_circular_mask_array(data, radius):
     return mask
 
 
-def calc_solar_image_stat(imagename, disc_size=32):
+def calc_solar_image_stat(imagename, disc_size=35):
     """
     Calculate solar image dynamic range
 
@@ -129,7 +129,7 @@ def calc_solar_image_stat(imagename, disc_size=32):
     imagename : str
         Fits image name
     disc_size : float, optional
-        Solar disc size in arcmin (default : 32)
+        Solar disc size in arcmin (default : 35)
 
     Returns
     -------

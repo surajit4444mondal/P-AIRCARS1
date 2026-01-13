@@ -12,6 +12,7 @@ import sys
 import os
 from casatools import msmetadata
 from dask import delayed
+from astropy.io import fits
 from paircars.utils import *
 
 logging.getLogger("distributed").setLevel(logging.ERROR)
@@ -246,7 +247,7 @@ def perform_imaging(
             fits_mask = prefix + "_solar-mask.fits"
             if os.path.exists(fits_mask) == False:
                 logger.info(
-                    f"{os.path.basename(msname)} -- Creating solar mask of size: {mask_radius} arcmin.\n",
+                    f"{os.path.basename(msname)} -- Creating solar mask of radius: {mask_radius} arcmin.\n",
                 )
                 fits_mask = create_circular_mask(
                     msname, cellsize, imsize, mask_radius=mask_radius
@@ -411,12 +412,13 @@ def perform_imaging(
                         os.makedirs(imagedir + "/images", exist_ok=True)
                         final_image_list = []
                         for imagename in imagelist:
-                            if "MFS" not in imagename:
-                                temp_make_overlay=False
-                                temp_make_plots=False
-                            else:
+                            image_bw = fits.getheader(imagename)["CDELT3"]/10**6 # In MHz
+                            if image_bw>=1.28:
                                 temp_make_overlay=make_overlay
                                 temp_make_plots=make_plots
+                            else:
+                                temp_make_overlay=False
+                                temp_make_plots=False
                             renamed_image = rename_mwasolar_image(
                                 imagename,
                                 imagedir=imagedir + "/images",
@@ -424,6 +426,7 @@ def perform_imaging(
                                 cutout_rsun=cutout_rsun,
                                 make_overlay=temp_make_overlay,
                                 make_plots=temp_make_plots,
+                                keep_euv_fits=True,
                             )
                             if renamed_image is not None:
                                 final_image_list.append(renamed_image)
@@ -458,6 +461,8 @@ def perform_imaging(
                                 if renamed_res is not None:
                                     final_res_list.append(renamed_res)
                             final_list_dic["residual"] = final_res_list
+            os.system("rm -rf aia.lev1_euv*.fits")
+            os.system("rm -rf *suvi-l2*.fits")
             if os.path.exists(f"{imagedir}/images/dask-scratch-space"):
                 os.system(f"rm -rf {imagedir}/images/dask-scratch-space")
             if use_solar_mask and os.path.exists(fits_mask):
@@ -608,13 +613,13 @@ def run_all_imaging(
         else:
             weight_str = weight
         if freqres == -1 and timeres == -1:
-            imagedir = outdir + f"/imagedir_f_all_t_all_w_{weight_str}"
+            imagedir = outdir + f"/imagedir_f_all_t_all_pol_{pol}_w_{weight_str}"
         elif freqres != -1 and timeres == -1:
-            imagedir = outdir + f"/imagedir_f_{freqres}_t_all_w_{weight_str}"
+            imagedir = outdir + f"/imagedir_f_{freqres}_t_all_pol_{pol}_w_{weight_str}"
         elif freqres == -1 and timeres != -1:
-            imagedir = outdir + f"/imagedir_f_all_t_{timeres}_w_{weight_str}"
+            imagedir = outdir + f"/imagedir_f_all_t_{timeres}_pol_{pol}_w_{weight_str}"
         else:
-            imagedir = outdir + f"/imagedir_f_{freqres}_t_{timeres}_w_{weight_str}"
+            imagedir = outdir + f"/imagedir_f_{freqres}_t_{timeres}_pol_{pol}_w_{weight_str}"
         os.makedirs(imagedir, exist_ok=True)
 
         ####################################
@@ -902,10 +907,12 @@ def main(
 
     if workdir == "":
         workdir = os.path.dirname(os.path.abspath(mslist[0])) + "/workdir"
+    workdir=workdir.rstrip("/")
     os.makedirs(workdir, exist_ok=True)
 
     if outdir == "" or not os.path.exists(outdir):
         outdir = workdir
+    outdir=outdir.rstrip("/")
     os.makedirs(outdir, exist_ok=True)
 
     ############

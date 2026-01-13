@@ -2224,6 +2224,7 @@ def master_control(
                 do_polcal == False
             ):  # Only if do_polcal is False, overwrite to make only Stokes I
                 pol = "I"
+            pol=pol.upper()
             current_worker = get_total_worker(dask_cluster)
             nworker = min(max_worker, len(target_mslist) + current_worker)
             scale_worker_and_wait(dask_cluster, nworker)
@@ -2273,21 +2274,21 @@ def master_control(
             else:
                 weight_str = weight
             if image_freqres == -1 and image_timeres == -1:
-                imagedir = outdir + f"/imagedir_f_all_t_all_w_{weight_str}"
+                imagedir = outdir + f"/imagedir_f_all_t_all_pol_{pol}_w_{weight_str}"
             elif image_freqres != -1 and image_timeres == -1:
                 imagedir = (
                     outdir
-                    + f"/imagedir_f_{round(float(image_freqres),1)}_t_all_w_{weight_str}"
+                    + f"/imagedir_f_{round(float(image_freqres),1)}_t_all_pol_{pol}_w_{weight_str}"
                 )
             elif image_freqres == -1 and image_timeres != -1:
                 imagedir = (
                     outdir
-                    + f"/imagedir_f_all_t_{round(float(image_timeres),1)}_w_{weight_str}"
+                    + f"/imagedir_f_all_t_{round(float(image_timeres),1)}_pol_{pol}_w_{weight_str}"
                 )
             else:
                 imagedir = (
                     outdir
-                    + f"/imagedir_f_{round(float(image_freqres),1)}_t_{round(float(image_timeres),1)}_w_{weight_str}"
+                    + f"/imagedir_f_{round(float(image_freqres),1)}_t_{round(float(image_timeres),1)}_pol_{pol}_w_{weight_str}"
                 )
             imagedir = imagedir + "/images"
             images = glob.glob(imagedir + "/*.fits")
