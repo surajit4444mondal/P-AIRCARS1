@@ -1,15 +1,15 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/devojyoti96/MeerSOLAR/refs/heads/master/dark_logo.png" alt="MeerSOLAR Logo" width="200"/>
+  <img src="https://raw.githubusercontent.com/devojyoti96/P-AIRCARS/refs/heads/master/dark_logo.png" alt="P-AIRCARS Logo" width="200"/>
 </p>
 <p align="center">
-  <h1>MeerSOLAR</h1> An automated calibration and imaging pipeline designed for solar radio observations using <strong>MeerKAT</strong> radio telescope. It performs end-to-end calibration, flagging, and imaging with a focus on dynamic solar data, supporting both spectral and temporal flexibility in imaging products.
+  <h1>P-AIRCARS</h1> An automated spectropolarimetric calibration and imaging pipeline designed for solar radio observations using the <strong>Murchision Widefield Array (MWA)</strong> radio telescope. It performs end-to-end calibration, flagging, and imaging with a focus on dynamic solar data, supporting both spectral and temporal flexibility in imaging products.
 </p>
 
 ## Background
 
 <!-- start elevator-pitch -->
 
-Solar radio data presents unique challenges due to the high variability and brightness of the Sun, as well as the need for high time-frequency resolution. The **MeerSOLAR** pipeline addresses these challenges by:
+Solar radio data presents unique challenges due to the high variability and brightness of the Sun, as well as the need for high time-frequency resolution. The **P-AIRCARS** pipeline addresses these challenges by:
 
 - Automating the calibration of interferometric data, including flux, phase, and polarization calibrations
 - Supporting time-sliced and frequency-sliced imaging workflows
@@ -20,9 +20,9 @@ Solar radio data presents unique challenges due to the high variability and brig
 
 ## Documentation
 
-MeerSOLAR documentation is available at: [meersolar.readthedocs.io]
+P-AIRCARS documentation is available at: [paircars.readthedocs.io]
 
-[meersolar.readthedocs.io]: https://meersolar.readthedocs.io 
+[paircars.readthedocs.io]: https://paircars.readthedocs.io 
 
 ## Quickstart
 
@@ -33,26 +33,26 @@ MeerSOLAR documentation is available at: [meersolar.readthedocs.io]
 1. Create conda environment with python 3.10
 
     ```text
-    conda create -n meersolar_env python=3.10
-    conda activate meersolar_env
+    conda create -n paircars_env python=3.10
+    conda activate paircars_env
     ```
 
-2. Install MeerSOLAR in conda environment
+2. Install P-AIRCARS in conda environment
 
    ```text
-   pip install meersolar
+   pip install paircars
    ```
 
 3. Initiate necessary metadata
 
     ```text
-    init-meersolar-setup --init
+    init-paircars-setup --init
     ```
     
-4. Run MeerSOLAR pipeline
+4. Run P-AIRCARS pipeline
 
     ```text
-    run-meer-meersolar <path of measurement set> --workdir <path of work directory> --outdir <path of output products directory>
+    run-mwa-paircars <path of measurement set> --workdir <path of work directory> --outdir <path of output products directory>
     ```    
 
 That's all. You started MeerSOLAR pipeline for analysing your MeerKAT solar observation 🎉.
