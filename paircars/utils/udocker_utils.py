@@ -98,6 +98,52 @@ def initialize_wsclean_container(name="solarwsclean", update=False):
     else:
         print(f"Container could not be created with name : {name}")
         return
+        
+        
+def initialize_quartical_container(name="solarquartical", update=False):
+    """
+    Initialize quartical container
+
+    Parameters
+    ----------
+    name : str, optional
+        Name of the container
+    update : bool, optional
+        Update container
+
+    Returns
+    -------
+    bool
+        Whether initialized successfully or not
+    """
+    print("Initializing quartical container.")
+    set_udocker_env()
+    image_name = "devojyoti96/quartical:0.2.6"
+    check_cmd = f"udocker images | grep -q '{image_name}'"
+    image_exists = os.system(check_cmd) == 0
+    if not image_exists:
+        a = os.system(f"udocker pull {image_name}")
+    else:
+        if update:
+            os.system(f"udocker rm {name}")
+            os.system(f"udocker rmi {image_name}")
+            print("Re-downloading docker image.")
+            a = os.system(f"udocker pull {image_name}")
+            if a == 0:
+                print("Re-downloaded docker image.")
+            else:
+                print("Re-downloading container image is failed.")
+                return
+        else:
+            print(f"Image '{image_name}' already present.")
+            a = 0
+    if a == 0:
+        a = os.system(f"udocker create --name={name} {image_name}")
+        print(f"Container started with name : {name}")
+        return name
+    else:
+        print(f"Container could not be created with name : {name}")
+        return
 
 
 def initialize_shadems_container(name="solarshadems", update=False):
@@ -460,6 +506,69 @@ def run_shadems(
         msname = splited_cmd[-1]
         datapath = os.path.dirname(os.path.abspath(msname))
     temp_docker_path = tempfile.mkdtemp(prefix="shadems_udocker_", dir=datapath)
+    if splited_cmd[-1] not in ["-h", "--help"]:
+        cmd = f"{' '.join(splited_cmd[:-1])} {temp_docker_path}/{os.path.basename(msname)}"
+    try:
+        full_command = f"udocker --quiet run --nobanner --volume={datapath}:{temp_docker_path} --workdir {temp_docker_path} {container_name} {cmd}"
+        if not verbose:
+            with suppress_output():
+                exit_code = os.system(full_command)
+        else:
+            print(cmd)
+            exit_code = os.system(full_command)
+        return 0 if exit_code == 0 else 1
+    except Exception as e:
+        traceback.print_exc()
+        return 1
+    finally:
+        os.system(f"rm -rf {temp_docker_path}")
+    return
+
+
+def run_quartical(
+    cmd,
+    container_name="solarquartical",
+    check_container=False,
+    verbose=False,
+):
+    """
+    Run quartical inside a udocker container (no root permission required).
+
+    Parameters
+    ----------
+    cmd : str
+        Quartical command
+    container_name : str, optional
+        Container name
+    check_container : bool, optional
+        Check container
+    verbose : bool, optional
+        Verbose output
+
+    Returns
+    -------
+    int
+        Success message
+    """
+    set_udocker_env()
+    pid = os.getpid()
+    if check_container:
+        container_present = check_udocker_container(container_name)
+        if not container_present:
+            container_name = initialize_quartical_container(name=container_name)
+            if container_name is None:
+                print(
+                    f"Container {container_name} is not initiated. First initiate container and then run."
+                )
+                return 1
+    splited_cmd = cmd.split(" ")
+    if splited_cmd[-1] in ["-h", "--help"]:
+        verbose = True
+        datapath = os.getcwd()
+    else:
+        msname = splited_cmd[-1]
+        datapath = os.path.dirname(os.path.abspath(msname))
+    temp_docker_path = tempfile.mkdtemp(prefix="quartical_udocker_", dir=datapath)
     if splited_cmd[-1] not in ["-h", "--help"]:
         cmd = f"{' '.join(splited_cmd[:-1])} {temp_docker_path}/{os.path.basename(msname)}"
     try:

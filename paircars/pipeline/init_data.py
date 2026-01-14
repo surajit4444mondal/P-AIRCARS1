@@ -136,6 +136,15 @@ def main(
         else:
             print("Error in initializing WSClean container.")
             return 1
+        quartical_container_name = initialize_quartical_container(update=update)
+        if (
+            quartical_container_name is not None
+            and quartical_container_name == "solarquartical"
+        ):
+            print("Quartical container is initialized")
+        else:
+            print("Error in initializing quartical container.")
+            return 1
         shadems_container_name = initialize_shadems_container(update=update)
         if (
             shadems_container_name is not None
