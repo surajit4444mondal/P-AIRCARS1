@@ -92,8 +92,8 @@ def do_flag_backup(msname, flagtype="flagdata"):
 
 def uvbin_flag(
     msname,
-    uvbin_size=50,
-    datacolumn="corrected",
+    uvbin_size=10,
+    datacolumn="data",
     mode="rflag",
     threshold=10.0,
     flagbackup=True,
