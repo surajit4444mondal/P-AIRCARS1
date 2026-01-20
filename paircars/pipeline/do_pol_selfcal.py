@@ -192,7 +192,7 @@ def do_polselfcal(
         possible_sizes = possible_sizes[possible_sizes >= imsize]
         imsize = max(512, int(possible_sizes[0]))
         unflagged_antenna_names, flag_frac_list = get_unflagged_antennas(msname)
-        refant_name = unflagged_antenna_names[0]
+        refant = unflagged_antenna_names[0]
         msmd = msmetadata()
         msmd.open(msname)
         refant = msmd.antennaids(refant)[0]
@@ -213,7 +213,6 @@ def do_polselfcal(
         VL1 = VL2 = VL3 = 1.0
         num_iter = 0
         last_round_gaintable = []
-        do_uvsub_flag = False
         os.system("rm -rf *_selfcal_present*")
 
         ##########################################
@@ -334,14 +333,10 @@ def do_polselfcal(
                 logger.info(
                     f"Dynamic range is decreasing after minimum numbers of rounds.\n"
                 )
-                if do_uvsub_flag is False:
-                    logger.info("Starting uvsub flagging.")
-                    do_uvsub_flag = True
-                else:
-                    os.system("rm -rf *_selfcal_present*")
-                    time.sleep(5)
-                    clean_shutdown(sub_observer)
-                    return 0, last_round_gaintable
+                os.system("rm -rf *_selfcal_present*")
+                time.sleep(5)
+                clean_shutdown(sub_observer)
+                return 0, last_round_gaintable
 
             ###########################
             # If maximum DR has reached
@@ -360,14 +355,10 @@ def do_polselfcal(
                 logger.info(
                     f"Dynamic range dropped suddenly. Using last round caltable as final.\n"
                 )
-                if do_uvsub_flag is False:
-                    logger.info("Starting uvsub flagging.")
-                    do_uvsub_flag = True
-                else:
-                    os.system("rm -rf *_selfcal_present*")
-                    time.sleep(5)
-                    clean_shutdown(sub_observer)
-                    return 0, last_round_gaintable
+                os.system("rm -rf *_selfcal_present*")
+                time.sleep(5)
+                clean_shutdown(sub_observer)
+                return 0, last_round_gaintable
 
             ###########################
             # Checking DR convergence
@@ -382,15 +373,11 @@ def do_polselfcal(
                 and num_iter > min_iter
                 and leakage_coverged
             ):
-                if do_uvsub_flag is False:
-                    logger.info("Starting uvsub flagging.")
-                    do_uvsub_flag = True
-                else:
-                    logger.info(f"Self-calibration has converged.\n")
-                    os.system("rm -rf *_selfcal_present*")
-                    time.sleep(5)
-                    clean_shutdown(sub_observer)
-                    return 0, gaintable
+                logger.info(f"Self-calibration has converged.\n")
+                os.system("rm -rf *_selfcal_present*")
+                time.sleep(5)
+                clean_shutdown(sub_observer)
+                return 0, gaintable
             #########################################
             # In apcal and maximum iteration has reached
             #########################################

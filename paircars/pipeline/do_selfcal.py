@@ -257,7 +257,6 @@ def do_selfcal(
         threshold = start_threshold
         last_round_gaintable = []
         use_previous_model = False
-        do_uvsub_flag = False
         os.system("rm -rf *_selfcal_present*")
         fluxscale_mwa = False
         solar_attn = 1
@@ -327,7 +326,6 @@ def do_selfcal(
                     fluxscale_mwa=fluxscale_mwa,
                     do_intensity_cal=True,
                     do_polcal=False,
-                    do_uvsub_flag=False,
                     solar_attn=solar_attn,
                     ncpu=ncpu,
                     mem=round(mem, 2),
@@ -371,7 +369,6 @@ def do_selfcal(
                         do_intensity_cal=True,
                         do_polcal=False,
                         solar_attn=solar_attn,
-                        do_uvsub_flag=do_uvsub_flag,
                         ncpu=ncpu,
                         mem=round(mem, 2),
                     )
@@ -440,14 +437,10 @@ def do_selfcal(
                         sigma_reduced_count += 1
                         num_iter_fixed_sigma = 0
                 else:
-                    if do_uvsub_flag is False:
-                        logger.info("Starting uvsub flagging.")
-                        do_uvsub_flag = True
-                    else:
-                        os.system("rm -rf *_selfcal_present*")
-                        time.sleep(5)
-                        clean_shutdown(sub_observer)
-                        return 0, last_round_gaintable
+                    os.system("rm -rf *_selfcal_present*")
+                    time.sleep(5)
+                    clean_shutdown(sub_observer)
+                    return 0, last_round_gaintable
 
             ##############################################################
             # If DR is decreasing (DR decrease in amplitude-phase selfcal)
@@ -460,14 +453,10 @@ def do_selfcal(
                 logger.info(
                     f"Dynamic range is decreasing after minimum numbers of 'ap' rounds.\n"
                 )
-                if do_uvsub_flag is False:
-                    logger.info("Starting uvsub flagging.")
-                    do_uvsub_flag = True
-                else:
-                    os.system("rm -rf *_selfcal_present*")
-                    time.sleep(5)
-                    clean_shutdown(sub_observer)
-                    return 0, last_round_gaintable
+                os.system("rm -rf *_selfcal_present*")
+                time.sleep(5)
+                clean_shutdown(sub_observer)
+                return 0, last_round_gaintable
 
             ###########################
             # If maximum DR has reached
@@ -486,14 +475,10 @@ def do_selfcal(
                 logger.info(
                     f"Dynamic range dropped suddenly. Using last round caltable as final.\n"
                 )
-                if do_uvsub_flag is False:
-                    logger.info("Starting uvsub flagging.")
-                    do_uvsub_flag = True
-                else:
-                    os.system("rm -rf *_selfcal_present*")
-                    time.sleep(5)
-                    clean_shutdown(sub_observer)
-                    return 0, last_round_gaintable
+                os.system("rm -rf *_selfcal_present*")
+                time.sleep(5)
+                clean_shutdown(sub_observer)
+                return 0, last_round_gaintable
 
             ###########################
             # Checking DR convergence
@@ -524,9 +509,6 @@ def do_selfcal(
                     threshold = end_threshold
                     sigma_reduced_count += 1
                     num_iter_fixed_sigma = 0
-                    if do_uvsub_flag is False:
-                        logger.info("Starting uvsub flagging.")
-                        do_uvsub_flag = True
                     continue
                 else:
                     logger.info(
@@ -559,9 +541,6 @@ def do_selfcal(
                             threshold -= 1
                             sigma_reduced_count += 1
                             num_iter_fixed_sigma = 0
-                            if do_uvsub_flag is False:
-                                logger.info("Starting uvsub flagging.")
-                                do_uvsub_flag = True
                     ######################################
                     # Converged if already in apcal
                     ######################################
@@ -590,9 +569,6 @@ def do_selfcal(
                         last_sigma_DR1 = round(np.nanmean([DR1, DR2, DR3]), 0)
                     else:
                         last_sigma_DR1 = round(np.nanmean([DR1, DR2, DR3]), 0)
-                    if do_uvsub_flag is False:
-                        logger.info("Starting uvsub flagging.")
-                        do_uvsub_flag = True
                 #########################################
                 # In apcal and maximum iteration has reached
                 #########################################
