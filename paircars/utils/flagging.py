@@ -4,7 +4,9 @@ import numpy as np
 import traceback
 import glob
 import os
+import dask
 from datetime import datetime as dt, timezone
+from daskms.experimental.zarr import xds_from_zarr, xds_to_zarr
 from .basic_utils import *
 from .resource_utils import *
 from .imaging import *
@@ -88,16 +90,25 @@ def do_flag_backup(msname, flagtype="flagdata"):
     af.done()
 
 
-def uvbin_flag(msname,uvbin_size=50,mode="rflag",threshold=10.0,flagbackup=True):
+def uvbin_flag(
+    msname,
+    uvbin_size=50,
+    datacolumn="corrected",
+    mode="rflag",
+    threshold=10.0,
+    flagbackup=True,
+):
     """
     Perform uv-bin flag
-        
+
     Parameters
     ----------
     msname : str
         Measurement set
     uvbin_size : float, optional
         UV-bin size in wavelength
+    datacolumn : str, optional
+        Data column
     mode : str, optional
         Flag mode (rflag or tfcrop)
     threshold : float, optional
@@ -106,19 +117,36 @@ def uvbin_flag(msname,uvbin_size=50,mode="rflag",threshold=10.0,flagbackup=True)
         Flag backup
     """
     from casatasks import flagdata, flagmanager
+
     try:
         maxuv_m, maxuv_l = calc_maxuv(msname)
         if flagbackup:
             do_flag_backup(msname, flagtype="uvbin_flagdata")
         maxuv_l = int(maxuv_l)
         uvbin_size = int(uvbin_size)
-        for i in range(0,maxuv_l,uvbin_size):
+        for i in range(0, maxuv_l, uvbin_size):
             try:
                 with suppress_output():
-                    if mode=="rflag":
-                        flagdata(vis=msname,mode=mode,uvrange=f"{i}~{i+uvbin_size}lambda",timedevscale=threshold,freqdevscale=threshold,flagbackup=False)
+                    if mode == "rflag":
+                        flagdata(
+                            vis=msname,
+                            mode=mode,
+                            datacolumn=datacolumn,
+                            uvrange=f"{i}~{i+uvbin_size}lambda",
+                            timedevscale=threshold,
+                            freqdevscale=threshold,
+                            flagbackup=False,
+                        )
                     else:
-                        flagdata(vis=msname,mode=mode,uvrange=f"{i}~{i+uvbin_size}lambda",timecutoff=threshold,freqcutoff=threshold,flagbackup=False)
+                        flagdata(
+                            vis=msname,
+                            mode=mode,
+                            datacolumn=datacolumn,
+                            uvrange=f"{i}~{i+uvbin_size}lambda",
+                            timecutoff=threshold,
+                            freqcutoff=threshold,
+                            flagbackup=False,
+                        )
             except:
                 pass
         return 0
@@ -126,9 +154,9 @@ def uvbin_flag(msname,uvbin_size=50,mode="rflag",threshold=10.0,flagbackup=True)
         traceback.print_exc()
         if flagbackup:
             with suppress_output():
-                flagmanager(vis=msname,mode="restore",versionname="uvbin_flagdata_1")
-                flagmanager(vis=msname,mode="delete",versionname="uvbin_flagdata_1")
-        return 1   
+                flagmanager(vis=msname, mode="restore", versionname="uvbin_flagdata_1")
+                flagmanager(vis=msname, mode="delete", versionname="uvbin_flagdata_1")
+        return 1
 
 
 def get_unflagged_antennas(
@@ -307,6 +335,75 @@ def flag_outside_uvrange(vis, uvrange, n_threads=-1, flagbackup=True):
     except Exception as e:
         traceback.print_exc()
         return 1
+
+
+def flag_quartical_table(caltable, threshold=10.0):
+    """
+    Flag quartical caltable
+
+    Parameters
+    ----------
+    caltable : str
+        Caltable name
+    threshold : float
+        Flagging threshold
+
+    Returns
+    -------
+    str
+        Flagged caltable name
+    """
+    caltable = caltable.rstrip("/")
+    caltable_dirs = os.listdir(caltable)
+    soltype = caltable_dirs[0]
+    gains = xds_from_zarr(f"{caltable}::{soltype}")
+    gain_data = gains[0].gains.to_numpy()  # Shape: ntime, nchan, nant, ndir, npol
+    gain_flag = gains[0].gain_flags.to_numpy()
+    pre_flags = np.nansum(gain_flag)
+    gain_flag = gain_flag.astype("bool")
+    gain_data[gain_flag] = np.nan
+    d1 = gain_data[..., 1]
+    d2 = gain_data[..., 2]
+    d1_real = np.real(d1) - np.nanmean(np.real(d1))
+    d1_imag = np.imag(d1) - np.nanmean(np.imag(d1))
+    d2_real = np.real(d2) - np.nanmean(np.real(d2))
+    d2_imag = np.imag(d2) - np.nanmean(np.imag(d2))
+    d1_real_std = np.nanstd(d1_real)
+    d1_imag_std = np.nanstd(d1_imag)
+    d2_real_std = np.nanstd(d2_real)
+    d2_imag_std = np.nanstd(d2_imag)
+    pos = np.where(
+        (d1_real > threshold * d1_real_std)
+        | (d1_imag > threshold * d1_imag_std)
+        | (d2_real > threshold * d2_real_std)
+        | (d2_imag > threshold * d2_imag_std)
+    )
+    gain_data[np.isnan(gain_data)] = 1.0
+    gain_flag[pos] = True
+    gain_data[gain_flag] = 1.0
+    gain_flag = gain_flag.astype("int")
+    new_flags = np.nansum(gain_flag)
+    gains[0].update(
+        {
+            "gain_flags": (
+                ["gain_time", "gain_freq", "antenna", "direction"],
+                gain_flag,
+            )
+        }
+    )
+    gains[0].update(
+        {
+            "gains": (
+                ["gain_time", "gain_freq", "antenna", "direction", "correlation"],
+                gain_data,
+            )
+        }
+    )
+    output_path = f"{caltable}::{soltype}"
+    os.system(f"rm -rf {caltable}")
+    write_xds_list = xds_to_zarr(gains, output_path)
+    dask.compute(write_xds_list)
+    return caltable
 
 
 # Expose functions and classes

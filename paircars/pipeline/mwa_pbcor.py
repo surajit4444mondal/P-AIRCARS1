@@ -81,12 +81,11 @@ def run_pbcor(
         str(ncpu),
         "--interpolated",
     ]
-    if os.path.exists(pbfile):
-        cmd.append("--pb_jones_file")
-        cmd.append(pbfile)
-    else:
+    cmd.append("--pb_jones_file")
+    cmd.append(pbfile)
+    if os.path.exists(pbfile) is False:
         cmd.append("--save_pb")
-        cmd.append(pbfile)
+
     if restore:
         cmd.append("--restore")
     cmd.append(imagename)

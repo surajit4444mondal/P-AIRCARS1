@@ -143,7 +143,7 @@ def single_mstransform(
     n_threads=-1,
 ):
     """
-    Perform mstransform 
+    Perform mstransform
 
     Parameters
     ----------
@@ -192,7 +192,7 @@ def single_mstransform(
             n_threads = 2
         else:
             n_threads = min(n_threads, 2)
-        print (f"Spliting ms: {msname}, Outputvis: {outputms}.")
+        print(f"Spliting ms: {msname}, Outputvis: {outputms}.")
         with suppress_output():
             mstransform(
                 vis=msname,

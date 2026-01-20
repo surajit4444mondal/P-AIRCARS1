@@ -165,11 +165,11 @@ def calc_solar_image_stat(imagename, disc_size=35):
     minval = float(np.nanmin(masked_data))
     rms = float(np.nanstd(masked_data))
     total_val = float(np.nansum(unmasked_data))
-    if rms!=0:
+    if rms != 0:
         rms_dyn = float(maxval / rms)
     else:
         rms_dyn = np.nan
-    if abs(minval)!=0:
+    if abs(minval) != 0:
         minmax_dyn = float(maxval / abs(minval))
     else:
         minmax_dyn = np.nan
@@ -227,6 +227,9 @@ def calc_dyn_range(imagename, modelname, residualname, fits_mask=""):
     use_mask = bool(fits_mask and os.path.exists(fits_mask))
     mask_data = fits.getdata(fits_mask).astype(bool) if use_mask else None
 
+    if mask_data is not None:
+        mask_data = mask_data[0, 0, ...]
+
     model_flux, dr1, rmsvalue = 0, 0, 0
 
     for i in range(len(imagename)):
@@ -235,6 +238,8 @@ def calc_dyn_range(imagename, modelname, residualname, fits_mask=""):
         image = load_data(img)
         residual = load_data(res)
         rms = np.nanstd(residual)
+        image = image[0, 0, ...]
+        residual = residual[0, 0, ...]
         if use_mask:
             maxval = np.nanmax(image[mask_data])
         else:
@@ -244,6 +249,7 @@ def calc_dyn_range(imagename, modelname, residualname, fits_mask=""):
 
     for mod in modelname:
         model = load_data(mod)
+        model = model[0, 0, ...]
         model_flux += np.nansum(model[mask_data] if use_mask else model)
 
     rmsvalue = rmsvalue / np.sqrt(len(residualname))
@@ -355,13 +361,13 @@ def make_timeavg_image(wsclean_images, outfile_name, keep_wsclean_images=True):
         Output image name.
     """
     timestamps = []
-    data=[]
+    data = []
     for i in range(len(wsclean_images)):
         image = wsclean_images[i]
         data.append(fits.getdata(image))
         timestamps.append(fits.getheader(image)["DATE-OBS"])
-    data=np.array(data)
-    data=np.nanmean(data,axis=0)
+    data = np.array(data)
+    data = np.nanmean(data, axis=0)
     avg_timestamp = average_timestamp(timestamps)
     header = fits.getheader(wsclean_images[0])
     header["DATE-OBS"] = avg_timestamp

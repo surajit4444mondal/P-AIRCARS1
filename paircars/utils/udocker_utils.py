@@ -98,8 +98,8 @@ def initialize_wsclean_container(name="solarwsclean", update=False):
     else:
         print(f"Container could not be created with name : {name}")
         return
-        
-        
+
+
 def initialize_quartical_container(name="solarquartical", update=False):
     """
     Initialize quartical container
@@ -562,15 +562,134 @@ def run_quartical(
                 )
                 return 1
     splited_cmd = cmd.split(" ")
-    if splited_cmd[-1] in ["-h", "--help"]:
+    if len(splited_cmd) == 1 and "goquartical" in cmd:
         verbose = True
         datapath = os.getcwd()
+        temp_docker_path = tempfile.mkdtemp(prefix="quartical_udocker_", dir=datapath)
+    elif len(splited_cmd) > 1:
+        for i in range(len(splited_cmd)):
+            cmd_arg = splited_cmd[i]
+            if "input_ms.path" in cmd_arg:
+                msname = cmd_arg.split("input_ms.path=")[-1]
+                datapath = os.path.dirname(os.path.abspath(msname))
+                temp_docker_path = tempfile.mkdtemp(
+                    prefix="quartical_udocker_", dir=datapath
+                )
+                temp_msname = f"{temp_docker_path}/{os.path.basename(msname)}"
+                cmd_arg = f"input_ms.path={temp_msname}"
+                splited_cmd[i] = cmd_arg
+            if "output.gain_directory" in cmd_arg:
+                caltable = cmd_arg.split("output.gain_directory=")[-1]
+                temp_caltable = f"{temp_docker_path}/{os.path.basename(caltable)}"
+                cmd_arg = f"output.gain_directory={temp_caltable}"
+                splited_cmd[i] = cmd_arg
+            if "output.log_directory" in cmd_arg:
+                log = cmd_arg.split("output.log_directory=")[-1]
+                temp_log = f"{temp_docker_path}/{os.path.basename(log)}"
+                cmd_arg = f"output.log_directory={temp_log}"
+                splited_cmd[i] = cmd_arg
+            if "load_from" in cmd_arg:
+                gaintable = cmd_arg.split("load_from=")[-1]
+                gaintable = gaintable.split("/")[-2:]
+                gaintable = "/".join(gaintable)
+                temp_gaintable = f"{temp_docker_path}/{gaintable}"
+                cmd_arg = f"{cmd_arg.split('=')[0]}={temp_gaintable}"
+                splited_cmd[i] = cmd_arg
+        cmd = " ".join(splited_cmd)
     else:
-        msname = splited_cmd[-1]
-        datapath = os.path.dirname(os.path.abspath(msname))
-    temp_docker_path = tempfile.mkdtemp(prefix="quartical_udocker_", dir=datapath)
-    if splited_cmd[-1] not in ["-h", "--help"]:
-        cmd = f"{' '.join(splited_cmd[:-1])} {temp_docker_path}/{os.path.basename(msname)}"
+        print("Please provide valid command.")
+        return 1
+    try:
+        full_command = f"udocker --quiet run --nobanner --volume={datapath}:{temp_docker_path} --workdir {temp_docker_path} {container_name} {cmd}"
+        if not verbose:
+            with suppress_output():
+                exit_code = os.system(full_command)
+        else:
+            print(cmd)
+            exit_code = os.system(full_command)
+        return 0 if exit_code == 0 else 1
+    except Exception as e:
+        traceback.print_exc()
+        return 1
+    finally:
+        os.system(f"rm -rf {temp_docker_path}")
+    return
+
+
+def run_quartical_plot(
+    cmd,
+    container_name="solarquartical",
+    check_container=False,
+    verbose=False,
+):
+    """
+    Run quartical plot inside a udocker container (no root permission required).
+
+    Parameters
+    ----------
+    cmd : str
+        Quartical command
+    container_name : str, optional
+        Container name
+    check_container : bool, optional
+        Check container
+    verbose : bool, optional
+        Verbose output
+
+    Returns
+    -------
+    int
+        Success message
+    """
+    set_udocker_env()
+    pid = os.getpid()
+    if check_container:
+        container_present = check_udocker_container(container_name)
+        if not container_present:
+            container_name = initialize_quartical_container(name=container_name)
+            if container_name is None:
+                print(
+                    f"Container {container_name} is not initiated. First initiate container and then run."
+                )
+                return 1
+    splited_cmd = cmd.split(" ")
+    if len(splited_cmd) == 1 and "goquartical" in cmd:
+        verbose = True
+        datapath = os.getcwd()
+        temp_docker_path = tempfile.mkdtemp(prefix="quartical_udocker_", dir=datapath)
+    elif len(splited_cmd) > 1:
+        for i in range(len(splited_cmd)):
+            cmd_arg = splited_cmd[i]
+            if "input_ms.path" in cmd_arg:
+                msname = cmd_arg.split("input_ms.path=")[-1]
+                datapath = os.path.dirname(os.path.abspath(msname))
+                temp_docker_path = tempfile.mkdtemp(
+                    prefix="quartical_udocker_", dir=datapath
+                )
+                temp_msname = f"{temp_docker_path}/{os.path.basename(msname)}"
+                cmd_arg = f"input_ms.path={temp_msname}"
+                splited_cmd[i] = cmd_arg
+            if "output.gain_directory" in cmd_arg:
+                caltable = cmd_arg.split("output.gain_directory=")[-1]
+                temp_caltable = f"{temp_docker_path}/{os.path.basename(caltable)}"
+                cmd_arg = f"output.gain_directory={temp_caltable}"
+                splited_cmd[i] = cmd_arg
+            if "output.log_directory" in cmd_arg:
+                log = cmd_arg.split("output.log_directory=")[-1]
+                temp_log = f"{temp_docker_path}/{os.path.basename(log)}"
+                cmd_arg = f"output.log_directory={temp_log}"
+                splited_cmd[i] = cmd_arg
+            if "load_from" in cmd_arg:
+                gaintable = cmd_arg.split("load_from=")[-1]
+                gaintable = gaintable.split("/")[-2:]
+                gaintable = "/".join(gaintable)
+                temp_gaintable = f"{temp_docker_path}/{gaintable}"
+                cmd_arg = f"{cmd_arg.split('=')[0]}={temp_gaintable}"
+                splited_cmd[i] = cmd_arg
+        cmd = " ".join(splited_cmd)
+    else:
+        print("Please provide valid command.")
+        return 1
     try:
         full_command = f"udocker --quiet run --nobanner --volume={datapath}:{temp_docker_path} --workdir {temp_docker_path} {container_name} {cmd}"
         if not verbose:

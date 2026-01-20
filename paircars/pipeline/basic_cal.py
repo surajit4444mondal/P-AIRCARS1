@@ -188,7 +188,9 @@ def single_ms_cal_and_flag(
         Caltables
     """
     try:
-        caltable_prefix = f"{workdir}/{os.path.basename(msname).split('.ms')[0]}_caltable"
+        caltable_prefix = (
+            f"{workdir}/{os.path.basename(msname).split('.ms')[0]}_caltable"
+        )
         msmd = msmetadata()
         msmd.open(msname)
         npol = msmd.ncorrforpol()[0]

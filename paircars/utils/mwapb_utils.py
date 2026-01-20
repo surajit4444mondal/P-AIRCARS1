@@ -91,9 +91,7 @@ def get_azza_from_fits(filename, metafits):
     #############################
     # Transform to Alt-Az
     #############################
-    source = SkyCoord(
-        ra=RA, dec=Dec, frame="icrs", unit=(u.deg, u.deg)
-    )
+    source = SkyCoord(ra=RA, dec=Dec, frame="icrs", unit=(u.deg, u.deg))
     source.location = MWAPOS
     source.obstime = mwatime
     s = time.time()
@@ -129,12 +127,18 @@ def get_IQUV(filename, stokesaxis=4):
     return stokes
 
 
-def get_inst_pols(stokes):
+def get_inst_pols(stokes, iau_order=True):
     """Return instrumental polaristations matrix (Vij)"""
-    XX = stokes["I"] + stokes["Q"]
-    XY = stokes["U"] + stokes["V"] * 1j
-    YX = stokes["U"] - stokes["V"] * 1j
-    YY = stokes["I"] - stokes["Q"]
+    if iau_order:
+        XX = stokes["I"] + stokes["Q"]
+        XY = stokes["U"] + stokes["V"] * 1j
+        YX = stokes["U"] - stokes["V"] * 1j
+        YY = stokes["I"] - stokes["Q"]
+    else:
+        XX = stokes["I"] - stokes["Q"]
+        XY = stokes["U"] - stokes["V"] * 1j
+        YX = stokes["U"] + stokes["V"] * 1j
+        YY = stokes["I"] + stokes["Q"]
     Vij = np.array([[XX, XY], [YX, YY]])
     Vij = np.swapaxes(np.swapaxes(Vij, 0, 2), 1, 3)
     return Vij

@@ -69,6 +69,7 @@ def applysol(
     gainfield=[],
     interp=[],
     applymode="calflag",
+    quartical_table=[],
     overwrite_datacolumn=False,
     n_threads=-1,
     memory_limit=-1,
@@ -90,6 +91,8 @@ def applysol(
         Gain interpolation
     applymode : str, optional
         Apply mode
+    quartical_table : list, optional
+        Quartical caltables
     overwrite_datacolumn : bool, optional
         Overwrite data column with corrected solutions
     n_threads : int, optional
@@ -137,6 +140,46 @@ def applysol(
                     calwt=[False] * len(gaintable),
                     flagbackup=False,
                 )
+            if len(quartical_table) > 0:
+                for qc in quartical_table:
+                    print(
+                        f"Applying solution on ms: {msname} from quartical table: {qc}."
+                    )
+                    if applymode == "calonly":
+                        calflag = False
+                    else:
+                        calflag = True
+                    temp_pol_caltable = f"{qc}.tempcal"
+                    quartical_log = f"{qc}.log"
+                    qc = qc.rstrip("/")
+                    qc_dirs = os.listdir(qc)
+                    soltype = qc_dirs[0]
+                    quartical_args = [
+                        "goquartical",
+                        f"input_ms.path={msname}",
+                        f"input_ms.data_column=CORRECTED_DATA",
+                        "input_model.recipe=MODEL_DATA",
+                        "output.log_to_terminal=True",
+                        f"output.log_directory={quartical_log}",
+                        f"output.gain_directory={temp_pol_caltable}",
+                        "output.overwrite=True",
+                        "output.products=[corrected_data]",
+                        "output.columns=[CORRECTED_DATA]",
+                        f"output.flags={calflag}",
+                        f"solver.terms=[{soltype}]",
+                        "solver.iter_recipe=[0]",
+                        "solver.propagate_flags=False",
+                        f"solver.threads={n_threads}",
+                        "dask.threads=1",
+                        f"{soltype}.type=complex",
+                        f"{soltype}.load_from={pol_caltable}/{soltype}",
+                    ]
+                    quartical_cmd = " ".join(quartical_args)
+                    print(f"Quartical cmd: {quartical_cmd}\n")
+                    quartical_msg = run_quartical(
+                        quartical_cmd, "solarquartical", verbose=False
+                    )
+                    os.system(f"rm -rf {quartical_log} {temp_pol_caltable}")
         if overwrite_datacolumn:
             print(f"Over writing data column with corrected data for ms: {msname}.")
             outputvis = msname.split(".ms")[0] + "_cor.ms"

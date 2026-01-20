@@ -30,7 +30,7 @@ def do_selfcal(
     start_threshold=5,
     end_threshold=3,
     max_iter=100,
-    max_DR=1000,
+    max_DR=100000,
     min_iter=5,
     DR_convegerence_frac=0.1,
     uvrange="",
@@ -130,7 +130,7 @@ def do_selfcal(
         os.makedirs(selfcaldir, exist_ok=True)
 
         os.chdir(selfcaldir)
-        selfcalms = selfcaldir + "/selfcal_" + os.path.basename(msname)
+        selfcalms = selfcaldir + "/intselfcal_" + os.path.basename(msname)
         if os.path.exists(selfcalms):
             os.system("rm -rf " + selfcalms)
         if os.path.exists(selfcalms + ".flagversions"):
@@ -200,16 +200,18 @@ def do_selfcal(
                 datacolumn="data",
                 flagbackup=False,
             )
-            result = uvbin_flag(msname,uvbin_size=10,mode="rflag",threshold=10.0,flagbackup=True)
-            if result!=0:
+            result = uvbin_flag(
+                msname, uvbin_size=10, mode="rflag", threshold=10.0, flagbackup=True
+            )
+            if result != 0:
                 logger.info(f"UV-bin flagging is not successful.")
             result = flag_non_disk(msname)
-            if result!=0:
+            if result != 0:
                 logger.info(f"Could not flag non-disk time properly.")
-                start_gauss_source=False
+                start_gauss_source = False
             else:
-                start_gauss_source=True
-              
+                start_gauss_source = True
+
         ############################################
         # Imaging and calibration parameters
         ############################################
@@ -228,9 +230,13 @@ def do_selfcal(
                 possible_sizes.append(k * 2**p)
         possible_sizes = np.sort(np.array(possible_sizes))
         possible_sizes = possible_sizes[possible_sizes >= imsize]
-        imsize = max(1024, int(possible_sizes[0]))
+        imsize = max(512, int(possible_sizes[0]))
         unflagged_antenna_names, flag_frac_list = get_unflagged_antennas(msname)
         refant = unflagged_antenna_names[0]
+        msmd = msmetadata()
+        msmd.open(msname)
+        refant = msmd.antennaids(refant)[0]
+        msmd.close()
 
         ############################################
         # Initiating selfcal Parameters
@@ -251,27 +257,36 @@ def do_selfcal(
         threshold = start_threshold
         last_round_gaintable = []
         use_previous_model = False
+        do_uvsub_flag = False
         os.system("rm -rf *_selfcal_present*")
-        fluxscale_mwa=False
-        solar_attn=1
+        fluxscale_mwa = False
+        solar_attn = 1
         if cal_applied is False:
-            fluxscale_mwa=True
+            fluxscale_mwa = True
             if os.path.exists(metafits) is False:
-                logger.error("Calibration solutions were not applied and target metafits is also not supplied. Provide any one of them.")
+                logger.error(
+                    "Calibration solutions were not applied and target metafits is also not supplied. Provide any one of them."
+                )
                 return 1, []
             solar_attn = float(fits.getheader(metafits)["ATTEN_DB"])
-            
+
         ###########################################
         # Starting using Gaussian model
         ###########################################
         if start_gauss_source:
             logger.info(f"Starting self-calibration using Gaussian source model.")
-            msg, caltable = quiet_sun_selfcal(msname,logger,selfcaldir,refant=str(refant),solint=solint)
-            if msg==0:
-                logger.info("Starting self-calibration using Gaussian model is successful.")
+            msg, caltable = quiet_sun_selfcal(
+                msname, logger, selfcaldir, refant=str(refant), solint=solint
+            )
+            if msg == 0:
+                logger.info(
+                    "Starting self-calibration using Gaussian model is successful."
+                )
             else:
-                logger.info("Starting self-calibration using Gaussian model is not successful.")
-                
+                logger.info(
+                    "Starting self-calibration using Gaussian model is not successful."
+                )
+
         ##########################################
         # Starting selfcal loops
         ##########################################
@@ -287,10 +302,11 @@ def do_selfcal(
                 + str(threshold)
                 + ", Calibration mode: "
                 + str(calmode)
-            )    
-            msg, gaintable, dyn, rms, final_image, final_model, final_residual = (
-                intensity_selfcal(
+            )
+            msg, gaintable, dyn, rms, final_image, final_model, final_residual, _ = (
+                selfcal_round(
                     msname,
+                    metafits,
                     logger,
                     selfcaldir,
                     cellsize,
@@ -309,6 +325,9 @@ def do_selfcal(
                     robust=robust,
                     use_solar_mask=solar_selfcal,
                     fluxscale_mwa=fluxscale_mwa,
+                    do_intensity_cal=True,
+                    do_polcal=False,
+                    do_uvsub_flag=False,
                     solar_attn=solar_attn,
                     ncpu=ncpu,
                     mem=round(mem, 2),
@@ -327,8 +346,10 @@ def do_selfcal(
                         final_image,
                         final_model,
                         final_residual,
-                    ) = intensity_selfcal(
+                        _,
+                    ) = selfcal_round(
                         msname,
+                        metafits,
                         logger,
                         selfcaldir,
                         cellsize,
@@ -347,7 +368,10 @@ def do_selfcal(
                         robust=robust,
                         use_solar_mask=solar_selfcal,
                         fluxscale_mwa=fluxscale_mwa,
+                        do_intensity_cal=True,
+                        do_polcal=False,
                         solar_attn=solar_attn,
+                        do_uvsub_flag=do_uvsub_flag,
                         ncpu=ncpu,
                         mem=round(mem, 2),
                     )
@@ -361,7 +385,7 @@ def do_selfcal(
                 else:
                     os.system("rm -rf *_selfcal_present*")
                     return msg, []
-            if msg == 2:
+            if msg > 1:
                 os.system("rm -rf *_selfcal_present*")
                 time.sleep(5)
                 clean_shutdown(sub_observer)
@@ -391,7 +415,9 @@ def do_selfcal(
             logger.info(
                 f"RMS of the images: " + str(RMS1) + "," + str(RMS2) + "," + str(RMS3)
             )
-            if DR3 > 0.9 * DR2 and (calmode=="p" or (calmode=="ap" and num_iter_after_ap > min_iter)):
+            if DR3 > 0.9 * DR2 and (
+                calmode == "p" or (calmode == "ap" and num_iter_after_ap > min_iter)
+            ):
                 use_previous_model = True
             else:
                 use_previous_model = False
@@ -408,15 +434,20 @@ def do_selfcal(
                 if do_apcal:
                     logger.info(f"Changed calmode to 'ap'.")
                     calmode = "ap"
+                    use_previous_model = False
                     if threshold > end_threshold and num_iter_fixed_sigma > min_iter:
                         threshold -= 1
                         sigma_reduced_count += 1
                         num_iter_fixed_sigma = 0
                 else:
-                    os.system("rm -rf *_selfcal_present*")
-                    time.sleep(5)
-                    clean_shutdown(sub_observer)
-                    return 0, last_round_gaintable
+                    if do_uvsub_flag is False:
+                        logger.info("Starting uvsub flagging.")
+                        do_uvsub_flag = True
+                    else:
+                        os.system("rm -rf *_selfcal_present*")
+                        time.sleep(5)
+                        clean_shutdown(sub_observer)
+                        return 0, last_round_gaintable
 
             ##############################################################
             # If DR is decreasing (DR decrease in amplitude-phase selfcal)
@@ -429,10 +460,14 @@ def do_selfcal(
                 logger.info(
                     f"Dynamic range is decreasing after minimum numbers of 'ap' rounds.\n"
                 )
-                os.system("rm -rf *_selfcal_present*")
-                time.sleep(5)
-                clean_shutdown(sub_observer)
-                return 0, last_round_gaintable
+                if do_uvsub_flag is False:
+                    logger.info("Starting uvsub flagging.")
+                    do_uvsub_flag = True
+                else:
+                    os.system("rm -rf *_selfcal_present*")
+                    time.sleep(5)
+                    clean_shutdown(sub_observer)
+                    return 0, last_round_gaintable
 
             ###########################
             # If maximum DR has reached
@@ -451,11 +486,15 @@ def do_selfcal(
                 logger.info(
                     f"Dynamic range dropped suddenly. Using last round caltable as final.\n"
                 )
-                os.system("rm -rf *_selfcal_present*")
-                time.sleep(5)
-                clean_shutdown(sub_observer)
-                return 0, last_round_gaintable
-                
+                if do_uvsub_flag is False:
+                    logger.info("Starting uvsub flagging.")
+                    do_uvsub_flag = True
+                else:
+                    os.system("rm -rf *_selfcal_present*")
+                    time.sleep(5)
+                    clean_shutdown(sub_observer)
+                    return 0, last_round_gaintable
+
             ###########################
             # Checking DR convergence
             ###########################
@@ -485,6 +524,9 @@ def do_selfcal(
                     threshold = end_threshold
                     sigma_reduced_count += 1
                     num_iter_fixed_sigma = 0
+                    if do_uvsub_flag is False:
+                        logger.info("Starting uvsub flagging.")
+                        do_uvsub_flag = True
                     continue
                 else:
                     logger.info(
@@ -512,10 +554,14 @@ def do_selfcal(
                             f"Dynamic range converged. Changing calmode to 'ap'.\n"
                         )
                         calmode = "ap"
+                        use_previous_model = False
                         if num_iter_fixed_sigma > min_iter:
                             threshold -= 1
                             sigma_reduced_count += 1
                             num_iter_fixed_sigma = 0
+                            if do_uvsub_flag is False:
+                                logger.info("Starting uvsub flagging.")
+                                do_uvsub_flag = True
                     ######################################
                     # Converged if already in apcal
                     ######################################
@@ -544,6 +590,9 @@ def do_selfcal(
                         last_sigma_DR1 = round(np.nanmean([DR1, DR2, DR3]), 0)
                     else:
                         last_sigma_DR1 = round(np.nanmean([DR1, DR2, DR3]), 0)
+                    if do_uvsub_flag is False:
+                        logger.info("Starting uvsub flagging.")
+                        do_uvsub_flag = True
                 #########################################
                 # In apcal and maximum iteration has reached
                 #########################################
@@ -577,11 +626,11 @@ def main(
     metafits,
     workdir,
     caldir,
-    cal_applied=True,  
+    cal_applied=True,
     start_thresh=5,
     stop_thresh=3,
     max_iter=100,
-    max_DR=1000,
+    max_DR=100000,
     min_iter=5,
     conv_frac=0.1,
     solint="10s",
@@ -623,9 +672,9 @@ def main(
     max_iter : int, optional
         Maximum number of self-calibration iterations. Default is 100.
     max_DR : float, optional
-        Maximum dynamic range allowed before halting iterations. Default is 1000.
+        Maximum dynamic range allowed before halting iterations. Default is 100000.
     min_iter : int, optional
-        Minimum number of iterations before checking for convergence. Default is 2.
+        Minimum number of iterations before checking for convergence. Default is 5.
     conv_frac : float, optional
         Convergence criterion: fractional change in dynamic range below which iteration stops. Default is 0.1.
     solint : str, optional
@@ -815,7 +864,7 @@ def main(
                 print("#################################")
 
                 #####################################s
-                os.makedirs(f"{workdir}/logs",exist_ok=True)
+                os.makedirs(f"{workdir}/logs", exist_ok=True)
                 tasks = []
                 for ms in mslist:
                     logfile = (
@@ -860,18 +909,20 @@ def main(
                         freq_end = freq_start + bw
                         ch_start = freq_to_MWA_coarse(freq_start)
                         ch_end = freq_to_MWA_coarse(freq_end)
+                        if freq_end > freq_start and ch_end == ch_start:
+                            ch_end = ch_start + 1
                         final_gain_caltable = (
                             caldir + f"/selfcal_coarsechan_{ch_start}_{ch_end}.gcal"
                         )
                         os.system(f"cp -r {gcal} {final_gain_caltable}")
                         gcal_list.append(final_gain_caltable)
-                        
+
                         final_bpass_caltable = (
                             caldir + f"/selfcal_coarsechan_{ch_start}_{ch_end}.bcal"
                         )
                         os.system(f"cp -r {bpass} {final_bpass_caltable}")
                         bpass_list.append(final_bpass_caltable)
-                        
+
                 if not keep_backup:
                     for ms in mslist:
                         selfcaldir = (
@@ -975,7 +1026,7 @@ def cli():
     adv_args.add_argument(
         "--max_DR",
         type=float,
-        default=1000,
+        default=100000,
         help="Maximum dynamic range",
         metavar="Float",
     )

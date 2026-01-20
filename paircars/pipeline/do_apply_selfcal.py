@@ -68,7 +68,12 @@ def run_all_applysol(
         parang = False
         selfcal_tables = sorted(glob.glob(caldir + "/selfcal_coarsechan*.gcal"))
         selfcal_bpass_tables = sorted(glob.glob(caldir + "/selfcal_coarsechan*.bcal"))
+        selfcal_quartical_tables = sorted(
+            glob.glob(caldir + "/selfcal_coarsechan*.dcal")
+        )
         print(f"Selfcal caltables: {selfcal_tables}")
+        print(f"Bandpass selfcal caltables: {selfcal_bpass_tables}")
+        print(f"Polarisation selfcal caltables: {selfcal_quartical_tables}")
         if len(selfcal_tables) == 0:
             print(f"No self-cal caltable is present in {caldir}.")
             return 1
@@ -132,21 +137,32 @@ def run_all_applysol(
             start_coarse_chan = freq_to_MWA_coarse(start_freq)
             end_coarse_chan = freq_to_MWA_coarse(end_freq)
             msmd.close()
+            gaintable = []
+            quartical_table = []
             for i in range(len(selfcal_tables_start_chans)):
                 s = selfcal_tables_start_chans[i]
                 e = selfcal_tables_end_chans[i]
                 if start_coarse_chan >= s and end_coarse_chan <= e:
-                    gaintable = [selfcal_tables[i],selfcal_bpass_tables[i]]
-                    
-            if len(gaintable)==0:
+                    gaintable = selfcal_tables[i]
+                    gaintable_prefix = gaintable.split(".gcal")[0]
+                    gaintable = [f"{gaintable_prefix}.gcal", f"{gaintable_prefix}.bcal"]
+                    quartical_table = [f"{gaintable_prefix}.dcal"]
+
+            if len(gaintable) == 0:
                 print(
                     f"Measurement set coarse channel : {start_coarse_chan} to {end_coarse_chan}. Corresponding self-calibration table is not present."
                 )
             else:
+                if len(quartical_table) == 0:
+                    print(
+                        f"Measurement set coarse channel : {start_coarse_chan} to {end_coarse_chan}. Corresponding polarisation self-calibration table is not present."
+                    )
+                    os.system(f"touch {ms}/.nopolselfcal")
                 tasks.append(
                     delayed(applysol)(
                         msname=ms,
                         gaintable=gaintable,
+                        quartical_table=quartical_table,
                         overwrite_datacolumn=overwrite_datacolumn,
                         applymode=applymode,
                         interp=["linear,linearflag"],

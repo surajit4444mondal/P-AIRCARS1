@@ -127,7 +127,7 @@ def get_MWA_coarse_bands(msname):
                 )
             if end_chan > 0:
                 end_chan = max((end_chan // nchan_coarse) * nchan_coarse, nchan_coarse)
-            if end_chan>start_chan:
+            if end_chan > start_chan:
                 coarse_chans.append([start_chan, end_chan])
     return coarse_chans
 
@@ -155,7 +155,7 @@ def get_bad_chans(msname):
     n_per_coarse_chan = int(1.28 / chanres)
     n_edge_chan = int(0.16 / chanres)
     spw = "0:"
-    for i in range(0, nchan-n_per_coarse_chan, n_per_coarse_chan):
+    for i in range(0, nchan - n_per_coarse_chan, n_per_coarse_chan):
         if i == i + n_edge_chan - 1:
             spw += f"{i};"
         else:
@@ -263,7 +263,7 @@ def download_MWA_metafits(OBSID, outdir="."):
     print(f"Metafits file could not be downloaded after {max_tries} tries.")
     return None
 
-    
+
 # Expose functions and classes
 __all__ = [
     name

@@ -37,7 +37,7 @@ def perform_imaging(
     threshold=1.0,
     use_multiscale=True,
     use_solar_mask=True,
-    mask_radius=32,
+    mask_radius=40,
     savemodel=True,
     saveres=True,
     ncpu=-1,
@@ -137,7 +137,7 @@ def perform_imaging(
         msname = msname.rstrip("/")
         msname = os.path.abspath(msname)
         logger.info(f"{os.path.basename(msname)} --Perform imaging...\n")
-        
+
         #########
         # Imaging
         #########
@@ -150,7 +150,15 @@ def perform_imaging(
         timeres = np.nanmin(np.diff(times))
         npol = msmd.ncorrforpol()[0]
         msmd.close()
-        
+
+        ####################################
+        # Whether pol-selfcal is done or not
+        ####################################
+        if os.path.exists(f"{ms}/.nopolselfcal"):
+            pol_selfcal = False
+        else:
+            pol_selfcal = True
+
         ###################################
         # Finding channel and time ranges
         ###################################
@@ -174,7 +182,7 @@ def perform_imaging(
             time.sleep(5)
             clean_shutdown(sub_observer)
             return 1, []
-            
+
         if timerange != "":
             start_times = []
             end_times = []
@@ -262,13 +270,13 @@ def perform_imaging(
                     f"-channel-range {start_chans[i]} {end_chans[i]}"
                 )
                 temp_wsclean_args.append(f"-interval {start_times[j]} {end_times[j]}")
-                
+
                 #####################################
                 # Spectral imaging configuration
                 #####################################
                 if image_freqres > 0:
-                    nchan = max(1,int(image_freqres/freqres))
-                    chan_chunk = int((end_chans[i]-start_chans[i])/nchan)
+                    nchan = max(1, int(image_freqres / freqres))
+                    chan_chunk = int((end_chans[i] - start_chans[i]) / nchan)
                     temp_wsclean_args.append(f"-channels-out {chan_chunk}")
                     temp_wsclean_args.append("-no-mf-weighting")
 
@@ -276,8 +284,8 @@ def perform_imaging(
                 # Temporal imaging configuration
                 #####################################
                 if image_timeres > 0:
-                    ntime = max(1,int(image_timeres/timeres))
-                    time_chunk = int((end_times[j]-start_times[j])/ntime) 
+                    ntime = max(1, int(image_timeres / timeres))
+                    time_chunk = int((end_times[j] - start_times[j]) / ntime)
                     temp_wsclean_args.append(f"-intervals-out {time_chunk}")
 
                 ######################################
@@ -306,10 +314,10 @@ def perform_imaging(
                     )
                     scale_bias = get_multiscale_bias(mid_freq)
                     temp_wsclean_args.append(f"-multiscale-scale-bias {scale_bias}")
-                    if imsize >= 2048 and 4 * max(multiscale_scales) < 1024:
-                        temp_wsclean_args.append("-parallel-deconvolution 1024")
-                elif imsize >= 2048:
-                    temp_wsclean_args.append("-parallel-deconvolution 1024")
+                    if imsize >= 1024 and 4 * max(multiscale_scales) < 512:
+                        temp_wsclean_args.append("-parallel-deconvolution 512")
+                elif imsize >= 1024:
+                    temp_wsclean_args.append("-parallel-deconvolution 512")
 
                 ######################################
                 # Running imaging
@@ -412,13 +420,15 @@ def perform_imaging(
                         os.makedirs(imagedir + "/images", exist_ok=True)
                         final_image_list = []
                         for imagename in imagelist:
-                            image_bw = fits.getheader(imagename)["CDELT3"]/10**6 # In MHz
-                            if image_bw>=1.28:
-                                temp_make_overlay=make_overlay
-                                temp_make_plots=make_plots
+                            image_bw = (
+                                fits.getheader(imagename)["CDELT3"] / 10**6
+                            )  # In MHz
+                            if image_bw >= 1.28:
+                                temp_make_overlay = make_overlay
+                                temp_make_plots = make_plots
                             else:
-                                temp_make_overlay=False
-                                temp_make_plots=False
+                                temp_make_overlay = False
+                                temp_make_plots = False
                             renamed_image = rename_mwasolar_image(
                                 imagename,
                                 imagedir=imagedir + "/images",
@@ -427,6 +437,7 @@ def perform_imaging(
                                 make_overlay=temp_make_overlay,
                                 make_plots=temp_make_plots,
                                 keep_euv_fits=True,
+                                pol_selfcal=pol_selfcal,
                             )
                             if renamed_image is not None:
                                 final_image_list.append(renamed_image)
@@ -442,6 +453,7 @@ def perform_imaging(
                                     cutout_rsun=cutout_rsun,
                                     make_overlay=False,
                                     make_plots=False,
+                                    pol_selfcal=pol_selfcal,
                                 )
                                 if renamed_model is not None:
                                     final_model_list.append(renamed_model)
@@ -457,6 +469,7 @@ def perform_imaging(
                                     cutout_rsun=cutout_rsun,
                                     make_overlay=False,
                                     make_plots=False,
+                                    pol_selfcal=pol_selfcal,
                                 )
                                 if renamed_res is not None:
                                     final_res_list.append(renamed_res)
@@ -619,7 +632,9 @@ def run_all_imaging(
         elif freqres == -1 and timeres != -1:
             imagedir = outdir + f"/imagedir_f_all_t_{timeres}_pol_{pol}_w_{weight_str}"
         else:
-            imagedir = outdir + f"/imagedir_f_{freqres}_t_{timeres}_pol_{pol}_w_{weight_str}"
+            imagedir = (
+                outdir + f"/imagedir_f_{freqres}_t_{timeres}_pol_{pol}_w_{weight_str}"
+            )
         os.makedirs(imagedir, exist_ok=True)
 
         ####################################
@@ -736,7 +751,7 @@ def run_all_imaging(
                     possible_sizes.append(k * 2**p)
             possible_sizes = np.sort(np.array(possible_sizes))
             possible_sizes = possible_sizes[possible_sizes >= imsize]
-            imsize = max(1024, int(possible_sizes[0]))
+            imsize = max(512, int(possible_sizes[0]))
             os.makedirs(workdir + "/logs", exist_ok=True)
             logfile = (
                 workdir
@@ -907,12 +922,12 @@ def main(
 
     if workdir == "":
         workdir = os.path.dirname(os.path.abspath(mslist[0])) + "/workdir"
-    workdir=workdir.rstrip("/")
+    workdir = workdir.rstrip("/")
     os.makedirs(workdir, exist_ok=True)
 
     if outdir == "" or not os.path.exists(outdir):
         outdir = workdir
-    outdir=outdir.rstrip("/")
+    outdir = outdir.rstrip("/")
     os.makedirs(outdir, exist_ok=True)
 
     ############

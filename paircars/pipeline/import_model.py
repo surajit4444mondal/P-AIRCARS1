@@ -97,8 +97,8 @@ def import_model(msname, metafits, beamfile="", sourcelist="", ncpu=-1):
         subprocess.run(
             hyperdrive_cmd,
             check=True,
-            #stdout=subprocess.DEVNULL,
-            #stderr=subprocess.DEVNULL,
+            # stdout=subprocess.DEVNULL,
+            # stderr=subprocess.DEVNULL,
         )
         model_msname = msname.split(".ms")[0] + "_model.ms"
         ########################

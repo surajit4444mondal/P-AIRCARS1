@@ -98,7 +98,7 @@ def single_ms_flag(
                     )
             except BaseException:
                 pass
-                
+
         #################################
         # Flag quack timestamps
         #################################

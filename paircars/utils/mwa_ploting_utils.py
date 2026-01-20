@@ -587,7 +587,7 @@ def plot_in_hpc(
         pixel_unit = mwa_header["BUNIT"]
     except BaseException:
         pixel_nuit = ""
-    pixel_scale = abs(mwa_header["CDELT1"])*3600.0 # In arcsec
+    pixel_scale = abs(mwa_header["CDELT1"]) * 3600.0  # In arcsec
     obstime = Time(mwa_header["date-obs"])
     mwa_map_rotate = get_mwamap(fits_image)
     top_right = SkyCoord(
@@ -658,8 +658,8 @@ def plot_in_hpc(
             # Add ellipse patch
             beam_ellipse = Ellipse(
                 (beam_center.Tx.value, beam_center.Ty.value),  # center in arcsec
-                width=bmin/pixel_scale,
-                height=bmaj/pixel_scale,
+                width=bmin / pixel_scale,
+                height=bmaj / pixel_scale,
                 angle=bpa,
                 edgecolor="white",
                 facecolor="white",
@@ -667,7 +667,9 @@ def plot_in_hpc(
             )
             ax.add_patch(beam_ellipse)
             # Draw square box around the ellipse
-            box_size = max(0.2*(x1-x0),1.5*max(bmin,bmaj))/pixel_scale  # slightly bigger than beam
+            box_size = (
+                max(0.2 * (x1 - x0), 1.5 * max(bmin, bmaj)) / pixel_scale
+            )  # slightly bigger than beam
             rect = Rectangle(
                 (
                     beam_center.Tx.value - box_size / 2,
@@ -758,7 +760,7 @@ def get_aia_map(obs_date, obs_time, workdir, aia_wavelength=193, keep_aia_fits=F
     )
     aia_wavelengths = np.array([94, 131, 171, 193, 211, 304, 335])
     if aia_wavelength not in aia_wavelengths:
-        pos = np.argmin(np.abs(aia_wavelength-aia_wavelengths))
+        pos = np.argmin(np.abs(aia_wavelength - aia_wavelengths))
         aia_wavelength = aia_wavelengths[pos]
     os.makedirs(workdir, exist_ok=True)
     start_time = dt.fromisoformat(f"{obs_date}T{obs_time}")
@@ -766,27 +768,34 @@ def get_aia_map(obs_date, obs_time, workdir, aia_wavelength=193, keep_aia_fits=F
     time = a.Time(t_start, t_start)
     instrument = a.Instrument("aia")
     jsoc_wavelength = a.Wavelength(aia_wavelength * u.angstrom)
-    results = Fido.search(time,a.jsoc.Series('aia.lev1_euv_12s'),a.jsoc.Notify("paircarsnotification@gmail.com"),jsoc_wavelength)
+    results = Fido.search(
+        time,
+        a.jsoc.Series("aia.lev1_euv_12s"),
+        a.jsoc.Notify("paircarsnotification@gmail.com"),
+        jsoc_wavelength,
+    )
     num_files = results.file_num
-    if num_files==0:
+    if num_files == 0:
         return
     else:
-        downloaded_files = Fido.fetch(results, path=workdir, progress=False, overwrite=False)
-        if len(downloaded_files)>0:
+        downloaded_files = Fido.fetch(
+            results, path=workdir, progress=False, overwrite=False
+        )
+        if len(downloaded_files) > 0:
             final_image = downloaded_files[0]
             aia_map = Map(final_image)
             # Step 1: Pointing correction
-            try:    
-                pointing_corrected_map=update_pointing(aia_map)
+            try:
+                pointing_corrected_map = update_pointing(aia_map)
             except:
-                pointing_corrected_map=aia_map
+                pointing_corrected_map = aia_map
             # Step 2: register (we are skipping PSF deconvolution)
             registered_map = register(pointing_corrected_map)
             # Step 3: instrument degradation correction
             try:
-                corrected_map=correct_degradation(registered_map)
+                corrected_map = correct_degradation(registered_map)
             except:
-                corrected_map=registered_map
+                corrected_map = registered_map
             # Step 4: Normalize by exposure time
             normalized_data = (
                 corrected_map.data / corrected_map.exposure_time.to(u.s).value
@@ -797,9 +806,11 @@ def get_aia_map(obs_date, obs_time, workdir, aia_wavelength=193, keep_aia_fits=F
             return normalized_map
         else:
             return
-    
-    
-def get_suvi_map(obs_date, obs_time, workdir, suvi_wavelength=195, keep_suvi_fits=False):
+
+
+def get_suvi_map(
+    obs_date, obs_time, workdir, suvi_wavelength=195, keep_suvi_fits=False
+):
     """
     Get GOES SUVI map
 
@@ -821,34 +832,47 @@ def get_suvi_map(obs_date, obs_time, workdir, suvi_wavelength=195, keep_suvi_fit
     sunpy.map
         Sunpy SUVIMap
     """
-    def list_url_directory(url, ext=''):
+
+    def list_url_directory(url, ext=""):
         page = requests.get(url).text
-        soup = BeautifulSoup(page, 'html.parser')
-        return [url + node.get('href') for node in soup.find_all('a') if node.get('href').endswith(ext)]
-        
+        soup = BeautifulSoup(page, "html.parser")
+        return [
+            url + node.get("href")
+            for node in soup.find_all("a")
+            if node.get("href").endswith(ext)
+        ]
+
     logging.getLogger("sunpy").setLevel(logging.ERROR)
     warnings.filterwarnings(
         "ignore",
         message="This download has been started in a thread which is not the main thread",
     )
-    suvi_wavelengths=np.array([94,131,171,195,284,304])
+    suvi_wavelengths = np.array([94, 131, 171, 195, 284, 304])
     if suvi_wavelength not in suvi_wavelengths:
-        pos = np.argmin(np.abs(suvi_wavelength-suvi_wavelengths))
+        pos = np.argmin(np.abs(suvi_wavelength - suvi_wavelengths))
         suvi_wavelength = suvi_wavelengths[pos]
     os.makedirs(workdir, exist_ok=True)
 
-    baseurl1 = 'https://data.ngdc.noaa.gov/platforms/solar-space-observing-satellites/goes/goes'
-    baseurl2 = 'l2/data'
-    ext = '.fits'
+    baseurl1 = "https://data.ngdc.noaa.gov/platforms/solar-space-observing-satellites/goes/goes"
+    baseurl2 = "l2/data"
+    ext = ".fits"
 
     spacecraft_numbers = [16, 18]
-    wvln_path = dict({94:'suvi-l2-ci094', 131:'suvi-l2-ci131', 171:'suvi-l2-ci171', \
-                      195:'suvi-l2-ci195', 284:'suvi-l2-ci284', 304:'suvi-l2-ci304'})
+    wvln_path = dict(
+        {
+            94: "suvi-l2-ci094",
+            131: "suvi-l2-ci131",
+            171: "suvi-l2-ci171",
+            195: "suvi-l2-ci195",
+            284: "suvi-l2-ci284",
+            304: "suvi-l2-ci304",
+        }
+    )
     date_str = "/".join(obs_date.split("-"))
-    all_files  = []
+    all_files = []
     start_times = []
     out_files = []
-        
+
     for spacecraft in spacecraft_numbers:
         url = f"{baseurl1}{spacecraft}/{baseurl2}/{wvln_path[suvi_wavelength]}/{date_str}/"
         request = requests.get(url)
@@ -870,15 +894,15 @@ def get_suvi_map(obs_date, obs_time, workdir, suvi_wavelength=195, keep_suvi_fit
                 dl = Downloader()
                 dl.enqueue_file(download_url, path=out_file)
                 downloaded_files = dl.download()
-                if len(downloaded_files)>0:
-                    final_image=downloaded_files[0]
+                if len(downloaded_files) > 0:
+                    final_image = downloaded_files[0]
             else:
                 final_image = out_file
             suvi_map = Map(final_image)
             if keep_suvi_fits is False:
                 os.system(f"rm -rf {final_image}")
             return suvi_map
-    return 
+    return
 
 
 def enhance_offlimb(sunpy_map, do_sharpen=True):
@@ -964,7 +988,7 @@ def make_mwa_overlay(
     contour_levels : list, optional
         Contour levels in fraction of peak
     euv_image_scaling : float, optional
-       EUV image pixel scaling (should be smaller than 1.0) 
+       EUV image pixel scaling (should be smaller than 1.0)
     do_sharpen_euv : bool, optional
         Do sharpen EUV images
     xlim : list, optional
@@ -1004,7 +1028,7 @@ def make_mwa_overlay(
     def reproject_map(smap, target_header):
         with SphericalScreen(smap.observer_coordinate):
             return smap.reproject_to(target_header)
-           
+
     if showgui:
         matplotlib.use("TkAgg")
     else:
@@ -1015,37 +1039,50 @@ def make_mwa_overlay(
     obs_date = obs_datetime.split("T")[0]
     year = int(obs_date.split("-")[0])
     obs_time = ":".join(obs_datetime.split("T")[-1].split(":")[:2])
-    if year>=2019:
-        euv_map = get_suvi_map(obs_date, obs_time, workdir, suvi_wavelength=wavelength, keep_suvi_fits=keep_euv_fits)
+    if year >= 2019:
+        euv_map = get_suvi_map(
+            obs_date,
+            obs_time,
+            workdir,
+            suvi_wavelength=wavelength,
+            keep_suvi_fits=keep_euv_fits,
+        )
     else:
-        euv_map=None
+        euv_map = None
     if euv_map is None:
-        euv_map = get_aia_map(obs_date, obs_time, workdir, aia_wavelength=wavelength, keep_aia_fits=keep_euv_fits)
+        euv_map = get_aia_map(
+            obs_date,
+            obs_time,
+            workdir,
+            aia_wavelength=wavelength,
+            keep_aia_fits=keep_euv_fits,
+        )
         if euv_map is None:
-            print ("Could not get either SUVI or AIA images.")
+            print("Could not get either SUVI or AIA images.")
             return
     if enhance_offdisk:
         euv_map = enhance_offlimb(euv_map, do_sharpen=do_sharpen_euv)
-    
+
     projected_coord = SkyCoord(
         0 * u.arcsec,
         0 * u.arcsec,
         obstime=mwamap.observer_coordinate.obstime,
         frame="helioprojective",
         observer=mwamap.observer_coordinate,
-        rsun=mwamap.coordinate_frame.rsun,)
-    mwa_header=mwamap.meta
-    euv_header=euv_map.meta
-    
-    euv_pix = max(1024,int(euv_header["naxis1"]*euv_image_scaling))
-    euv_current_fov=euv_header["naxis1"]*euv_header["cdelt1"] 
-    mwa_image_fov=mwa_header["naxis1"]*mwa_header["cdelt1"] 
-  
-    new_scale = float(mwa_image_fov/euv_pix)* u.arcsec/u.pix
-    SpatialPair=namedtuple("SpatialPair","axis1 axis2")
+        rsun=mwamap.coordinate_frame.rsun,
+    )
+    mwa_header = mwamap.meta
+    euv_header = euv_map.meta
+
+    euv_pix = max(1024, int(euv_header["naxis1"] * euv_image_scaling))
+    euv_current_fov = euv_header["naxis1"] * euv_header["cdelt1"]
+    mwa_image_fov = mwa_header["naxis1"] * mwa_header["cdelt1"]
+
+    new_scale = float(mwa_image_fov / euv_pix) * u.arcsec / u.pix
+    SpatialPair = namedtuple("SpatialPair", "axis1 axis2")
     new_scale = SpatialPair(axis1=new_scale, axis2=new_scale)
-    new_shape = (euv_pix,euv_pix)
-    
+    new_shape = (euv_pix, euv_pix)
+
     projected_header = make_fitswcs_header(
         new_shape,
         projected_coord,
@@ -1053,12 +1090,12 @@ def make_mwa_overlay(
         instrument=euv_map.instrument,
         wavelength=euv_map.wavelength,
     )
-    
+
     reprojected = [
         reproject_map(mwamap, projected_header),
         reproject_map(euv_map, projected_header),
     ]
-        
+
     if ncpu < 1:
         ncpu = 1
     pool = ThreadPool(processes=ncpu)
@@ -1115,7 +1152,7 @@ def make_mwa_overlay(
                 zorder=z,
             )
             ax_colormap.set_facecolor("black")
-            
+
         if len(contour_levels) > 0:
             z = 0
             euv_reprojected.plot(
@@ -1170,12 +1207,12 @@ def make_mwa_overlay(
         elif len(contour_levels) > 0:
             ax_contour.coords.grid(False)
         fig.subplots_adjust(
-            left=0.1,    # space from left edge
-            right=0.98,   # space from right edge
+            left=0.1,  # space from left edge
+            right=0.98,  # space from right edge
             bottom=0.08,  # space from bottom
-            top=0.9,     # space from top
+            top=0.9,  # space from top
             wspace=0.27,  # horizontal space between panels
-            hspace=0.05   # vertical space between panels
+            hspace=0.05,  # vertical space between panels
         )
         plot_file_list = []
         if verbose:
@@ -1290,6 +1327,7 @@ def rename_mwasolar_image(
     make_overlay=True,
     make_plots=True,
     keep_euv_fits=False,
+    pol_selfcal=True,
 ):
     """
     Rename and move image to image directory
@@ -1310,6 +1348,8 @@ def rename_mwasolar_image(
         Make radio map plot in helioprojective coordinates
     keep_euv_fits : bool, optional
         Keep EUV images or not
+    pol_selfcal : bool, optional
+        Whether polarisation self-calibration solutions are applied
 
     Returns
     -------
@@ -1326,7 +1366,7 @@ def rename_mwasolar_image(
     if np.isnan(rms_dyn):
         os.system(f"rm -rf {imagename}")
         return
-    
+
     header = fits.getheader(imagename)
     time = header["DATE-OBS"]
     astro_time = Time(time, scale="utc")
@@ -1335,7 +1375,7 @@ def rename_mwasolar_image(
     sun_coords = SkyCoord(
         ra=eph["RA"][0] * u.deg, dec=eph["DEC"][0] * u.deg, frame="icrs"
     )
-    
+
     with fits.open(imagename, mode="update") as hdul:
         hdr = hdul[0].header
         hdr["AUTHOR"] = "DevojyotiKansabanik"
@@ -1350,6 +1390,10 @@ def rename_mwasolar_image(
         hdr["MEDIAN"] = median_val
         hdr["RMSDYN"] = rms_dyn
         hdr["MIMADYN"] = minmax_dyn
+        if pol_selfcal:
+            hdr["POLSELF"] = "TRUE"
+        else:
+            hdr["POLSELF"] = "FALSE"
     freq = round(header["CRVAL3"] / 10**6, 2)
     t_str = "".join(time.split("T")[0].split("-")) + (
         "".join(time.split("T")[-1].split(":"))

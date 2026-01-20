@@ -1916,7 +1916,7 @@ def master_control(
         #########################################################
         # Applying solutions on targets for self-calibration
         #########################################################
-        cal_applied=False
+        cal_applied = False
         if do_selfcal and has_cal:  # If calibrator solutions are available
             current_worker = get_total_worker(dask_cluster)
             nworker = min(max_worker, len(selfcal_mslist) + current_worker)
@@ -1939,14 +1939,14 @@ def master_control(
             )
             try:
                 msg = future_apply_basical_selfcal.result()
-                cal_applied=True
+                cal_applied = True
             except Exception as e:
                 print(
                     "!!!! WARNING: Error in applying basic calibration solutions on target. Continuing selfcal without basic calibration.!!!!"
                 )
                 traceback.print_exc()
-                cal_applied=False
-                do_selfcal=True
+                cal_applied = False
+                do_selfcal = True
             finally:
                 scale_worker_and_wait(dask_cluster, current_worker)
 
@@ -2224,7 +2224,7 @@ def master_control(
                 do_polcal == False
             ):  # Only if do_polcal is False, overwrite to make only Stokes I
                 pol = "I"
-            pol=pol.upper()
+            pol = pol.upper()
             current_worker = get_total_worker(dask_cluster)
             nworker = min(max_worker, len(target_mslist) + current_worker)
             scale_worker_and_wait(dask_cluster, nworker)
