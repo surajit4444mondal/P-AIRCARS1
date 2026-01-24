@@ -419,10 +419,8 @@ def solint_in_float(solint):
     """
     if solint.endswith("s"):
         solint = float(solint.rstrip("s"))
-    elif solint.endswith("m"):
-        solint = float(solint.rstrip("m") * 60.0)
-    elif solint.endswith("h"):
-        solint = float(solint.rstrip("h") * 3600.0)
+    elif solint.endswith("min"):
+        solint = float(solint.rstrip("min") * 60.0)
     else:
         try:
             solint = float(solint)

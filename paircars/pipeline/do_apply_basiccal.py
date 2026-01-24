@@ -158,7 +158,6 @@ def applysol(
                         "goquartical",
                         f"input_ms.path={msname}",
                         f"input_ms.data_column=CORRECTED_DATA",
-                        "input_model.recipe=MODEL_DATA",
                         "output.log_to_terminal=True",
                         f"output.log_directory={quartical_log}",
                         f"output.gain_directory={temp_pol_caltable}",
@@ -172,13 +171,16 @@ def applysol(
                         f"solver.threads={n_threads}",
                         "dask.threads=1",
                         f"{soltype}.type=complex",
-                        f"{soltype}.load_from={pol_caltable}/{soltype}",
+                        f"{soltype}.load_from={qc}/{soltype}",
                     ]
                     quartical_cmd = " ".join(quartical_args)
                     print(f"Quartical cmd: {quartical_cmd}\n")
                     quartical_msg = run_quartical(
                         quartical_cmd, "solarquartical", verbose=False
                     )
+                    if quartical_msg!=0:
+                        print("Quartical solutions did not apply.")
+                        os.system(f"touch {msname}/.nopolselfcal")
                     os.system(f"rm -rf {quartical_log} {temp_pol_caltable}")
         if overwrite_datacolumn:
             print(f"Over writing data column with corrected data for ms: {msname}.")
@@ -272,8 +274,8 @@ def run_all_applysol(
         if only_amplitude:
             print("Applying only amplitude.")
 
-        bandpass_table = glob.glob(caldir + f"/{calibrator_obsid}*.bcal")
-        crossphase_table = glob.glob(caldir + f"/{calibrator_obsid}*.kcrosscal")
+        bandpass_table = glob.glob(caldir + f"/*{calibrator_obsid}*.bcal")
+        crossphase_table = glob.glob(caldir + f"/*{calibrator_obsid}*.kcrosscal")
 
         if len(bandpass_table) == 0:
             print(f"No bandpass table is present in calibration directory : {caldir}.")

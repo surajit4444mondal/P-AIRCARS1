@@ -12,17 +12,13 @@ logging.getLogger("distributed").setLevel(logging.ERROR)
 logging.getLogger("tornado.application").setLevel(logging.CRITICAL)
 
 all_filenames = [
-    "3C138_pol_model.txt",
     "udocker-englib-1.2.11.tar.gz",
-    "J1939-6342_U_model.txt",
-    "UHF_band_cal.npy",
-    "L_band_cal.npy",
-    "3C286_pol_model.txt",
-    "J1939-6342_L_model.txt",
-    "J0408-6545_U_model.txt",
-    "MeerKAT_antavg_Uband.npz",
-    "J0408-6545_L_model.txt",
-    "MeerKAT_antavg_Lband.npz",
+    "de421.bsp",
+    "GGSM.txt",
+    "haslam_map.fits",
+    "hyperdrive",
+    "MWA_sweet_spots.npy",
+    "Ref_mean_bandpass_final.npy",
 ]
 
 
@@ -49,6 +45,8 @@ def download_with_parfive(record_id, update=False, output_dir="zenodo_download")
                     os.system(f"rm -rf {output_dir}/{filename}")
                 dl.enqueue_file(file_url, path=output_dir, filename=filename)
     results = dl.download()
+    for f in results:
+        os.chmod(f, 0o755)
 
 
 def init_paircars_data(update=False, remote_link=None, emails=None):
@@ -87,7 +85,7 @@ def init_paircars_data(update=False, remote_link=None, emails=None):
     ]
 
     if unavailable_files or update:
-        record_id = "15691548"
+        record_id = "18314531"
         download_with_parfive(record_id, update=update, output_dir=datadir)
         timestr = dt.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         print(f"P-AIRCARS data are updated in: {datadir} at time: {timestr}")

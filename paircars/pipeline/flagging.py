@@ -25,6 +25,7 @@ def single_ms_flag(
     use_rflag=False,
     flagdimension="freqtime",
     flag_autocorr=True,
+    flag_quack=True,
     threshold=5.0,
     n_threads=-1,
     memory_limit=-1,
@@ -50,6 +51,8 @@ def single_ms_flag(
         Flag dimension (only applicable for tfcrop)
     flag_autocorr : bool, optional
         Flag autocorrelations or not
+    flag_quack : bool, optional
+        Flag quack timestamps
     threshold : float, optional
         Flagging threshold
     n_threads : int, optional
@@ -102,26 +105,27 @@ def single_ms_flag(
         #################################
         # Flag quack timestamps
         #################################
-        try:
-            with suppress_output():
-                flagdata(
-                    vis=msname,
-                    mode="quack",
-                    quackmode="beg",
-                    quackinterval=4.0,
-                    datacolumn=datacolumn,
-                    flagbackup=False,
-                )
-                flagdata(
-                    vis=msname,
-                    mode="quack",
-                    quackmode="endb",
-                    quackinterval=4.0,
-                    datacolumn=datacolumn,
-                    flagbackup=False,
-                )
-        except BaseException:
-            pass
+        if flag_quack:
+            try:
+                with suppress_output():
+                    flagdata(
+                        vis=msname,
+                        mode="quack",
+                        quackmode="beg",
+                        quackinterval=4.0,
+                        datacolumn=datacolumn,
+                        flagbackup=False,
+                    )
+                    flagdata(
+                        vis=msname,
+                        mode="quack",
+                        quackmode="endb",
+                        quackinterval=4.0,
+                        datacolumn=datacolumn,
+                        flagbackup=False,
+                    )
+            except BaseException:
+                pass
 
         #################################
         # Clip zero amplitude data points
@@ -292,7 +296,9 @@ def do_flagging(
     use_rflag=False,
     flagdimension="freqtime",
     flag_autocorr=True,
+    flag_quack=True,
     flag_backup=True,
+    restore_flag=True,
     cpu_frac=0.8,
     mem_frac=0.8,
 ):
@@ -325,8 +331,12 @@ def do_flagging(
         Flag dimension (only for tfcrop)
     flag_autocorr : bool,optional
         Flag auto-correlations
+    flag_quack : bool, optional
+        Flag quack timestamps
     flag_backup : bool, optional
         Flag backup
+    restore_flag : bool, optional
+        Restore previous flags
     cpu_frac : float, optional
         CPU fraction to use
     mem_frac : float, optional
@@ -367,15 +377,18 @@ def do_flagging(
             print("Flagging measurement set : ", msname)
             print("###########################")
             correct_missing_col_subms(msname)
-            print("Restoring all previous flags...")
-            with suppress_output():
-                flagdata(vis=msname, mode="unflag", spw="0", flagbackup=False)
+            if restore_flag:
+                print("Restoring all previous flags...")
+                with suppress_output():
+                    flagdata(vis=msname, mode="unflag", spw="0", flagbackup=False)
             if flag_bad_spw:
                 badspw = get_bad_chans(msname)
+                print (f"Flagging bad spws: {badspw}.")
             else:
                 badspw = ""
             if flag_bad_ants:
                 bad_ants_str = get_mwa_bad_ants(metafits)
+                print (f"Flagging bad antennas: {bad_ants_str}.")
             else:
                 bad_ants_str = ""
 
@@ -391,6 +404,7 @@ def do_flagging(
                     use_rflag=use_rflag,
                     flagdimension=flagdimension,
                     flag_autocorr=flag_autocorr,
+                    flag_quack=flag_quack,
                     threshold=5.0,
                     n_threads=n_threads,
                     memory_limit=mem_limit,
@@ -425,8 +439,10 @@ def main(
     use_tfcrop=False,
     use_rflag=False,
     flag_autocorr=True,
+    flag_quack=True,
     flagbackup=True,
     flagdimension="freqtime",
+    restore_flag=True,
     cpu_frac=0.8,
     mem_frac=0.8,
     logfile=None,
@@ -459,11 +475,15 @@ def main(
     use_rflag : bool, optional
         If True, applies the `rflag` automated flagging algorithm. Default is False.
     flag_autocorr : bool, optional
-        If True, flags auto-correlations. Default is True.
+        If True, flags auto-correlations. Default is True. 
+    flag_quack : bool, optional
+        If True, flag quack timestamps. Default is True.
     flagbackup : bool, optional
         If True, saves a flag backup before applying new flags. Default is True.
     flagdimension : str, optional
         Dimension over which to apply automated flagging (e.g., "freqtime"). Default is "freqtime".
+    restore_flag : bool, optional
+        Restore previous flags
     cpu_frac : float, optional
         Fraction of total CPU resources to use. Default is 0.8.
     mem_frac : float, optional
@@ -541,6 +561,8 @@ def main(
                 use_rflag=use_rflag,
                 flagdimension=flagdimension,
                 flag_autocorr=flag_autocorr,
+                flag_quack=flag_quack,
+                restore_flag=restore_flag,
                 flag_backup=flagbackup,
                 cpu_frac=cpu_frac,
                 mem_frac=mem_frac,
@@ -615,10 +637,22 @@ def cli():
         help="Do not flag auto-correlations",
     )
     adv_args.add_argument(
+        "--no_flag_quack",
+        dest="flag_quack",
+        action="store_false",
+        help="Do not flag quack timestamps",
+    )
+    adv_args.add_argument(
         "--no_flagbackup",
         dest="flagbackup",
         action="store_false",
         help="Do not backup flags",
+    )
+    adv_args.add_argument(
+        "--no_restore",
+        dest="restore_flag",
+        action="store_false",
+        help="Do not restore flags",
     )
     adv_args.add_argument(
         "--start_remote_log", action="store_true", help="Start remote logging"
@@ -657,8 +691,10 @@ def cli():
         use_tfcrop=args.use_tfcrop,
         use_rflag=args.use_rflag,
         flag_autocorr=args.flag_autocorr,
+        flag_quack=args.flag_quack,
         flagbackup=args.flagbackup,
         flagdimension=args.flagdimension,
+        restore_flag=args.restore_flag,
         cpu_frac=args.cpu_frac,
         mem_frac=args.mem_frac,
         logfile=args.logfile,

@@ -167,14 +167,16 @@ def split_target_scans(
             results = list(dask_client.gather(futures))
             for splited_ms in results:
                 splited_ms_list.append(splited_ms)
+        for splited_ms in splited_ms_list:
+            drop_cache(splited_ms)
         print("##################")
-        print("Spliting of target scans are done successfully.")
+        print("Spliting of measurement sets are done successfully.")
         print("##################")
         return 0, splited_ms_list
     except Exception as e:
         traceback.print_exc()
         print("##################")
-        print("Spliting of target scans are unsuccessful.")
+        print("Spliting of measurement sets are unsuccessful.")
         print("##################")
         return 1, []
     finally:
@@ -313,7 +315,8 @@ def main(
         msg = 1
     finally:
         time.sleep(5)
-        drop_cache(msname)
+        for msname in mslist:
+            drop_cache(msname)
         drop_cache(workdir)
         clean_shutdown(observer)
         if dask_cluster is not None:

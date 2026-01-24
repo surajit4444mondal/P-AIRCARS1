@@ -1022,7 +1022,7 @@ def do_full_selfcal(
     """
     selfcaldir = selfcaldir.rstrip("/")
     logfile = logfile.rstrip("/")
-    print (f"Starting intensity self-calibration for ms: {msname}.")
+    print(f"Starting intensity self-calibration for ms: {msname}.")
     intensity_selfcal_msg, selfcal_ms, gaintable = do_selfcal(
         msname=msname,
         workdir=workdir,
@@ -1049,11 +1049,11 @@ def do_full_selfcal(
         logfile=f"{logfile}.int",
     )
     if intensity_selfcal_msg != 0:
-        return intensity_selfcal_msg, gaintable
+        return intensity_selfcal_msg, 1, [], []
     elif do_polcal is False:
         return 0, 0, gaintable, []
     else:
-        print (f"Starting polarisation self-calibration for ms: {msname}.\n")
+        print(f"Starting polarisation self-calibration for ms: {msname}.\n")
         pol_selfcal_msg, pol_selfcal_ms, quartical_table = do_polselfcal(
             msname=selfcal_ms,
             workdir=workdir,
@@ -1242,6 +1242,8 @@ def main(
                     "Polarisation self-calibration is requested without amplitude-phase intensity self-calibration. Switching off polarisation self-calibration."
                 )
                 do_polcal = False
+            header = fits.getheader(metafits)
+            obsid = header["GPSTIME"]
             partial_do_selfcal = partial(
                 do_full_selfcal,
                 metafits=str(metafits),
@@ -1339,9 +1341,9 @@ def main(
                         + "_selfcal.log"
                     )
                     print(f"Measurement set name: {ms}.")
-                    print (f"Self-cal log file: {logfile}.int")
+                    print(f"Self-cal log file: {logfile}.int")
                     if do_polcal:
-                        print (f"Polarisation self-cal log file: {logfile}.pol")
+                        print(f"Polarisation self-cal log file: {logfile}.pol")
                     tasks.append(
                         delayed(partial_do_selfcal)(
                             ms,
@@ -1381,14 +1383,16 @@ def main(
                         if freq_end > freq_start and ch_end == ch_start:
                             ch_end = ch_start + 1
                         final_gain_caltable = (
-                            caldir + f"/selfcal_coarsechan_{ch_start}_{ch_end}.gcal"
+                            caldir + f"/selfcal_{obsid}_coarsechan_{ch_start}_{ch_end}.gcal"
                         )
+                        os.system(f"rm -rf {final_gain_caltable}")
                         os.system(f"cp -r {gcal} {final_gain_caltable}")
                         gcal_list.append(final_gain_caltable)
 
                         final_bpass_caltable = (
-                            caldir + f"/selfcal_coarsechan_{ch_start}_{ch_end}.bcal"
+                            caldir + f"/selfcal_{obsid}_coarsechan_{ch_start}_{ch_end}.bcal"
                         )
+                        os.system(f"rm -rf {final_bpass_caltable}")
                         os.system(f"cp -r {bpass} {final_bpass_caltable}")
                         bpass_list.append(final_bpass_caltable)
 
@@ -1410,8 +1414,9 @@ def main(
                             if freq_end > freq_start and ch_end == ch_start:
                                 ch_end = ch_start + 1
                             final_leakage_caltable = (
-                                caldir + f"/selfcal_coarsechan_{ch_start}_{ch_end}.dcal"
+                                caldir + f"/selfcal_{obsid}_coarsechan_{ch_start}_{ch_end}.dcal"
                             )
+                            os.system(f"rm -rf {final_leakage_caltable}")
                             os.system(f"cp -r {dcal} {final_leakage_caltable}")
                             dcal_list.append(final_leakage_caltable)
 

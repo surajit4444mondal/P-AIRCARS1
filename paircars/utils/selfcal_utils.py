@@ -872,6 +872,7 @@ def selfcal_round(
                 temporal_tol_factor=float(min_tol_factor / 100.0),
                 spectral_tol_factor=0.1,
             )
+            nintervals=min(nintervals,int(ntime/2))
         else:
             nchans = 1
             nintervals = 1
@@ -1184,7 +1185,7 @@ def selfcal_round(
                     return 3, applycal_gaintable, 0, 0, "", "", "", []
 
                 applycal_gaintable.append(bpass_caltable)
-                interp.append("linear,linearflag")
+                interp.append("linear,linear")
 
             #########################################
             # Flagging bad gains
@@ -1287,7 +1288,6 @@ def selfcal_round(
                 "goquartical",
                 f"input_ms.path={msname}",
                 f"input_ms.data_column=DATA",
-                "input_model.recipe=MODEL_DATA",
                 "output.log_to_terminal=True",
                 f"output.log_directory={quartical_log}",
                 f"output.gain_directory={temp_pol_caltable}",

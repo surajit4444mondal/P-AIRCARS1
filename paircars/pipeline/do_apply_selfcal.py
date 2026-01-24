@@ -10,6 +10,7 @@ import os
 from casatools import msmetadata
 from dask import delayed
 from paircars.utils import *
+from astropy.io import fits
 from paircars.pipeline.do_apply_basiccal import applysol
 
 logging.getLogger("distributed").setLevel(logging.ERROR)
@@ -18,6 +19,7 @@ logging.getLogger("tornado.application").setLevel(logging.CRITICAL)
 
 def run_all_applysol(
     mslist,
+    metafits,
     dask_client,
     workdir,
     caldir,
@@ -34,6 +36,8 @@ def run_all_applysol(
     ----------
     mslist : list
         Measurement set list
+    metafits: str
+        Metafits file
     dask_client : dask.client
         Dask client
     workdir : str
@@ -66,10 +70,12 @@ def run_all_applysol(
         os.chdir(workdir)
         mslist = np.unique(mslist).tolist()
         parang = False
-        selfcal_tables = sorted(glob.glob(caldir + "/selfcal_coarsechan*.gcal"))
-        selfcal_bpass_tables = sorted(glob.glob(caldir + "/selfcal_coarsechan*.bcal"))
+        header = fits.getheader(metafits)
+        obsid = header["GPSTIME"]
+        selfcal_tables = sorted(glob.glob(f"{caldir}/selfcal_{obsid}_coarsechan*.gcal"))
+        selfcal_bpass_tables = sorted(glob.glob(f"{caldir}/selfcal_{obsid}_coarsechan*.bcal"))
         selfcal_quartical_tables = sorted(
-            glob.glob(caldir + "/selfcal_coarsechan*.dcal")
+            glob.glob(f"{caldir}/selfcal_{obsid}_coarsechan*.dcal")
         )
         print(f"Selfcal caltables: {selfcal_tables}")
         print(f"Bandpass selfcal caltables: {selfcal_bpass_tables}")
@@ -209,6 +215,7 @@ def run_all_applysol(
 
 def main(
     mslist,
+    metafits,
     workdir,
     caldir,
     applymode="calonly",
@@ -228,6 +235,8 @@ def main(
     ----------
     mslist : str
         Comma-separated list of measurement set paths to apply calibration to.
+    metafits : str
+        Metafits file
     workdir : str
         Directory for logs, intermediate files, and PID tracking.
     caldir : str
@@ -309,6 +318,7 @@ def main(
         else:
             msg = run_all_applysol(
                 mslist,
+                metafits,
                 dask_client,
                 workdir,
                 caldir,
@@ -348,6 +358,11 @@ def cli():
         "mslist",
         type=str,
         help="Comma-separated list of measurement sets (required)",
+    )
+    basic_args.add_argument(
+        "metafits",
+        type=str,
+        help="Metafits file (required)",
     )
     basic_args.add_argument(
         "--workdir",
@@ -413,6 +428,7 @@ def cli():
 
     msg = main(
         args.mslist,
+        args.metafits,
         args.workdir,
         args.caldir,
         applymode=args.applymode,

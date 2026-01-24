@@ -35,6 +35,8 @@ from .image_utils import *
 from .proc_manage_utils import *
 from .ms_metadata import *
 from .mwa_utils import *
+from .resource_utils import *
+from .udocker_utils import *
 
 warnings.simplefilter("ignore", category=FITSFixedWarning)
 
@@ -1471,13 +1473,14 @@ def make_ds_plot(dsfiles, plot_file=None, plot_quantity="TB", showgui=False):
     if type(dsfiles) == str:
         dsfiles = [dsfiles]
     for i, dsfile in enumerate(dsfiles):
-        freqs_i, times_i, timestamps_i, T_data_i, S_data_i = np.load(
+        freqs_i, times_i, timestamps_i, T_data_i, S_data_i, flags = np.load(
             dsfile, allow_pickle=True
         )
         if plot_quantity == "TB":
             data_i = T_data_i / 10**6
         else:
             data_i = S_data_i
+        data_i[flags]=np.nan
         if i == 0:
             freqs = freqs_i
             times = times_i

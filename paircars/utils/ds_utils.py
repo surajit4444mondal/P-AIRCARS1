@@ -17,38 +17,6 @@ kb = 1.38e-23  # Boltzmann constant
 light_speed = 3.0e8  # Speed of light in vacuum
 
 
-def fill_nan(arr):
-    """
-    Function to interpolate to nan values
-
-    Parameters
-    ----------
-    arr : np.array
-        1-D numpy array
-
-    Returns
-    -------
-    np.array
-        1-D nan interpolated numpy array
-    """
-    try:
-        med_fill_value = np.nanmedian(arr)
-        inds = np.arange(arr.shape[0])
-        good = np.where(np.isfinite(arr))
-        f = interp1d(
-            inds[good],
-            arr[good],
-            bounds_error=False,
-            kind="linear",
-            copy=True,
-            fill_value=med_fill_value,
-        )
-        out_arr = np.where(np.isfinite(arr), arr, f(inds))
-    except:
-        out_arr = arr
-    return out_arr
-
-
 def calc_T_rec(freq):
     """
     Function to calculate receiver temperature based on Noise Temperature of Phased Array Radio Telescope:
@@ -442,7 +410,7 @@ def calc_dynamic_spectrum(msname, metafits, outdir, nthreads=1):
     msmd.close()
     highest_freq = np.nanmax(freqs)
     smallest_wavelength = 299792458.0 / (highest_freq * (10**6))
-    max_uv = 100 / smallest_wavelength
+    max_uv = 100.0 / smallest_wavelength
     baselines = get_short_baselines(msname, max_uv=max_uv, nmax=3)
     sun_radec_string, sun_ra, sun_dec, radeg, decdeg = radec_sun(msname)
 
@@ -612,15 +580,22 @@ def calc_dynamic_spectrum(msname, metafits, outdir, nthreads=1):
     T_sun_yy_list = np.array(T_sun_yy_list)
     S_sun_xx_list = np.array(S_sun_xx_list)
     S_sun_yy_list = np.array(S_sun_yy_list)
+    
+    pos = np.where((T_sun_xx_list<=0)|(T_sun_yy_list<=0)|(S_sun_xx_list<=0)|(S_sun_yy_list<=0))
+    
+    T_sun_xx_list[pos]=np.nan
+    T_sun_xx_list[pos]=np.nan
+    S_sun_xx_list[pos]=np.nan
+    S_sun_yy_list[pos]=np.nan
 
-    T_sun_xx = np.nanmean(T_sun_xx_list, axis=0)
-    T_sun_yy = np.nanmean(T_sun_yy_list, axis=0)
-    S_sun_xx = np.nanmean(S_sun_xx_list, axis=0)
-    S_sun_yy = np.nanmean(S_sun_yy_list, axis=0)
+    T_sun_xx = np.mean(T_sun_xx_list, axis=0)
+    T_sun_yy = np.mean(T_sun_yy_list, axis=0)
+    S_sun_xx = np.mean(S_sun_xx_list, axis=0)
+    S_sun_yy = np.mean(S_sun_yy_list, axis=0)
 
     T_sun = (T_sun_xx + T_sun_yy) / 2.0
     S_sun = (S_sun_xx + S_sun_yy) / 2.0
-
+    
     ######################################
     # Extracting metadata
     ######################################
@@ -644,6 +619,7 @@ def calc_dynamic_spectrum(msname, metafits, outdir, nthreads=1):
         timestamps[0].split("T")[-1].split(".")[0].split(":")
     )
     msmd.close()
+    flags = np.where(T_sun<=0)
     save_file = f"freq_{mid_freq}MHz_time_{t_string}"
     np.save(
         f"{outdir}/{save_file}_ds.npy",
@@ -654,6 +630,7 @@ def calc_dynamic_spectrum(msname, metafits, outdir, nthreads=1):
                 timestamps[quack_timestamp:-quack_timestamp],
                 T_sun[:, quack_timestamp:-quack_timestamp],
                 S_sun[:, quack_timestamp:-quack_timestamp],
+                flags,
             ],
             dtype="object",
         ),

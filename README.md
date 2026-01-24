@@ -52,48 +52,48 @@ P-AIRCARS documentation is available at: [paircars.readthedocs.io]
 4. Run P-AIRCARS pipeline
 
     ```text
-    run-mwa-paircars <path of measurement set> --workdir <path of work directory> --outdir <path of output products directory>
+    run-mwa-paircars <path of target measurement set directory> <path of target metafits file> --workdir <path of work directory> --outdir <path of output products directory>
     ```    
 
-That's all. You started MeerSOLAR pipeline for analysing your MeerKAT solar observation 🎉.
+That's all. You started P-AIRCARS pipeline for analysing your MWA solar observation 🎉.
 
-5. To see all running MeerSOLAR jobs
+5. To see all running P-AIRCARS jobs
 
     ```text
-    show-meersolar-status --show
+    show-paircars-status --show
     ```
     
 6. To see prefect dashboard
 
    ```text
-   run-meer-meerlogger
+   run-mwa-mwalogger
    ```
       
 7. To see local log of any job using the <jobid>
 
    ```text
-   run-meer-meerlogger --jobid <jobid>
+   run-mwa-mwalogger --jobid <jobid>
    ```
    
 7. Output products will be saved in : `<path of output products directory>`
 
-[pypi]: https://pypi.org/project/meersolar/
+[pypi]: https://pypi.org/project/paircars/
 
 <!-- end quickstart -->
 
 ## Sample dataset
-User can download and test entire MeerSOLAR pipeline using the sample dataset available in Zenodo: https://doi.org/10.5281/zenodo.16068485. Do not use this sample dataset for any publication without permission from the developer.
+User can download and test entire P-AIRCARS pipeline using the sample dataset available in Zenodo: https://doi.org/10.5281/zenodo.16068485. Do not use this sample dataset for any publication without permission from the developer.
 
 
 ## Acknowledgements
 
-MeerSOLAR is developed by Devojyoti Kansabanik (CPAESS-UCAR, Boulder, USA) and Deepan Patra (NCRA-TIFR, Pune, India). If you use **MeerSOLAR** for analysing your MeerKAT solar observations, include the following statement in your paper
+P-AIRCARS is developed by Devojyoti Kansabanik (NCRA-TIFR, Pune, India and CPAESS-UCAR, Boulder, USA) and an incarnation of AIRCARS. If you use **P-AIRCARS** for analysing your MWA solar observations, include the following statement in your paper
 
 ```text
-This MeerKAT solar observations are analysed using MeerSOLAR pipeline.
+This MWA solar observations are analysed using P-AIRCARS pipeline.
 ```
 
-1. MeerSOLAR software in zenodo: https://doi.org/10.5281/zenodo.16040507
+1. P-AIRCARS software in zenodo: https://doi.org/10.5281/zenodo.16040507
 
 <!-- will be updated one published.
 and cite the following papers.

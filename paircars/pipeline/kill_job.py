@@ -102,4 +102,4 @@ def kill_paircarsjob():
 
 
 if __name__ == "__main__":
-    kill_meerjob()
+    kill_paircarsjob()

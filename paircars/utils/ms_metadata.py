@@ -69,11 +69,12 @@ def get_timeranges(msname, time_interval, time_window, quack_timestamps=-1):
     msmd.done()
     time_ranges = []
     if quack_timestamps > 0:
+        quack_timestamps+=1
         times = times[quack_timestamps:-quack_timestamps]
     else:
         times = times[1:-1]
-    start_time = times[0]
-    end_time = times[-1]
+    start_time = min(times)
+    end_time = max(times)
     if time_interval < 0 or time_window < 0 or time_interval <= time_window:
         t = (
             mjdsec_to_timestamp(start_time, str_format=1)

@@ -17,7 +17,7 @@ logging.getLogger("tornado.application").setLevel(logging.CRITICAL)
 datadir = get_datadir()
 
 
-def import_model(msname, metafits, beamfile="", sourcelist="", ncpu=-1):
+def import_hyperdrive_model(msname, metafits, beamfile="", sourcelist="", ncpu=-1):
     """
     Simulate visibilities and import in the measurement set
 
@@ -239,7 +239,7 @@ def main(
             tasks = []
             for msname in mslist:
                 tasks.append(
-                    delayed(import_model)(
+                    delayed(import_hyperdrive_model)(
                         msname,
                         metafits,
                         beamfile=beamfile,
@@ -248,11 +248,11 @@ def main(
                     )
                 )
             print("Start import modeling...")
-            results = []
-            for i in range(0, len(tasks), njobs):
-                batch = tasks[i : i + njobs]
-                futures = dask_client.compute(batch)
-                results.extend(dask_client.gather(futures))
+            #results = []
+            #for i in range(0, len(tasks), njobs):
+            #batch = tasks[i : i + njobs]
+            futures = dask_client.compute(tasks)
+            results=dask_client.gather(futures)
             msg = 0
             for i in range(len(results)):
                 if results[i] != 0:

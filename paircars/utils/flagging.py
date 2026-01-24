@@ -135,6 +135,7 @@ def uvbin_flag(
                             uvrange=f"{i}~{i+uvbin_size}lambda",
                             timedevscale=threshold,
                             freqdevscale=threshold,
+                            ntime="2s",
                             flagbackup=False,
                         )
                     else:

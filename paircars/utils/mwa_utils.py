@@ -90,6 +90,28 @@ def freq_to_MWA_coarse(freq):
     return int(round(freq // 1.28))
 
 
+def get_MWA_coarse_chan(msname):
+    """
+    Get MWA coarse channel number
+    
+    Parameters
+    ----------
+    msname : str
+        Measurement set
+        
+    Returns
+    -------
+    int
+        Coarse channel corresponding to central frequency of the measurement set
+    """
+    msmd=msmetadata()
+    msmd.open(msname)
+    meanfreq=msmd.meanfreq(0,unit="MHz")
+    msmd.close()
+    ncoarse = freq_to_MWA_coarse(meanfreq)
+    return ncoarse
+    
+       
 def get_MWA_coarse_bands(msname):
     """
     Get coarse channel bands of the MWA
@@ -153,20 +175,21 @@ def get_bad_chans(msname):
     msmd.close()
     msmd.done()
     n_per_coarse_chan = int(1.28 / chanres)
-    n_edge_chan = int(0.16 / chanres)
-    spw = "0:"
-    for i in range(0, nchan - n_per_coarse_chan, n_per_coarse_chan):
+    n_edge_chan = max(1,int(0.16 / chanres))
+    spw = ""
+    for i in range(0, int(nchan/n_per_coarse_chan), n_per_coarse_chan):
         if i == i + n_edge_chan - 1:
             spw += f"{i};"
         else:
             spw += f"{i}~{i+n_edge_chan-1};"
         if n_edge_chan >= 1:
-            spw += f"{i+int(nchan/2)};"
+            spw += f"{i+int(nchan/2)-1};"
         if i + nchan - n_edge_chan == i + nchan - 1:
             spw += f"{i+nchan-1};"
         else:
             spw += f"{i+nchan-n_edge_chan}~{i+nchan-1};"
-    spw = spw[:-1]
+    if spw!="":
+        spw=f"0:{spw[:-1]}"
     return spw
 
 
