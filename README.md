@@ -52,8 +52,10 @@ P-AIRCARS documentation is available at: [paircars.readthedocs.io]
 4. Run P-AIRCARS pipeline
 
     ```text
-    run-mwa-paircars <path of target measurement set directory> <path of target metafits file> --workdir <path of work directory> --outdir <path of output products directory>
+    run-mwa-paircars <path of target measurement set directory> <path of target metafits file> --cal_datadir <path of calibrator measurement set directory> --cal_metafits <path of calibrator metafits> --workdir <path of work directory> --outdir <path of output products directory>
     ```    
+    
+    N.B.: Keep target measurement sets for a single OBSID and calibrator measurement sets for a single OBSID must be kept in seperate directories. If calibrator is not present, do not provide these information.
 
 That's all. You started P-AIRCARS pipeline for analysing your MWA solar observation 🎉.
 
