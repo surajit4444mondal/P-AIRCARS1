@@ -133,6 +133,9 @@ def cli():
         "imagedir", type=str, help="Image directory"
     )
     basic_args.add_argument(
+        "outdir", type=str, help="Output directory"
+    )
+    basic_args.add_argument(
         "--workdir", type=str, default="", help="Name of work directory"
     )
 
@@ -162,7 +165,8 @@ def cli():
 
     msg = main(
         args.imagedir,
-        args.workdir,
+        args.outdir,
+        workdir=args.workdir,
         cpu_frac=args.cpu_frac,
         logfile=args.logfile,
         jobid=args.jobid,
