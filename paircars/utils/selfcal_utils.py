@@ -913,16 +913,14 @@ def selfcal_round(
         ################################################
         # Creating and using solar mask
         ################################################
-        if use_solar_mask:
-            fits_mask = msname.split(".ms")[0] + "_solar-mask.fits"
-            if os.path.exists(fits_mask) == False:
-                logger.info(f"Creating solar mask of size: {mask_radius} arcmin.\n")
-                fits_mask = create_circular_mask(
-                    msname, cellsize, imsize, mask_radius=mask_radius
-                )
-
-        if fits_mask is not None and os.path.exists(fits_mask):
-            wsclean_args.append("-fits-mask " + fits_mask)
+        fits_mask = msname.split(".ms")[0] + "_solar-mask.fits"
+        if os.path.exists(fits_mask) == False:
+            logger.info(f"Creating solar mask of size: {mask_radius} arcmin.\n")
+            fits_mask = create_circular_mask(
+                msname, cellsize, imsize, mask_radius=mask_radius
+            )
+        if fits_mask is not None and os.path.exists(fits_mask) and use_solar_mask:
+            wsclean_args.append(f"-fits-mask {fits_mask}")
 
         ######################################
         # Determining multiscale parameter
@@ -1243,7 +1241,6 @@ def selfcal_round(
                 "solver.terms=[D]",
                 "solver.iter_recipe=[200]",
                 "solver.propagate_flags=False",
-                f"solver.reference_antenna={refant}",
                 f"solver.threads={ncpu}",
                 "dask.threads=1",
                 "D.type=complex",

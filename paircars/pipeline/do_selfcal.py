@@ -27,6 +27,7 @@ def do_selfcal(
     selfcaldir="",
     metafits="",
     cal_applied=True,
+    refant="",
     start_threshold=5,
     end_threshold=3,
     max_iter=100,
@@ -61,6 +62,8 @@ def do_selfcal(
         Metafits file
     cal_applied : bool, optional
         Basic calibration applied or not
+    refant : str, optional
+        Reference antenna
     start_threshold : int, optional
         Start CLEAN threhold
     end_threshold : int, optional
@@ -216,8 +219,10 @@ def do_selfcal(
             if result != 0:
                 logger.info(f"Could not flag non-disk time properly.")
                 start_gauss_source = False
+                use_solar_mask=False
             else:
                 start_gauss_source = True
+                use_solar_mask=True
 
         ############################################
         # Imaging and calibration parameters
@@ -238,12 +243,13 @@ def do_selfcal(
         possible_sizes = np.sort(np.array(possible_sizes))
         possible_sizes = possible_sizes[possible_sizes >= imsize]
         imsize = max(512, int(possible_sizes[0]))
-        unflagged_antenna_names, flag_frac_list = get_unflagged_antennas(msname)
-        refant = unflagged_antenna_names[0]
-        msmd = msmetadata()
-        msmd.open(msname)
-        refant = msmd.antennaids(refant)[0]
-        msmd.close()
+        if refant=="":
+            unflagged_antenna_names, flag_frac_list = get_unflagged_antennas(msname)
+            refant = unflagged_antenna_names[0]
+            msmd = msmetadata()
+            msmd.open(msname)
+            refant = msmd.antennaids(refant)[0]
+            msmd.close()
 
         ############################################
         # Initiating selfcal Parameters
@@ -329,7 +335,7 @@ def do_selfcal(
                     use_previous_model=use_previous_model,
                     weight=weight,
                     robust=robust,
-                    use_solar_mask=solar_selfcal,
+                    use_solar_mask=use_solar_mask,
                     fluxscale_mwa=fluxscale_mwa,
                     do_intensity_cal=True,
                     do_polcal=False,
@@ -371,7 +377,7 @@ def do_selfcal(
                         use_previous_model=False,
                         weight=weight,
                         robust=robust,
-                        use_solar_mask=solar_selfcal,
+                        use_solar_mask=use_solar_mask,
                         fluxscale_mwa=fluxscale_mwa,
                         do_intensity_cal=True,
                         do_polcal=False,
@@ -609,6 +615,7 @@ def do_polselfcal(
     workdir="",
     selfcaldir="",
     metafits="",
+    refant="",
     max_iter=100,
     max_DR=100000,
     min_iter=2,
@@ -637,6 +644,8 @@ def do_polselfcal(
         Working directory
     metafits : str
         Metafits file
+    refant : str, optional
+        Reference antenna
     max_iter : int, optional
         Maximum numbers of selfcal iterations
     max_DR : float, optional
@@ -781,12 +790,13 @@ def do_polselfcal(
         possible_sizes = np.sort(np.array(possible_sizes))
         possible_sizes = possible_sizes[possible_sizes >= imsize]
         imsize = max(512, int(possible_sizes[0]))
-        unflagged_antenna_names, flag_frac_list = get_unflagged_antennas(msname)
-        refant = unflagged_antenna_names[0]
-        msmd = msmetadata()
-        msmd.open(msname)
-        refant = msmd.antennaids(refant)[0]
-        msmd.close()
+        if refant=="":
+            unflagged_antenna_names, flag_frac_list = get_unflagged_antennas(msname)
+            refant = unflagged_antenna_names[0]
+            msmd = msmetadata()
+            msmd.open(msname)
+            refant = msmd.antennaids(refant)[0]
+            msmd.close()
 
         ############################################
         # Initiating selfcal Parameters
@@ -838,7 +848,7 @@ def do_polselfcal(
                 threshold=threshold,
                 weight=weight,
                 robust=robust,
-                use_solar_mask=solar_selfcal,
+                use_solar_mask=False,
                 do_polcal=True,
                 do_intensity_cal=False,
                 pbcor=True,
@@ -997,6 +1007,7 @@ def do_full_selfcal(
     selfcaldir="",
     metafits="",
     cal_applied=True,
+    refant="",
     start_threshold=5,
     end_threshold=3,
     max_iter=100,
@@ -1029,6 +1040,7 @@ def do_full_selfcal(
         selfcaldir=f"{selfcaldir}_int",
         metafits=metafits,
         cal_applied=cal_applied,
+        refant=refant,
         start_threshold=start_threshold,
         end_threshold=end_threshold,
         max_iter=max_iter,
@@ -1083,6 +1095,7 @@ def main(
     workdir,
     caldir,
     cal_applied=True,
+    refant="",
     start_thresh=5,
     stop_thresh=3,
     max_iter=100,
@@ -1122,6 +1135,8 @@ def main(
         Directory containing calibration tables (e.g., from flux or phase calibrators).
     cal_applied : bool, optional
         Basic initial calibration applied or not.
+    refant : str, optional
+        Reference antenna name.
     start_thresh : float, optional
         Initial image dynamic range threshold to start self-calibration. Default is 5.
     stop_thresh : float, optional
@@ -1248,6 +1263,7 @@ def main(
                 do_full_selfcal,
                 metafits=str(metafits),
                 cal_applied=bool(cal_applied),
+                refant=str(refant),
                 start_threshold=float(start_thresh),
                 end_threshold=float(stop_thresh),
                 max_iter=int(max_iter),
@@ -1502,6 +1518,13 @@ def cli():
         help="Basic calibration is not applied",
     )
     adv_args.add_argument(
+        "--refant",
+        type=str,
+        default="",
+        help="Reference antenna",
+        metavar="String",
+    )
+    adv_args.add_argument(
         "--start_thresh",
         type=float,
         default=5,
@@ -1637,6 +1660,7 @@ def cli():
         metafits=args.metafits,
         workdir=args.workdir,
         cal_applied=args.cal_applied,
+        refant=args.refant,
         caldir=args.caldir,
         start_thresh=args.start_thresh,
         stop_thresh=args.stop_thresh,

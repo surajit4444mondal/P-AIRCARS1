@@ -12,6 +12,7 @@ import os
 import socket
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic_settings")
+from collections import Counter
 from casatools import msmetadata
 from astropy.io import fits
 from datetime import datetime as dt
@@ -421,6 +422,7 @@ def run_basic_cal_jobs(
     workdir,
     outdir,
     perform_polcal=False,
+    refant="1",
     jobid=0,
     cpu_frac=0.8,
     mem_frac=0.8,
@@ -440,6 +442,8 @@ def run_basic_cal_jobs(
         Output directory
     perform_polcal : bool, optional
         Perform full polarization calibration
+    refant : str, optional
+        Reference antenna
     cpu_frac : float, optional
         CPU fraction to use
     mem_frac : float, optional
@@ -481,6 +485,7 @@ def run_basic_cal_jobs(
                 workdir,
                 outdir,
                 perform_polcal=perform_polcal,
+                refant=refant,
                 keep_backup=keep_backup,
                 start_remote_log=remote_log,
                 cpu_frac=float(cpu_frac),
@@ -684,6 +689,7 @@ def run_selfcal_jobs(
     caldir,
     metafits,
     cal_applied,
+    refant="1",
     start_thresh=5.0,
     stop_thresh=3.0,
     max_iter=100,
@@ -721,6 +727,8 @@ def run_selfcal_jobs(
         Metafits file
     cal_applied : bool
         Whether calibration solutions are applied or not
+    refant : str, optional
+        Reference antenna
     cpu_frac : float, optional
         CPU fraction to use
     mem_frac : float, optional
@@ -793,6 +801,7 @@ def run_selfcal_jobs(
                 workdir,
                 caldir,
                 cal_applied=cal_applied,
+                refant=refant,
                 start_thresh=float(start_thresh),
                 stop_thresh=float(stop_thresh),
                 max_iter=float(max_iter),
@@ -926,13 +935,12 @@ def run_imaging_jobs(
     weight="briggs",
     robust=0.0,
     pol="IQUV",
-    freqres=0.16,
-    timeres=0.5,
-    threshold=1.0,
+    freqres=1.28,
+    timeres=10.0,
+    threshold=3.0,
     use_multiscale=True,
     use_solar_mask=True,
     cutout_rsun=4.0,
-    make_overlay=True,
     savemodel=False,
     saveres=False,
     jobid=0,
@@ -979,8 +987,6 @@ def run_imaging_jobs(
         Use solar mask or not
     cutout_rsun : float, optional
         Cutout image size from center in solar radii (default : 4.0 solar radii)
-    make_overlay : bool, optional
-        Make SUVI MeerKAT overlay
     savemodel : bool, optional
         Save model images or not
     saveres : bool, optional
@@ -1033,7 +1039,6 @@ def run_imaging_jobs(
                 use_solar_mask=use_solar_mask,
                 savemodel=savemodel,
                 saveres=saveres,
-                make_overlay=make_overlay,
                 start_remote_log=remote_log,
                 cpu_frac=float(cpu_frac),
                 mem_frac=float(mem_frac),
@@ -1125,6 +1130,75 @@ def run_apply_pbcor(
         return msg
 
 
+@task(name="making_overlay", retries=2, retry_delay_seconds=10, log_prints=True)
+def run_make_overlay(
+    imagedir,
+    outdir,
+    workdir="",
+    jobid=0,
+    cpu_frac=0.8,
+    mem_frac=0.8,
+    remote_log=False,
+):
+    """
+    Making overlays of all images on EUV images
+
+    Parameters
+    ----------
+    imagedir : str
+        Image directory name
+    outdir : str
+        Output directory
+    workdir : str, optional
+        Work directory
+    cpu_frac : float, optional
+        CPU fraction to use
+    remote_log: bool, optional
+        Start remote logger
+
+    Returns
+    -------
+    int
+        Success message for applying primary beam correction on all images
+    """
+    overlay_basename = "overlay"
+    logdir = f"{workdir}/logs"
+    os.makedirs(logdir, exist_ok=True)
+    logfile = f"{logdir}/{overlay_basename}.log"
+    if os.path.exists(logfile):
+        os.remove(logfile)
+    ctx = get_run_context()
+    task_id = str(ctx.task_run.id)
+    task_name = ctx.task_run.name
+    stop_event = Event()
+    log_thread_pbcor = start_log_task_saver(
+        task_id, task_name, logfile, poll_interval=3, stop_event=stop_event
+    )
+    overlay_pngdir = f"{os.path.dirname(imagedir)}/overlays_pngs"
+    os.makedirs(overlay_pngdir, exist_ok=True)
+    try:
+        ###################
+        print("###########################")
+        print("Making overlays of all images .....")
+        print("###########################")
+        #####################
+        # Making overlays
+        #####################
+        msg = make_overlay.main(
+            imagedir,
+            outdir,
+            workdir=workdir,
+            cpu_frac=float(cpu_frac),
+            logfile=logfile,
+            jobid=jobid,
+            start_remote_log=remote_log,
+        )
+    finally:
+        stop_event.set()
+        log_thread_pbcor.join(timeout=5)
+    return 0
+
+      
 @flow(
     name="P-AIRCARS Master control",
     version="3.0",
@@ -1171,10 +1245,10 @@ def master_control(
     weight="briggs",
     robust=0.0,
     minuv=0,
-    image_freqres=0.16,
-    image_timeres=0.5,
+    image_freqres=1.28,
+    image_timeres=10.0,
     pol="IQUV",
-    clean_threshold=1.0,
+    clean_threshold=3.0,
     use_multiscale=True,
     cutout_rsun=4.0,
     make_overlay=True,
@@ -1275,7 +1349,7 @@ def master_control(
     cutout_rsun : float, optional
         Cutout image size from center in solar radii (default : 4.0 solar radii)
     make_overlay : bool, optional
-        Make SUVI MeerKAT overlay
+        Make EUV MWA overlay
 
     cpu_frac : float, optional
         CPU fraction to use
@@ -1409,7 +1483,12 @@ def master_control(
         if cpu_frac > 0.8:
             cpu_frac = 0.8
         max_worker = int(psutil.cpu_count() * cpu_frac)
-
+        
+    ################################################
+    # Starting number of workers
+    ################################################
+    current_worker = get_total_worker(dask_cluster)
+        
     try:
         ####################################
         # Job and process IDs
@@ -1565,9 +1644,11 @@ def master_control(
         max_freqres = min(max_freqres_list)
         if image_freqres > 0:
             image_freqres = max(image_freqres,freqres)
-            freqavg = round(min(image_freqres, max_freqres), 1)
+            freqavg = round(min(image_freqres, max_freqres), 2)
         else:
             freqavg = freqres
+        freqavg = min(0.16,freqavg)
+        image_freqres=round(image_freqres,2)
         total_ncoarse = 0
         for msname in target_mslist:
             ncoarse = get_ncoarse(msname)
@@ -1602,10 +1683,14 @@ def master_control(
             )
         if image_timeres > 0:
             image_timeres = max(image_timeres,timeres)
-            timeavg = round(min(image_timeres, max_timeres), 1)
+            timeavg = round(min(image_timeres, max_timeres), 2)
         else:
             timeavg = timeres
-        print (f"Frequency resolution: {freqres}MHz, time resolution: {timeres}s, frequency averaging: {freqavg}MHz, time averaging: {timeavg}s")
+        timeavg = min(2.0,timeavg)
+        image_timeres=round(image_timeres,2)
+        print (f"Frequency resolution: {freqres}MHz, time resolution: {timeres}s.")
+        print (f"Frequency averaging: {freqavg}MHz, time averaging: {timeavg}s.")
+        print (f"Imaging frequency resolution: {image_freqres}MHz, time resolution: {image_timeres}s.")
         
         #############################
         # Reset any previous weights
@@ -1624,11 +1709,15 @@ def master_control(
                 msname, n_threads=available_cpus, force_reset=do_forcereset_weightflag
             )
 
+        ###############################################
+        # Estimating reference antenna
         ################################################
-        # Starting number of workers
-        ################################################
-        current_worker = get_total_worker(dask_cluster)
-
+        refant_list=[]
+        for ms in calibrator_mslist:
+            refant = get_refant(ms)
+            refant_list.append(refant)
+        refant = max(Counter(refant_list).values())
+            
         #######################################
         # Run dynamic spectra making
         #######################################
@@ -1774,6 +1863,7 @@ def master_control(
                 workdir,
                 outdir,
                 perform_polcal=do_polcal,
+                refant=refant,
                 jobid=jobid,
                 cpu_frac=round(cpu_frac, 2),
                 mem_frac=round(mem_frac, 2),
@@ -2029,6 +2119,7 @@ def master_control(
                 caldir,
                 target_metafits,
                 cal_applied,
+                refant=refant,
                 solint=solint,
                 do_apcal=do_ap_selfcal,
                 do_polcal=do_polcal,
@@ -2325,7 +2416,6 @@ def master_control(
                 use_multiscale=use_multiscale,
                 use_solar_mask=use_solar_mask,
                 cutout_rsun=cutout_rsun,
-                make_overlay=make_overlay,
                 savemodel=keep_backup,
                 saveres=keep_backup,
                 jobid=jobid,
@@ -2343,43 +2433,45 @@ def master_control(
                 return 1
             finally:
                 scale_worker_and_wait(dask_cluster, current_worker)
-
+        
+        ########################################
+        # Naming of image directory
+        ########################################
+        if weight == "briggs":
+            weight_str = f"{weight}_{robust}"
+        else:
+            weight_str = weight
+        if image_freqres == -1 and image_timeres == -1:
+            imagedir = outdir + f"/imagedir_f_all_t_all_pol_{pol}_w_{weight_str}"
+        elif image_freqres != -1 and image_timeres == -1:
+            imagedir = (
+                outdir
+                + f"/imagedir_f_{image_freqres}_t_all_pol_{pol}_w_{weight_str}"
+            )
+        elif image_freqres == -1 and image_timeres != -1:
+            imagedir = (
+                outdir
+                + f"/imagedir_f_all_t_{image_timeres}_pol_{pol}_w_{weight_str}"
+            )
+        else:
+            imagedir = (
+                outdir
+                + f"/imagedir_f_{image_freqres}_t_{image_timeres}_pol_{pol}_w_{weight_str}"
+            )
         ###########################
         # Primary beam correction
         ###########################
         if do_pbcor:
-            if weight == "briggs":
-                weight_str = f"{weight}_{robust}"
-            else:
-                weight_str = weight
-            if image_freqres == -1 and image_timeres == -1:
-                imagedir = outdir + f"/imagedir_f_all_t_all_pol_{pol}_w_{weight_str}"
-            elif image_freqres != -1 and image_timeres == -1:
-                imagedir = (
-                    outdir
-                    + f"/imagedir_f_{round(float(image_freqres),1)}_t_all_pol_{pol}_w_{weight_str}"
-                )
-            elif image_freqres == -1 and image_timeres != -1:
-                imagedir = (
-                    outdir
-                    + f"/imagedir_f_all_t_{round(float(image_timeres),1)}_pol_{pol}_w_{weight_str}"
-                )
-            else:
-                imagedir = (
-                    outdir
-                    + f"/imagedir_f_{round(float(image_freqres),1)}_t_{round(float(image_timeres),1)}_pol_{pol}_w_{weight_str}"
-                )
-            imagedir = imagedir + "/images"
-            images = glob.glob(imagedir + "/*.fits")
+            images = glob.glob(f"{imagedir}/images/*.fits")
             if len(images) == 0:
-                print(f"No image is present in image directory: {imagedir}")
+                print(f"No image is present in image directory: {imagedir}/images")
             else:
                 current_worker = get_total_worker(dask_cluster)
                 scale_worker_and_wait(dask_cluster, max_worker)
                 future_pbcor = run_apply_pbcor.with_options(
                     task_run_name=f"applying_primary_beam_{jobid}"
                 ).submit(
-                    imagedir,
+                    f"{imagedir}/images",
                     target_metafits,
                     workdir,
                     jobid=jobid,
@@ -2396,9 +2488,35 @@ def master_control(
                     traceback.print_exc()
                     return 1
                 finally:
-                    scale_worker_and_wait(dask_cluster, 1)
-                print(f"Final image directory: {os.path.dirname(imagedir)}")
-
+                    scale_worker_and_wait(dask_cluster, current_worker)
+                print(f"Final image directory: {os.path.dirname(imagedir)/images}")
+            
+        #######################################
+        # Make overlays
+        #######################################
+        if make_overlay:
+            future_overlay = run_make_overlay.with_options(
+                task_run_name=f"making_overlay_{jobid}"
+            ).submit(
+                f"{imagedir}/images",
+                f"{imagedir}/overlay_pngs",
+                workdir=workdir,
+                jobid=jobid,
+                cpu_frac=round(cpu_frac, 2),
+                remote_log=remote_logger,
+            )
+            try:
+                msg = future_overlay.result()
+            except Exception as e:
+                print(
+                    "!!!! WARNING: Overlay of the images are not successful. !!!!"
+                )
+                traceback.print_exc()
+                return 1
+            finally:
+                scale_worker_and_wait(dask_cluster, current_worker)
+            print(f"Final image directory: {os.path.dirname(outdir)}")
+        
         ###########################################
         # Successful exit
         ###########################################
@@ -2420,7 +2538,7 @@ def master_control(
         drop_cache(outdir)
         stop_event.set()
         log_thread_flow.join(timeout=5)
-        scale_worker_and_wait(dask_cluster, 1)
+        scale_worker_and_wait(dask_cluster, current_worker)
         if dask_dir is not None:
             os.system(f"rm -rf {dask_dir}")
 
@@ -2507,13 +2625,13 @@ def cli():
     advanced_image.add_argument(
         "--image_freqres",
         type=float,
-        default=0.16,
+        default=1.28,
         help="Output image frequency resolution in MHz (-1 = full)",
     )
     advanced_image.add_argument(
         "--image_timeres",
         type=float,
-        default=0.5,
+        default=10.0,
         help="Output image time resolution in seconds (-1 = full)",
     )
     advanced_image.add_argument(
@@ -2549,7 +2667,7 @@ def cli():
     advanced_image.add_argument(
         "--clean_threshold",
         type=float,
-        default=1.0,
+        default=3.0,
         help="Clean threshold in sigma for final deconvolution (Note this is not auto-mask)",
     )
     advanced_image.add_argument(
@@ -2574,7 +2692,7 @@ def cli():
         "--no_overlay",
         action="store_false",
         dest="make_overlay",
-        help="Disable overlay plot on GOES SUVI after imaging",
+        help="Disable overlay plot on EUV images",
     )
 
     # === Advanced options ===
