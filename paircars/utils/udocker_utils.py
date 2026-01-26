@@ -591,8 +591,10 @@ def run_quartical(
             if "load_from" in cmd_arg:
                 gaintable = cmd_arg.split("load_from=")[-1]
                 gain_path = os.path.dirname(os.path.dirname(gaintable))
-                if gain_path!=datapath:
-                    temp_gain_path = f"{datapath}/{os.path.basename(os.path.dirname(gaintable))}"
+                if gain_path != datapath:
+                    temp_gain_path = (
+                        f"{datapath}/{os.path.basename(os.path.dirname(gaintable))}"
+                    )
                     os.system(f"rm -rf {temp_gain_path}")
                     os.system(f"cp -r {os.path.dirname(gaintable)} {temp_gain_path}")
                 gaintable = gaintable.split("/")[-2:]
@@ -612,7 +614,7 @@ def run_quartical(
         else:
             print(cmd)
             exit_code = os.system(full_command)
-        if "load_from" in cmd_arg and gain_path!=datapath:
+        if "load_from" in cmd_arg and gain_path != datapath:
             os.system(f"rm -rf {temp_gain_path}")
         return 0 if exit_code == 0 else 1
     except Exception as e:

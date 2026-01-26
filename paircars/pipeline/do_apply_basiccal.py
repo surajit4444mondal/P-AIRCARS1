@@ -178,7 +178,7 @@ def applysol(
                     quartical_msg = run_quartical(
                         quartical_cmd, "solarquartical", verbose=False
                     )
-                    if quartical_msg!=0:
+                    if quartical_msg != 0:
                         print("Quartical solutions did not apply.")
                         os.system(f"touch {msname}/.nopolselfcal")
                     os.system(f"rm -rf {quartical_log} {temp_pol_caltable}")

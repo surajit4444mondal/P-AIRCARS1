@@ -213,7 +213,7 @@ def perform_imaging(
         os.makedirs(imagedir, exist_ok=True)
         if weight == "briggs":
             weight += " " + str(robust)
-      
+
         wsclean_args = [
             "-quiet",
             "-scale " + str(cellsize) + "asec",

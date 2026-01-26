@@ -73,7 +73,9 @@ def run_all_applysol(
         header = fits.getheader(metafits)
         obsid = header["GPSTIME"]
         selfcal_tables = sorted(glob.glob(f"{caldir}/selfcal_{obsid}_coarsechan*.gcal"))
-        selfcal_bpass_tables = sorted(glob.glob(f"{caldir}/selfcal_{obsid}_coarsechan*.bcal"))
+        selfcal_bpass_tables = sorted(
+            glob.glob(f"{caldir}/selfcal_{obsid}_coarsechan*.bcal")
+        )
         selfcal_quartical_tables = sorted(
             glob.glob(f"{caldir}/selfcal_{obsid}_coarsechan*.dcal")
         )

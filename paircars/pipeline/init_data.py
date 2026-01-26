@@ -36,10 +36,15 @@ def download_with_parfive(record_id, update=False, output_dir="zenodo_download")
     print("Downloading P-AIRCARS data files ...")
     print("####################################")
     urls = get_zenodo_file_urls(record_id)
-    urls.append(("http://ws.mwatelescope.org/static/mwa_full_embedded_element_pattern.h5","mwa_full_embedded_element_pattern.h5"))
+    urls.append(
+        (
+            "http://ws.mwatelescope.org/static/mwa_full_embedded_element_pattern.h5",
+            "mwa_full_embedded_element_pattern.h5",
+        )
+    )
     os.makedirs(output_dir, exist_ok=True)
     total_cpu = psutil.cpu_count()
-    dl = Downloader(max_conn=min(total_cpu, len(all_filenames)+1))
+    dl = Downloader(max_conn=min(total_cpu, len(all_filenames) + 1))
     for file_url, filename in urls:
         if filename in all_filenames:
             if os.path.exists(f"{output_dir}/{filename}") == False or update:
@@ -49,7 +54,6 @@ def download_with_parfive(record_id, update=False, output_dir="zenodo_download")
     results = dl.download()
     for f in results:
         os.chmod(f, 0o755)
-    
 
 
 def init_paircars_data(update=False, remote_link=None, emails=None):

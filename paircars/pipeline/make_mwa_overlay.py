@@ -54,7 +54,7 @@ def main(
     if workdir == "":
         workdir = f"{imagedir}/workdir"
     os.makedirs(workdir, exist_ok=True)
-    
+
     os.makedirs(outdir, exist_ok=True)
 
     ############
@@ -78,13 +78,13 @@ def main(
         print("Remote link or jobname is blank. Not transmiting to remote logger.")
 
     imagelist = glob.glob(f"{imagedir}/*.fits")
-    if len(imagelist)==0:
+    if len(imagelist) == 0:
         print("No image in the image directory.")
         return 1
 
     try:
-        ncpu = max(1,int(psutil.cpu_count()*cpu_frac))
-        outimage_list=[]
+        ncpu = max(1, int(psutil.cpu_count() * cpu_frac))
+        outimage_list = []
         for image in imagelist:
             outimage = make_mwa_overlay(
                 image,
@@ -97,15 +97,15 @@ def main(
                 verbose=False,
             )
         outimage_list.append(outimage)
-        if len(outimage_list)==0:
+        if len(outimage_list) == 0:
             print("No overlay is made.")
-            msg=1
+            msg = 1
         else:
             print(f"Total images: {len(imagelist)}")
             print(f"Total overlays: {len(outimage_list)}")
             os.system(f"rm -rf {imagedir}/images/aia.lev1_euv*.fits")
             os.system(f"rm -rf {imagedir}/images/*suvi-l2*.fits")
-            msg=0
+            msg = 0
     except Exception as e:
         traceback.print_exc()
         msg = 1
@@ -118,7 +118,6 @@ def main(
     return msg
 
 
-
 def cli():
     usage = "Overlay MWA images on EUV images"
     parser = argparse.ArgumentParser(
@@ -129,12 +128,8 @@ def cli():
     basic_args = parser.add_argument_group(
         "###################\nEssential parameters\n###################"
     )
-    basic_args.add_argument(
-        "imagedir", type=str, help="Image directory"
-    )
-    basic_args.add_argument(
-        "outdir", type=str, help="Output directory"
-    )
+    basic_args.add_argument("imagedir", type=str, help="Image directory")
+    basic_args.add_argument("outdir", type=str, help="Output directory")
     basic_args.add_argument(
         "--workdir", type=str, default="", help="Name of work directory"
     )
@@ -179,10 +174,3 @@ if __name__ == "__main__":
     result = cli()
     print("\n###################\nOverlay of images are done.\n###################\n")
     os._exit(result)
-
-
-
-
-
-
-

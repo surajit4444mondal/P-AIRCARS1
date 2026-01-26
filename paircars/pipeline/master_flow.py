@@ -11,6 +11,7 @@ import sys
 import os
 import socket
 import warnings
+
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic_settings")
 from collections import Counter
 from casatools import msmetadata
@@ -164,7 +165,7 @@ def run_target_split_jobs(
     time_interval : float, optional
         Time interval in seconds
     quack_timestamps: int, optional
-        Number of timestamps to flag at the beginning and end of each scan ("quack"). 
+        Number of timestamps to flag at the beginning and end of each scan ("quack").
     cpu_frac : float, optional
         CPU fraction to use
     mem_frac : float, optional
@@ -422,7 +423,6 @@ def run_basic_cal_jobs(
     workdir,
     outdir,
     perform_polcal=False,
-    refant="1",
     jobid=0,
     cpu_frac=0.8,
     mem_frac=0.8,
@@ -442,8 +442,6 @@ def run_basic_cal_jobs(
         Output directory
     perform_polcal : bool, optional
         Perform full polarization calibration
-    refant : str, optional
-        Reference antenna
     cpu_frac : float, optional
         CPU fraction to use
     mem_frac : float, optional
@@ -485,7 +483,6 @@ def run_basic_cal_jobs(
                 workdir,
                 outdir,
                 perform_polcal=perform_polcal,
-                refant=refant,
                 keep_backup=keep_backup,
                 start_remote_log=remote_log,
                 cpu_frac=float(cpu_frac),
@@ -689,7 +686,6 @@ def run_selfcal_jobs(
     caldir,
     metafits,
     cal_applied,
-    refant="1",
     start_thresh=5.0,
     stop_thresh=3.0,
     max_iter=100,
@@ -727,8 +723,6 @@ def run_selfcal_jobs(
         Metafits file
     cal_applied : bool
         Whether calibration solutions are applied or not
-    refant : str, optional
-        Reference antenna
     cpu_frac : float, optional
         CPU fraction to use
     mem_frac : float, optional
@@ -801,7 +795,6 @@ def run_selfcal_jobs(
                 workdir,
                 caldir,
                 cal_applied=cal_applied,
-                refant=refant,
                 start_thresh=float(start_thresh),
                 stop_thresh=float(stop_thresh),
                 max_iter=float(max_iter),
@@ -1184,7 +1177,7 @@ def run_make_overlay(
         #####################
         # Making overlays
         #####################
-        msg = make_overlay.main(
+        msg = make_mwa_overlay.main(
             imagedir,
             outdir,
             workdir=workdir,
@@ -1198,7 +1191,7 @@ def run_make_overlay(
         log_thread_pbcor.join(timeout=5)
     return 0
 
-      
+
 @flow(
     name="P-AIRCARS Master control",
     version="3.0",
@@ -1379,12 +1372,12 @@ def master_control(
     target_header = fits.getheader(target_metafits)
     target_obsid = target_header["GPSTIME"]
     target_freq_config = target_header["CHANNELS"]
-    target_coarse_chans=[get_MWA_coarse_chan(ms) for ms in target_mslist]
-    
+    target_coarse_chans = [get_MWA_coarse_chan(ms) for ms in target_mslist]
+
     calibrator_mslist = glob.glob(f"{calibrator_datadir}/*.ms")
-    calibrator_obsid=None
+    calibrator_obsid = None
     if len(calibrator_mslist) == 0:
-        print (
+        print(
             f"No calibrator observation is provided. Continuing based on self-calibration."
         )
         has_cal = False
@@ -1393,37 +1386,32 @@ def master_control(
         calibrator_obsid = calibrator_header["GPSTIME"]
         calibrator_freq_config = calibrator_header["CHANNELS"]
         if np.abs(calibrator_obsid - target_obsid) > 12 * 3600:
-            print(
-                "Calibrator observations were taken 12 hours apart."
-            )
+            print("Calibrator observations were taken 12 hours apart.")
         elif target_freq_config != calibrator_freq_config:
             print(f"Target coarse channels: {target_freq_config}.")
             print(f"Calibrator coarse channels: {calibrator_freq_config}.")
-            print(
-                "Calibrator and target frequency configuration is different."
-            )
+            print("Calibrator and target frequency configuration is different.")
             has_cal = False
         else:
             has_cal = True
     else:
-        print(
-            f"Calibrator ms is available. No calibrator metafits is provided."
-        )
-        #TODO; DOWNLOAD METAFTIS
-        has_cal = True
-        
+        print(f"Calibrator ms is available. No calibrator metafits is provided.")
+        has_cal = False
+
     ######################################################
     # Filtering only matching coarse channel calibrator ms
     ######################################################
     if has_cal:
-        print ("Filtering calibrator measurement sets...")
-        filtered_calms=[]
+        print("Filtering calibrator measurement sets...")
+        filtered_calms = []
         for ms in calibrator_mslist:
             coarse_chan = get_MWA_coarse_chan(ms)
             if coarse_chan in target_coarse_chans:
                 filtered_calms.append(ms)
-                print(f"Coarse channel: {coarse_chan} of calibrator measurement set: {ms} is used.")
-    calibrator_mslist=filtered_calms
+                print(
+                    f"Coarse channel: {coarse_chan} of calibrator measurement set: {ms} is used."
+                )
+        calibrator_mslist = filtered_calms
 
     ###################################
     # Preparing working directories
@@ -1433,7 +1421,7 @@ def master_control(
         workdir = os.path.dirname(os.path.abspath(target_mslist[0])) + "/workdir"
     workdir = workdir.rstrip("/")
     workdir = f"{workdir}/{target_obsid}"
-    
+
     #################################
     # Setup logger
     #################################
@@ -1472,7 +1460,7 @@ def master_control(
     if outdir == "":
         outdir = workdir
     outdir = outdir.rstrip("/")
-    outdir = f"{outdir}/{target_obsid}" 
+    outdir = f"{outdir}/{target_obsid}"
     caldir = f"{outdir}/caltables"
     caldir = caldir.rstrip("/")
     os.makedirs(workdir, exist_ok=True)
@@ -1483,12 +1471,12 @@ def master_control(
         if cpu_frac > 0.8:
             cpu_frac = 0.8
         max_worker = int(psutil.cpu_count() * cpu_frac)
-        
+
     ################################################
     # Starting number of workers
     ################################################
     current_worker = get_total_worker(dask_cluster)
-        
+
     try:
         ####################################
         # Job and process IDs
@@ -1631,24 +1619,24 @@ def master_control(
         #################################################
         print("Estimating optimal frequency averaging....")
         max_freqres_list = []
-        freqres_list=[]
-        msmd=msmetadata()
+        freqres_list = []
+        msmd = msmetadata()
         for msname in target_mslist:
             max_freqres = calc_bw_smearing_freqwidth(msname, full_FoV=full_FoV)
             max_freqres_list.append(max_freqres)
             msmd.open(msname)
-            freqres=msmd.chanres(0,unit="MHz")[0]
+            freqres = msmd.chanres(0, unit="MHz")[0]
             msmd.close()
             freqres_list.append(freqres)
-        freqres=min(freqres_list)
+        freqres = min(freqres_list)
         max_freqres = min(max_freqres_list)
         if image_freqres > 0:
-            image_freqres = max(image_freqres,freqres)
+            image_freqres = max(image_freqres, freqres)
             freqavg = round(min(image_freqres, max_freqres), 2)
         else:
             freqavg = freqres
-        freqavg = min(0.16,freqavg)
-        image_freqres=round(image_freqres,2)
+        freqavg = min(0.16, freqavg)
+        image_freqres = round(image_freqres, 2)
         total_ncoarse = 0
         for msname in target_mslist:
             ncoarse = get_ncoarse(msname)
@@ -1659,7 +1647,7 @@ def master_control(
         ################################################
         print("Estimating optimal temporal averaging....")
         max_timeres_list = []
-        timeres_list=[]
+        timeres_list = []
         for msname in target_mslist:
             if solar_data:  # For solar data, it is assumed Sun is tracked.
                 max_timeres = calc_time_smearing_timewidth(msname)
@@ -1670,28 +1658,30 @@ def master_control(
                 )
             max_timeres_list.append(max_timeres)
             msmd.open(msname)
-            times=msmd.timesforspws(0)
-            timeres=np.nanmean(np.diff(times))
+            times = msmd.timesforspws(0)
+            timeres = np.nanmean(np.diff(times))
             msmd.close()
             timeres_list.append(timeres)
-        timeres=min(timeres_list)
-        quack_timestamps=int(4.0/timeres)
+        timeres = min(timeres_list)
+        quack_timestamps = int(4.0 / timeres)
         max_timeres = min(max_timeres_list)
         if image_timeres > (2 * 3660):  # If more than 2 hours
             print(
                 "Image time integration is more than 2 hours, which may cause smearing due to solar differential rotation."
             )
         if image_timeres > 0:
-            image_timeres = max(image_timeres,timeres)
+            image_timeres = max(image_timeres, timeres)
             timeavg = round(min(image_timeres, max_timeres), 2)
         else:
             timeavg = timeres
-        timeavg = min(2.0,timeavg)
-        image_timeres=round(image_timeres,2)
-        print (f"Frequency resolution: {freqres}MHz, time resolution: {timeres}s.")
-        print (f"Frequency averaging: {freqavg}MHz, time averaging: {timeavg}s.")
-        print (f"Imaging frequency resolution: {image_freqres}MHz, time resolution: {image_timeres}s.")
-        
+        timeavg = min(2.0, timeavg)
+        image_timeres = round(image_timeres, 2)
+        print(f"Frequency resolution: {freqres}MHz, time resolution: {timeres}s.")
+        print(f"Frequency averaging: {freqavg}MHz, time averaging: {timeavg}s.")
+        print(
+            f"Imaging frequency resolution: {image_freqres}MHz, time resolution: {image_timeres}s."
+        )
+
         #############################
         # Reset any previous weights
         ############################
@@ -1709,15 +1699,6 @@ def master_control(
                 msname, n_threads=available_cpus, force_reset=do_forcereset_weightflag
             )
 
-        ###############################################
-        # Estimating reference antenna
-        ################################################
-        refant_list=[]
-        for ms in calibrator_mslist:
-            refant = get_refant(ms)
-            refant_list.append(refant)
-        refant = max(Counter(refant_list).values())
-            
         #######################################
         # Run dynamic spectra making
         #######################################
@@ -1863,7 +1844,6 @@ def master_control(
                 workdir,
                 outdir,
                 perform_polcal=do_polcal,
-                refant=refant,
                 jobid=jobid,
                 cpu_frac=round(cpu_frac, 2),
                 mem_frac=round(mem_frac, 2),
@@ -1915,17 +1895,21 @@ def master_control(
         ##########################################
         if calibrator_obsid is not None:
             if len(glob.glob(f"{caldir}/*{calibrator_obsid}*.bcal")) == 0:
-                print(f"No bandpass table is present in calibration directory : {caldir}.")
+                print(
+                    f"No bandpass table is present in calibration directory : {caldir}."
+                )
                 has_cal = False
         else:
-            has_cal=False
+            has_cal = False
 
         ############################################
         # Spliting for self-cals
         ############################################
         # Spliting only if self-cal is requested
         if not do_selfcal_split and do_selfcal:
-            selfcal_target_mslist = glob.glob(workdir + "/selfcal*{target_obsid}*_spw_*.ms")
+            selfcal_target_mslist = glob.glob(
+                workdir + "/selfcal*{target_obsid}*_spw_*.ms"
+            )
             if len(selfcal_target_mslist) == 0:
                 print(
                     "No measurement set is present for self-calibration. Spliting them.."
@@ -1982,7 +1966,7 @@ def master_control(
                 traceback.print_exc()
             finally:
                 scale_worker_and_wait(dask_cluster, current_worker)
-                    
+
         ####################################
         # Filtering any corrupted ms
         #####################################
@@ -2085,7 +2069,9 @@ def master_control(
         # Performing self-calibration
         ########################################
         if do_selfcal:
-            os.system(f"rm -rf {workdir}/*selfcal_int {workdir}/*selfcal_pol {workdir}/caltables/*selfcal*")
+            os.system(
+                f"rm -rf {workdir}/*selfcal_int {workdir}/*selfcal_pol {workdir}/caltables/*selfcal*"
+            )
             current_worker = get_total_worker(dask_cluster)
             nworker = min(max_worker, len(selfcal_mslist) + current_worker)
             scale_worker_and_wait(dask_cluster, nworker)
@@ -2119,7 +2105,6 @@ def master_control(
                 caldir,
                 target_metafits,
                 cal_applied,
-                refant=refant,
                 solint=solint,
                 do_apcal=do_ap_selfcal,
                 do_polcal=do_polcal,
@@ -2136,22 +2121,6 @@ def master_control(
             )
             try:
                 msg = future_selfcal.result()
-                for selfcalms in selfcal_mslist:
-                    msg, ms_diag_plot = plot_ms_diagnostics(
-                        selfcalms,
-                        outdir=f"{outdir}/diagnostic_plots",
-                        dask_client=dask_client,
-                        cpu_frac=cpu_frac,
-                        mem_frac=mem_frac,
-                    )
-                    if msg == 0:
-                        print(
-                            f"Diagnostic plots for self-cal measurement set {selfcalms} are saved in : {ms_diag_plot}."
-                        )
-                    else:
-                        print(
-                            f"Error in creating diagnostic plots for self-cal measurement set {selfcalms}."
-                        )
             except Exception as e:
                 print(
                     "!!!! WARNING: Error in self-calibration on targets. Not applying self-calibration. !!!!"
@@ -2242,7 +2211,7 @@ def master_control(
         #########################################################
         # Applying basic solutions on target scans
         #########################################################
-        if do_applycal:
+        if do_applycal and has_cal:
             current_worker = get_total_worker(dask_cluster)
             nworker = min(max_worker, len(split_target_mslist) + current_worker)
             scale_worker_and_wait(dask_cluster, nworker)
@@ -2382,14 +2351,14 @@ def master_control(
         # Imaging
         ######################################
         if do_imaging:
-            if image_freqres>0:
-                print (f"Image frequency resolution: {image_freqres} MHz.")
+            if image_freqres > 0:
+                print(f"Image frequency resolution: {image_freqres} MHz.")
             else:
-                print (f"Image frequency resolution: entire corase channel.")
-            if image_timeres>0:
-                print (f"Image time resolution: {image_timeres} s.")
+                print(f"Image frequency resolution: entire corase channel.")
+            if image_timeres > 0:
+                print(f"Image time resolution: {image_timeres} s.")
             else:
-                print ("Imaging entire scan.")
+                print("Imaging entire scan.")
             if (
                 do_polcal == False
             ):  # Only if do_polcal is False, overwrite to make only Stokes I
@@ -2433,7 +2402,7 @@ def master_control(
                 return 1
             finally:
                 scale_worker_and_wait(dask_cluster, current_worker)
-        
+
         ########################################
         # Naming of image directory
         ########################################
@@ -2445,19 +2414,18 @@ def master_control(
             imagedir = outdir + f"/imagedir_f_all_t_all_pol_{pol}_w_{weight_str}"
         elif image_freqres != -1 and image_timeres == -1:
             imagedir = (
-                outdir
-                + f"/imagedir_f_{image_freqres}_t_all_pol_{pol}_w_{weight_str}"
+                outdir + f"/imagedir_f_{image_freqres}_t_all_pol_{pol}_w_{weight_str}"
             )
         elif image_freqres == -1 and image_timeres != -1:
             imagedir = (
-                outdir
-                + f"/imagedir_f_all_t_{image_timeres}_pol_{pol}_w_{weight_str}"
+                outdir + f"/imagedir_f_all_t_{image_timeres}_pol_{pol}_w_{weight_str}"
             )
         else:
             imagedir = (
                 outdir
                 + f"/imagedir_f_{image_freqres}_t_{image_timeres}_pol_{pol}_w_{weight_str}"
             )
+            
         ###########################
         # Primary beam correction
         ###########################
@@ -2490,7 +2458,7 @@ def master_control(
                 finally:
                     scale_worker_and_wait(dask_cluster, current_worker)
                 print(f"Final image directory: {os.path.dirname(imagedir)/images}")
-            
+
         #######################################
         # Make overlays
         #######################################
@@ -2508,15 +2476,13 @@ def master_control(
             try:
                 msg = future_overlay.result()
             except Exception as e:
-                print(
-                    "!!!! WARNING: Overlay of the images are not successful. !!!!"
-                )
+                print("!!!! WARNING: Overlay of the images are not successful. !!!!")
                 traceback.print_exc()
                 return 1
             finally:
                 scale_worker_and_wait(dask_cluster, current_worker)
             print(f"Final image directory: {os.path.dirname(outdir)}")
-        
+
         ###########################################
         # Successful exit
         ###########################################
@@ -2528,10 +2494,10 @@ def master_control(
         traceback.print_exc()
         return 1
     finally:
-        datalist=glob.glob(f"{target_datadir}/*")
+        datalist = glob.glob(f"{target_datadir}/*")
         for data in datalist:
             drop_cache(data)
-        callist=glob.glob(f"{calibrator_datadir}/*")
+        callist = glob.glob(f"{calibrator_datadir}/*")
         for cal in callist:
             drop_cache(cal)
         drop_cache(workdir)

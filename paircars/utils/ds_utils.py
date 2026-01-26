@@ -580,13 +580,18 @@ def calc_dynamic_spectrum(msname, metafits, outdir, nthreads=1):
     T_sun_yy_list = np.array(T_sun_yy_list)
     S_sun_xx_list = np.array(S_sun_xx_list)
     S_sun_yy_list = np.array(S_sun_yy_list)
-    
-    pos = np.where((T_sun_xx_list<=0)|(T_sun_yy_list<=0)|(S_sun_xx_list<=0)|(S_sun_yy_list<=0))
-    
-    T_sun_xx_list[pos]=np.nan
-    T_sun_xx_list[pos]=np.nan
-    S_sun_xx_list[pos]=np.nan
-    S_sun_yy_list[pos]=np.nan
+
+    pos = np.where(
+        (T_sun_xx_list <= 0)
+        | (T_sun_yy_list <= 0)
+        | (S_sun_xx_list <= 0)
+        | (S_sun_yy_list <= 0)
+    )
+
+    T_sun_xx_list[pos] = np.nan
+    T_sun_xx_list[pos] = np.nan
+    S_sun_xx_list[pos] = np.nan
+    S_sun_yy_list[pos] = np.nan
 
     T_sun_xx = np.mean(T_sun_xx_list, axis=0)
     T_sun_yy = np.mean(T_sun_yy_list, axis=0)
@@ -595,7 +600,7 @@ def calc_dynamic_spectrum(msname, metafits, outdir, nthreads=1):
 
     T_sun = (T_sun_xx + T_sun_yy) / 2.0
     S_sun = (S_sun_xx + S_sun_yy) / 2.0
-    
+
     ######################################
     # Extracting metadata
     ######################################
@@ -619,7 +624,7 @@ def calc_dynamic_spectrum(msname, metafits, outdir, nthreads=1):
         timestamps[0].split("T")[-1].split(".")[0].split(":")
     )
     msmd.close()
-    flags = np.where(T_sun<=0)
+    flags = np.where(T_sun <= 0)
     save_file = f"freq_{mid_freq}MHz_time_{t_string}"
     np.save(
         f"{outdir}/{save_file}_ds.npy",

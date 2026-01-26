@@ -97,8 +97,8 @@ def import_hyperdrive_model(msname, metafits, beamfile="", sourcelist="", ncpu=-
         subprocess.run(
             hyperdrive_cmd,
             check=True,
-            # stdout=subprocess.DEVNULL,
-            # stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         model_msname = msname.split(".ms")[0] + "_model.ms"
         ########################
@@ -248,11 +248,8 @@ def main(
                     )
                 )
             print("Start import modeling...")
-            #results = []
-            #for i in range(0, len(tasks), njobs):
-            #batch = tasks[i : i + njobs]
             futures = dask_client.compute(tasks)
-            results=dask_client.gather(futures)
+            results = dask_client.gather(futures)
             msg = 0
             for i in range(len(results)):
                 if results[i] != 0:

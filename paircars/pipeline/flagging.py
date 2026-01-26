@@ -383,12 +383,12 @@ def do_flagging(
                     flagdata(vis=msname, mode="unflag", spw="0", flagbackup=False)
             if flag_bad_spw:
                 badspw = get_bad_chans(msname)
-                print (f"Flagging bad spws: {badspw}.")
+                print(f"Flagging bad spws: {badspw}.")
             else:
                 badspw = ""
             if flag_bad_ants:
                 bad_ants_str = get_mwa_bad_ants(metafits)
-                print (f"Flagging bad antennas: {bad_ants_str}.")
+                print(f"Flagging bad antennas: {bad_ants_str}.")
             else:
                 bad_ants_str = ""
 
@@ -475,7 +475,7 @@ def main(
     use_rflag : bool, optional
         If True, applies the `rflag` automated flagging algorithm. Default is False.
     flag_autocorr : bool, optional
-        If True, flags auto-correlations. Default is True. 
+        If True, flags auto-correlations. Default is True.
     flag_quack : bool, optional
         If True, flag quack timestamps. Default is True.
     flagbackup : bool, optional

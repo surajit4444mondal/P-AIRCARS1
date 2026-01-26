@@ -872,7 +872,6 @@ def selfcal_round(
                 temporal_tol_factor=float(min_tol_factor / 100.0),
                 spectral_tol_factor=0.1,
             )
-            nintervals=min(nintervals,int(ntime/2))
         else:
             nchans = 1
             nintervals = 1
@@ -1235,6 +1234,7 @@ def selfcal_round(
                 f"input_ms.select_uv_range=[{minuv},{maxuv}]",
                 "input_model.recipe=MODEL_DATA",
                 f"output.gain_directory={pol_caltable}",
+                f"solver.reference_antenna={refant}",
                 "output.overwrite=True",
                 "output.log_to_terminal=True",
                 f"output.log_directory={quartical_log}",

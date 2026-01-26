@@ -471,7 +471,12 @@ def run_basic_cal_rounds(
         applysol = True
         flag_threshold = 6.0
         if refant == "":
-            refant = get_refant(trial_ms)
+            unflagged_antenna_names, flag_frac_list = get_unflagged_antennas(trial_ms)
+            refant = unflagged_antenna_names[0]
+            msmd = msmetadata()
+            msmd.open(trial_ms)
+            refant = str(msmd.antennaids(refant)[0])
+            msmd.close()
         for msname in mslist:
             if uvrange == "":
                 uvrange = get_gleam_uvrange(msname)
