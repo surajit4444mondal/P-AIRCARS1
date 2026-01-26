@@ -1005,7 +1005,7 @@ def selfcal_round(
             # PB correction and residual leakages
             #####################################
             if pbcor is True or leakagecor is True or pbuncor is True and do_polcal:
-                delmod(vis=msname, scr=True)
+                delmod(vis=msname, otf=True, scr=True)
                 for count in range(len(imagelist)):
                     imagename = imagelist[count]
                     modelname = modellist[count]
@@ -1034,7 +1034,7 @@ def selfcal_round(
                             cent_freq = header["crval4"]/10**6
                             bw = header["cdelt4"]/10**6
                             spw=f"0:{cent_freq-(bw/2)}~{cent_freq+(bw/2)}MHz"
-                            ft(vis=msname, model=casa_modelname, spw=spw, incremental=True, usescratch=False)
+                            ft(vis=msname, model=casa_modelname, spw=spw, incremental=True, usescratch=True)
                             os.system(f"rm -rf {casa_modelname}")
                             leakage_info_list.append(leakage_info)
 
