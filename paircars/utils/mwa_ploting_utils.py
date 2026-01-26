@@ -1378,18 +1378,6 @@ def rename_mwasolar_image(
     sun_coords = SkyCoord(
         ra=eph["RA"][0] * u.deg, dec=eph["DEC"][0] * u.deg, frame="icrs"
     )
-    if header["CTYPE3"] == "STOKES":
-        if header["NAXIS3"] == 4:
-            fullpol = True
-        else:
-            fullpol = False
-    elif header["CTYPE4"] == "STOKES":
-        if header["NAXIS4"] == 4:
-            fullpol = True
-        else:
-            fullpol = False
-    else:
-        fullpol = False
     with fits.open(imagename, mode="update") as hdul:
         hdr = hdul[0].header
         hdr["AUTHOR"] = "DevojyotiKansabanik"
@@ -1408,19 +1396,6 @@ def rename_mwasolar_image(
             hdr["POLSELF"] = "TRUE"
         else:
             hdr["POLSELF"] = "FALSE"
-        if fullpol:
-            (
-                q_leakage,
-                u_leakage,
-                v_leakage,
-                q_leakage_err,
-                u_leakage_err,
-                v_leakage_err,
-            ) = calc_leakage(imagename)
-            hdr["LEAKUNIT"] = "PERCENT"
-            hdr["QLEAK"] = round(q_leakage * 100.0, 4)
-            hdr["ULEAK"] = round(u_leakage * 100.0, 4)
-            hdr["VLEAK"] = round(v_leakage * 100.0, 4)
     freq = round(header["CRVAL3"] / 10**6, 2)
     t_str = "".join(time.split("T")[0].split("-")) + (
         "".join(time.split("T")[-1].split(":"))

@@ -7,8 +7,9 @@ import os
 import subprocess
 import copy
 import types
+import time
 from casatools import msmetadata, table, componentlist, ms as casamstool
-from casatasks import ft, importfits
+from casatasks import ft, importfits, imhead
 from astropy.io import fits
 from .basic_utils import *
 from .resource_utils import *
@@ -873,7 +874,9 @@ def selfcal_round(
                 spectral_tol_factor=0.1,
             )
         else:
-            nchans = 1
+            nchans = max(
+                    1, round(bw / 0.32)
+                ) 
             nintervals = 1
 
         os.system(f"rm -rf {prefix}*image.fits {prefix}*residual.fits")
@@ -1001,7 +1004,7 @@ def selfcal_round(
             #####################################
             # PB correction and residual leakages
             #####################################
-            if pbcor is True or leakagecor is True or pbuncor is True:
+            if pbcor is True or leakagecor is True or pbuncor is True and do_polcal:
                 delmod(vis=msname, scr=True)
                 for count in range(len(imagelist)):
                     imagename = imagelist[count]
@@ -1027,7 +1030,11 @@ def selfcal_round(
                                 defaultaxesvalues=["ra", "dec", "stokes", "freq"],
                                 overwrite=True,
                             )
-                            ft(vis=msname, model=casa_modelname, usescratch=True)
+                            header = imhead(imagename=casa_modelname,mode="list")
+                            cent_freq = header["crval4"]/10**6
+                            bw = header["cdelt4"]/10**6
+                            spw=f"0:{cent_freq-(bw/2)}~{cent_freq+(bw/2)}MHz"
+                            ft(vis=msname, model=casa_modelname, spw=spw, incremental=True, usescratch=False)
                             os.system(f"rm -rf {casa_modelname}")
                             leakage_info_list.append(leakage_info)
 

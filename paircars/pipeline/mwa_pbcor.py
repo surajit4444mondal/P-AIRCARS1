@@ -317,11 +317,11 @@ def pbcor_all_images(
         #########################################
         print(f"Total input images: {len(images)}")
         if successful_pbcor > 0:
-            print(f"Total corrected images: {len(pbcor_images)}")
+            print(f"Total primary beam corrected images: {len(pbcor_images)}")
             if make_TB:
                 print(f"Total brightness temperatures maps: {len(tb_images)}")
         else:
-            print(f"Total corrected images: 0")
+            print(f"Total primary beam corrected images: 0")
         return 0
     except Exception as e:
         traceback.print_exc()

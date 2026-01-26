@@ -722,7 +722,11 @@ def do_polselfcal(
         scan = int(msmd.scannumbers()[0])
         field = int(msmd.fieldsforscan(scan)[0])
         freqMHz = msmd.meanfreq(0, unit="MHz")
+        times = msmd.timesforspws(0)
         msmd.close()
+        cent_index = int(len(times)/2)
+        central_time = times[cent_index]
+        central_timestamp = mjdsec_to_timestamp(central_time, str_format=1)
         if hascor:
             logger.info(f"Spliting corrected data to ms : {selfcalms}")
             with suppress_output():
@@ -730,6 +734,7 @@ def do_polselfcal(
                     vis=msname,
                     field=str(field),
                     scan=str(scan),
+                    timerange=central_timestamp,
                     outputvis=selfcalms,
                     datacolumn="corrected",
                 )
@@ -742,6 +747,7 @@ def do_polselfcal(
                     field=str(field),
                     scan=str(scan),
                     outputvis=selfcalms,
+                    timerange=central_timestamp,
                     datacolumn="data",
                 )
         msname = selfcalms

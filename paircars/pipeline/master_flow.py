@@ -37,6 +37,7 @@ from paircars.pipeline import (
     do_apply_selfcal,
     do_imaging,
     mwa_pbcor,
+    make_mwa_overlay,
 )
 
 logging.getLogger("distributed").setLevel(logging.ERROR)
@@ -1167,8 +1168,7 @@ def run_make_overlay(
     log_thread_pbcor = start_log_task_saver(
         task_id, task_name, logfile, poll_interval=3, stop_event=stop_event
     )
-    overlay_pngdir = f"{os.path.dirname(imagedir)}/overlays_pngs"
-    os.makedirs(overlay_pngdir, exist_ok=True)
+    os.makedirs(outdir, exist_ok=True)
     try:
         ###################
         print("###########################")
@@ -2457,7 +2457,7 @@ def master_control(
                     return 1
                 finally:
                     scale_worker_and_wait(dask_cluster, current_worker)
-                print(f"Final image directory: {os.path.dirname(imagedir)/images}")
+                    print(f"Final image directory: {imagedir}/images")
 
         #######################################
         # Make overlays

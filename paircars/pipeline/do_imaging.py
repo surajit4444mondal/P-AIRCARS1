@@ -214,6 +214,9 @@ def perform_imaging(
         if weight == "briggs":
             weight += " " + str(robust)
 
+        if threshold<=1:
+            threshold=1.1
+            
         wsclean_args = [
             "-quiet",
             "-scale " + str(cellsize) + "asec",
@@ -230,7 +233,7 @@ def perform_imaging(
             "-minuv-l " + str(minuv),
             "-j " + str(ncpu),
             "-abs-mem " + str(round(mem, 2)),
-            f"-auto-threshold {threshold+0.1} -auto-mask {threshold}",
+            f"-auto-threshold 1 -auto-mask {threshold}",
             "-no-update-model-required",
         ]
         if datacolumn != "CORRECTED_DATA" and datacolumn != "corrected":

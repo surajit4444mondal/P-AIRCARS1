@@ -216,17 +216,35 @@ def get_pbcor_image(
             imagedata[0, 1, :, :] = np.real(B["Q"])
             imagedata[0, 2, :, :] = np.real(B["U"])
             imagedata[0, 3, :, :] = np.real(B["V"])
+            fullpol=True
         elif stokesaxis == 4:
             imagedata[0, 0, :, :] = np.real(B["I"])
             imagedata[1, 0, :, :] = np.real(B["Q"])
             imagedata[2, 0, :, :] = np.real(B["U"])
             imagedata[3, 0, :, :] = np.real(B["V"])
+            fullpol=True
         else:
             imagedata[0, 0, :, :] = np.real(B["I"])
+            fullpol=False
 
         if os.path.exists(outfile):
             os.system(f"rm -rf {outfile}")
         fits.writeto(outfile, data=imagedata, header=imageheader, overwrite=True)
+        if fullpol:
+            with fits.open(outfile, mode="update") as hdul:
+                hdr = hdul[0].header
+                (
+                    q_leakage,
+                    u_leakage,
+                    v_leakage,
+                    q_leakage_err,
+                    u_leakage_err,
+                    v_leakage_err,
+                ) = calc_leakage(outfile)
+                hdr["LEAKUNIT"] = "PERCENT"
+                hdr["QLEAK"] = round(q_leakage * 100.0, 4)
+                hdr["ULEAK"] = round(u_leakage * 100.0, 4)
+                hdr["VLEAK"] = round(v_leakage * 100.0, 4)
         print(f"Output image written to : {outfile}\n")
         return outfile
     except Exception as e:
@@ -340,31 +358,32 @@ def cli():
         )
         if pbcor_image is not None:
             header = fits.getheader(pbcor_image)
-            if header["POLSELF"] is "FALSE":
-                print(
-                    f"Estimating and correcting image based leakage for image: {imagename}.\n"
-                )
-                (
-                    q_leakage,
-                    u_leakage,
-                    v_leakage,
-                    q_leakage_err,
-                    u_leakage_err,
-                    v_leakage_err,
-                ) = calc_leakage(pbcor_image)
-                print(
-                    f"Q leakage: {round(q_leakage*100.0,3)}, U leakage: {round(u_leakage*100.0,3)}, V leakage: {round(v_leakage*100.0,3)}%.\n"
-                )
-                leakagecor_image, _ = correct_image_leakage(
-                    pbcor_image,
-                    modelname="",
-                    q_leakage=q_leakage,
-                    u_leakage=u_leakage,
-                    v_leakage=v_leakage,
-                )
-                if os.path.exists(leakagecor_image):
-                    os.system(f"rm -rf {pbcor_image}")
-                    os.system(f"mv {leakagecor_image} {pbcor_image}")
+            if "POLSELF" in header.keys():
+                if header["POLSELF"] is "FALSE":
+                    print(
+                        f"Estimating and correcting image based leakage for image: {imagename}.\n"
+                    )
+                    (
+                        q_leakage,
+                        u_leakage,
+                        v_leakage,
+                        q_leakage_err,
+                        u_leakage_err,
+                        v_leakage_err,
+                    ) = calc_leakage(pbcor_image)
+                    print(
+                        f"Q leakage: {round(q_leakage*100.0,3)}, U leakage: {round(u_leakage*100.0,3)}, V leakage: {round(v_leakage*100.0,3)}%.\n"
+                    )
+                    leakagecor_image, _ = correct_image_leakage(
+                        pbcor_image,
+                        modelname="",
+                        q_leakage=q_leakage,
+                        u_leakage=u_leakage,
+                        v_leakage=v_leakage,
+                    )
+                    if os.path.exists(leakagecor_image):
+                        os.system(f"rm -rf {pbcor_image}")
+                        os.system(f"mv {leakagecor_image} {pbcor_image}")
         return 0
     except Exception:
         traceback.print_exc()
