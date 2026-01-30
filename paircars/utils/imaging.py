@@ -287,8 +287,7 @@ def calc_npix_in_psf(weight, robust=0.0):
         # robust: -1 (uniform) → 3, +1 (natural) → 5
         robust = np.clip(robust, -1.0, 1.0)
         npix = 3.0 + ((robust + 1.0) / 2.0) * (5.0 - 3.0)
-
-    return round(npix, 1)
+    return round(npix, 0)
 
 
 def calc_cellsize(msname, num_pixel_in_psf):

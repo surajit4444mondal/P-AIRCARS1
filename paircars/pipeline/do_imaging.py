@@ -34,7 +34,7 @@ def perform_imaging(
     weight="briggs",
     robust=0.0,
     minuv=0,
-    threshold=3.0,
+    threshold=1.0,
     use_multiscale=True,
     use_solar_mask=True,
     mask_radius=40,
@@ -43,6 +43,7 @@ def perform_imaging(
     ncpu=-1,
     mem=-1,
     cutout_rsun=4.0,
+    make_overlay=True,
     make_plots=True,
     logfile="imaging.log",
 ):
@@ -93,6 +94,8 @@ def perform_imaging(
         Band name
     cutout_rsun : float, optional
         Cutout image size in solar radii from center (default: 4.0 solar radii)
+    make_overlay : bool, optional
+        Make SUVI MWA overlay
     make_plots : bool, optional
         Make radio map helioprojective plots
     logfile : str, optional
@@ -213,10 +216,9 @@ def perform_imaging(
         os.makedirs(imagedir, exist_ok=True)
         if weight == "briggs":
             weight += " " + str(robust)
+        if threshold <= 1:
+            threshold = 1.1
 
-        if threshold<=1:
-            threshold=1.1
-            
         wsclean_args = [
             "-quiet",
             "-scale " + str(cellsize) + "asec",
@@ -233,7 +235,7 @@ def perform_imaging(
             "-minuv-l " + str(minuv),
             "-j " + str(ncpu),
             "-abs-mem " + str(round(mem, 2)),
-            f"-auto-threshold 1 -auto-mask {threshold}",
+            "-auto-threshold 1 -auto-mask " + str(threshold),
             "-no-update-model-required",
         ]
         if datacolumn != "CORRECTED_DATA" and datacolumn != "corrected":
@@ -421,14 +423,20 @@ def perform_imaging(
                             image_bw = (
                                 fits.getheader(imagename)["CDELT3"] / 10**6
                             )  # In MHz
+                            if image_bw >= 1.28:
+                                temp_make_overlay = make_overlay
+                                temp_make_plots = make_plots
+                            else:
+                                temp_make_overlay = False
+                                temp_make_plots = False
                             renamed_image = rename_mwasolar_image(
                                 imagename,
                                 imagedir=imagedir + "/images",
                                 pol=pol,
                                 cutout_rsun=cutout_rsun,
-                                make_overlay=False,
-                                make_plots=True,
-                                keep_euv_fits=False,
+                                make_overlay=temp_make_overlay,
+                                make_plots=temp_make_plots,
+                                keep_euv_fits=True,
                                 pol_selfcal=pol_selfcal,
                             )
                             if renamed_image is not None:
@@ -466,6 +474,8 @@ def perform_imaging(
                                 if renamed_res is not None:
                                     final_res_list.append(renamed_res)
                             final_list_dic["residual"] = final_res_list
+            os.system(f"rm -rf {imagedir}/images/aia.lev1_euv*.fits")
+            os.system(f"rm -rf {imagedir}/images/*suvi-l2*.fits")
             if os.path.exists(f"{imagedir}/images/dask-scratch-space"):
                 os.system(f"rm -rf {imagedir}/images/dask-scratch-space")
             if use_solar_mask and os.path.exists(fits_mask):
@@ -527,6 +537,7 @@ def run_all_imaging(
     savemodel=False,
     saveres=False,
     cutout_rsun=-1,
+    make_overlay=True,
     make_plots=True,
     cpu_frac=0.8,
     mem_frac=0.8,
@@ -577,6 +588,8 @@ def run_all_imaging(
         Cutout image size (width and height is : 2 times cutout_rsun)
         Default value: 4 solar radii
         Note: default FoV is 8 solar solar radii. If cutout_rsun is chosen larger than 8 solar radii, FoV will be increased accordingly.
+    make_overlay : bool, optional
+        Make SUVI MWA overlay
     make_plots : bool, optional
         Make radio image helioprojective plots
     cpu_frac : float, optional
@@ -768,6 +781,7 @@ def run_all_imaging(
                     savemodel=savemodel,
                     saveres=saveres,
                     cutout_rsun=cutout_rsun,
+                    make_overlay=make_overlay,
                     make_plots=make_plots,
                     ncpu=n_threads,
                     mem=mem_limit,
@@ -822,12 +836,13 @@ def main(
     weight="briggs",
     robust=0.0,
     minuv=0.0,
-    threshold=3.0,
+    threshold=1.0,
     cutout_rsun=-1,
     use_multiscale=True,
     use_solar_mask=True,
     savemodel=True,
     saveres=True,
+    make_overlay=True,
     make_plots=True,
     start_remote_log=False,
     cpu_frac=0.8,
@@ -866,7 +881,7 @@ def main(
     minuv : float, optional
         Minimum uv-distance (in wavelengths) to include in imaging. Default is 0.0.
     threshold : float, optional
-        Cleaning threshold. Default is 3.0.
+        Cleaning threshold in Jy. Default is 1.0.
     cutout_rsun : float, optional
         Radius in solar radii to cut out around solar center. Set to -1 to disable. Default is -1.
     use_multiscale : bool, optional
@@ -877,6 +892,8 @@ def main(
         If True, saves the CLEAN model images. Default is True.
     saveres : bool, optional
         If True, saves the residual images. Default is True.
+    make_overlay : bool, optional
+        If True, generates image overlays on solar maps. Default is True.
     make_plots : bool, optional
         If True, generates diagnostic plots for each image. Default is True.
     start_remote_log : bool, optional
@@ -968,6 +985,7 @@ def main(
                 pol=pol,
                 make_plots=make_plots,
                 cutout_rsun=cutout_rsun,
+                make_overlay=make_overlay,
                 savemodel=savemodel,
                 saveres=saveres,
                 cpu_frac=cpu_frac,
@@ -1081,8 +1099,8 @@ def cli():
     adv_args.add_argument(
         "--threshold",
         type=float,
-        default=3.0,
-        help="CLEAN threshold",
+        default=1.0,
+        help="CLEAN threshold in Jy",
     )
     adv_args.add_argument(
         "--cutout_rsun",
@@ -1113,6 +1131,12 @@ def cli():
         action="store_false",
         dest="saveres",
         help="Do not save residual images",
+    )
+    adv_args.add_argument(
+        "--no_make_overlay",
+        action="store_false",
+        dest="make_overlay",
+        help="Do not generate overlay with SUVI images",
     )
     adv_args.add_argument(
         "--no_make_plots",
@@ -1172,6 +1196,7 @@ def cli():
         use_solar_mask=args.use_solar_mask,
         savemodel=args.savemodel,
         saveres=args.saveres,
+        make_overlay=args.make_overlay,
         make_plots=args.make_plots,
         start_remote_log=args.start_remote_log,
         cpu_frac=float(args.cpu_frac),

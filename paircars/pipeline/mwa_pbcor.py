@@ -187,7 +187,7 @@ def pbcor_all_images(
         # Number of worker limit based on memory
         ########################################
         mem_limit = (
-            16 * max([os.path.getsize(image) for image in images]) / 1024**3
+            16.0 * max([os.path.getsize(image) for image in images]) / 1024**3
         )  # In GB
         njobs = max(1, min(total_cpu, int(total_mem / mem_limit)))
         n_threads = max(1, int(total_cpu / njobs))
@@ -195,7 +195,7 @@ def pbcor_all_images(
         print("#################################")
         print(f"Total dask worker: {njobs}")
         print(f"CPU per worker: {n_threads}")
-        print(f"Memory per worker: {round(mem_limit,2)} GB")
+        print(f"Memory per worker: {round(mem_limit,5)} GB")
         print("#################################")
         ###########################################
 

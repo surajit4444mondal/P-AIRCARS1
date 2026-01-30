@@ -36,7 +36,6 @@ from paircars.pipeline import (
     do_selfcal,
     do_apply_selfcal,
     do_imaging,
-    mwa_pbcor,
     make_mwa_overlay,
 )
 
@@ -1049,81 +1048,6 @@ def run_imaging_jobs(
         return msg
 
 
-@task(name="applying_primary_beam", retries=2, retry_delay_seconds=10, log_prints=True)
-def run_apply_pbcor(
-    imagedir,
-    metafits,
-    workdir,
-    jobid=0,
-    cpu_frac=0.8,
-    mem_frac=0.8,
-    remote_log=False,
-):
-    """
-    Apply primary beam corrections on all images
-
-    Parameters
-    ----------
-    imagedir: str
-        Image directory name
-    metafits : str
-        Metafits file
-    workdir : str
-        Work directory
-    cpu_frac : float, optional
-        CPU fraction to use
-    mem_frac : float, optional
-        Memory fraction to use
-    remote_log: bool, optional
-        Start remote logger
-
-    Returns
-    -------
-    int
-        Success message for applying primary beam correction on all images
-    """
-    applypbcor_basename = "apply_pbcor"
-    logdir = f"{workdir}/logs"
-    os.makedirs(logdir, exist_ok=True)
-    logfile = f"{logdir}/{applypbcor_basename}.log"
-    if os.path.exists(logfile):
-        os.remove(logfile)
-    ctx = get_run_context()
-    task_id = str(ctx.task_run.id)
-    task_name = ctx.task_run.name
-    stop_event = Event()
-    log_thread_pbcor = start_log_task_saver(
-        task_id, task_name, logfile, poll_interval=3, stop_event=stop_event
-    )
-    try:
-        ###################
-        print("###########################")
-        print("Applying primary beam corrections on all images .....")
-        print("###########################")
-        #####################
-        # Applying primary beam correction
-        #####################
-        with get_dask_client() as dask_client:
-            msg = mwa_pbcor.main(
-                imagedir,
-                metafits,
-                workdir=workdir,
-                cpu_frac=float(cpu_frac),
-                mem_frac=float(mem_frac),
-                logfile=logfile,
-                jobid=jobid,
-                start_remote_log=remote_log,
-                dask_client=dask_client,
-            )
-    finally:
-        stop_event.set()
-        log_thread_pbcor.join(timeout=5)
-    if msg != 0:
-        raise RuntimeError("Primary beam correction is failed.")
-    else:
-        return msg
-
-
 @task(name="making_overlay", retries=2, retry_delay_seconds=10, log_prints=True)
 def run_make_overlay(
     imagedir,
@@ -1165,7 +1089,7 @@ def run_make_overlay(
     task_id = str(ctx.task_run.id)
     task_name = ctx.task_run.name
     stop_event = Event()
-    log_thread_pbcor = start_log_task_saver(
+    log_thread_overlay = start_log_task_saver(
         task_id, task_name, logfile, poll_interval=3, stop_event=stop_event
     )
     os.makedirs(outdir, exist_ok=True)
@@ -1188,7 +1112,7 @@ def run_make_overlay(
         )
     finally:
         stop_event.set()
-        log_thread_pbcor.join(timeout=5)
+        log_thread_overlay.join(timeout=5)
     return 0
 
 
@@ -1234,7 +1158,6 @@ def master_control(
     make_ds=True,
     # Imaging
     do_imaging=True,
-    do_pbcor=True,
     weight="briggs",
     robust=0.0,
     minuv=0,
@@ -1244,7 +1167,7 @@ def master_control(
     clean_threshold=3.0,
     use_multiscale=True,
     cutout_rsun=4.0,
-    make_overlay=True,
+    make_overlay=False,
     # Resource settings
     cpu_frac=0.8,
     mem_frac=0.8,
@@ -1321,8 +1244,6 @@ def master_control(
 
     do_imaging : bool, optional
         Perform final imaging
-    do_pbcor : bool, optional
-        Perform primary beam correction
     weight : str, optional
         Image weighting
     robust : float, optional
@@ -2425,39 +2346,6 @@ def master_control(
                 outdir
                 + f"/imagedir_f_{image_freqres}_t_{image_timeres}_pol_{pol}_w_{weight_str}"
             )
-            
-        ###########################
-        # Primary beam correction
-        ###########################
-        if do_pbcor:
-            images = glob.glob(f"{imagedir}/images/*.fits")
-            if len(images) == 0:
-                print(f"No image is present in image directory: {imagedir}/images")
-            else:
-                current_worker = get_total_worker(dask_cluster)
-                scale_worker_and_wait(dask_cluster, max_worker)
-                future_pbcor = run_apply_pbcor.with_options(
-                    task_run_name=f"applying_primary_beam_{jobid}"
-                ).submit(
-                    f"{imagedir}/images",
-                    target_metafits,
-                    workdir,
-                    jobid=jobid,
-                    cpu_frac=round(cpu_frac, 2),
-                    mem_frac=round(mem_frac, 2),
-                    remote_log=remote_logger,
-                )
-                try:
-                    msg = future_pbcor.result()
-                except Exception as e:
-                    print(
-                        "!!!! WARNING: Primary beam corrections of the final images are not successful. !!!!"
-                    )
-                    traceback.print_exc()
-                    return 1
-                finally:
-                    scale_worker_and_wait(dask_cluster, current_worker)
-                    print(f"Final image directory: {imagedir}/images")
 
         #######################################
         # Make overlays
@@ -2637,12 +2525,6 @@ def cli():
         help="Clean threshold in sigma for final deconvolution (Note this is not auto-mask)",
     )
     advanced_image.add_argument(
-        "--no_pbcor",
-        action="store_false",
-        dest="do_pbcor",
-        help="Do not apply primary beam correction after imaging",
-    )
-    advanced_image.add_argument(
         "--cutout_rsun",
         type=float,
         default=4.0,
@@ -2655,10 +2537,10 @@ def cli():
         help="Disable use solar disk mask during deconvolution",
     )
     advanced_image.add_argument(
-        "--no_overlay",
-        action="store_false",
+        "--do_overlay",
+        action="store_true",
         dest="make_overlay",
-        help="Disable overlay plot on EUV images",
+        help="Make overlay plot on EUV images",
     )
 
     # === Advanced options ===
@@ -2891,7 +2773,6 @@ def cli():
             make_ds=args.make_ds,
             # Imaging
             do_imaging=args.do_imaging,
-            do_pbcor=args.do_pbcor,
             weight=args.weight,
             robust=args.robust,
             minuv=args.minuv,

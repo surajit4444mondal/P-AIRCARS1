@@ -241,7 +241,7 @@ def do_selfcal(
         possible_sizes = np.sort(np.array(possible_sizes))
         possible_sizes = possible_sizes[possible_sizes >= imsize]
         imsize = max(512, int(possible_sizes[0]))
-        if refant=="":
+        if refant == "":
             unflagged_antenna_names, flag_frac_list = get_unflagged_antennas(msname)
             refant = unflagged_antenna_names[0]
             msmd = msmetadata()
@@ -723,10 +723,18 @@ def do_polselfcal(
         field = int(msmd.fieldsforscan(scan)[0])
         freqMHz = msmd.meanfreq(0, unit="MHz")
         times = msmd.timesforspws(0)
+        timeres=abs(np.nanmin(np.diff(times)))
         msmd.close()
-        cent_index = int(len(times)/2)
-        central_time = times[cent_index]
-        central_timestamp = mjdsec_to_timestamp(central_time, str_format=1)
+        #cent_index = int(len(times) / 2)
+        #central_time = times[cent_index]
+        #scentral_timestamp = mjdsec_to_timestamp(central_time, str_format=1)
+        timerange_list = get_timeranges(
+            msname,
+            60.0,
+            timeres,
+            quack_timestamps=-1,
+        )
+        timerange = ",".join(timerange_list)
         if hascor:
             logger.info(f"Spliting corrected data to ms : {selfcalms}")
             with suppress_output():
@@ -734,8 +742,8 @@ def do_polselfcal(
                     vis=msname,
                     field=str(field),
                     scan=str(scan),
-                    timerange=central_timestamp,
                     outputvis=selfcalms,
+                    timerange=timerange,
                     datacolumn="corrected",
                 )
         else:
@@ -747,7 +755,7 @@ def do_polselfcal(
                     field=str(field),
                     scan=str(scan),
                     outputvis=selfcalms,
-                    timerange=central_timestamp,
+                    timerange=timerange,
                     datacolumn="data",
                 )
         msname = selfcalms
@@ -794,7 +802,7 @@ def do_polselfcal(
         possible_sizes = np.sort(np.array(possible_sizes))
         possible_sizes = possible_sizes[possible_sizes >= imsize]
         imsize = max(512, int(possible_sizes[0]))
-        if refant=="":
+        if refant == "":
             unflagged_antenna_names, flag_frac_list = get_unflagged_antennas(msname)
             refant = unflagged_antenna_names[0]
             msmd = msmetadata()
@@ -818,7 +826,7 @@ def do_polselfcal(
         num_iter = 0
         last_round_gaintable = []
         os.system("rm -rf *_selfcal_present*")
-
+    
         ##########################################
         # Starting selfcal loops
         ##########################################
@@ -828,6 +836,14 @@ def do_polselfcal(
             ##################################
             logger.info("######################################")
             logger.info(f"Selfcal iteration : " + str(num_iter))
+            if num_iter==0:
+                pbcor=True
+                leakagecor=True
+                pbuncor=False
+            else:
+                pbcor=False
+                leakagecor=True
+                pbuncor=False       
             (
                 msg,
                 gaintable,
@@ -847,7 +863,7 @@ def do_polselfcal(
                 round_number=num_iter,
                 uvrange=uvrange,
                 minuv=minuv,
-                solint=solint,
+                solint="60s",
                 refant=str(refant),
                 threshold=threshold,
                 weight=weight,
@@ -855,9 +871,9 @@ def do_polselfcal(
                 use_solar_mask=solar_selfcal,
                 do_polcal=True,
                 do_intensity_cal=False,
-                pbcor=True,
-                leakagecor=True,
-                pbuncor=True,
+                pbcor=pbcor,
+                leakagecor=leakagecor,
+                pbuncor=pbuncor,
                 ncpu=ncpu,
                 mem=round(mem, 2),
             )
@@ -1404,14 +1420,16 @@ def main(
                         if freq_end > freq_start and ch_end == ch_start:
                             ch_end = ch_start + 1
                         final_gain_caltable = (
-                            caldir + f"/selfcal_{obsid}_coarsechan_{ch_start}_{ch_end}.gcal"
+                            caldir
+                            + f"/selfcal_{obsid}_coarsechan_{ch_start}_{ch_end}.gcal"
                         )
                         os.system(f"rm -rf {final_gain_caltable}")
                         os.system(f"cp -r {gcal} {final_gain_caltable}")
                         gcal_list.append(final_gain_caltable)
 
                         final_bpass_caltable = (
-                            caldir + f"/selfcal_{obsid}_coarsechan_{ch_start}_{ch_end}.bcal"
+                            caldir
+                            + f"/selfcal_{obsid}_coarsechan_{ch_start}_{ch_end}.bcal"
                         )
                         os.system(f"rm -rf {final_bpass_caltable}")
                         os.system(f"cp -r {bpass} {final_bpass_caltable}")
@@ -1435,7 +1453,8 @@ def main(
                             if freq_end > freq_start and ch_end == ch_start:
                                 ch_end = ch_start + 1
                             final_leakage_caltable = (
-                                caldir + f"/selfcal_{obsid}_coarsechan_{ch_start}_{ch_end}.dcal"
+                                caldir
+                                + f"/selfcal_{obsid}_coarsechan_{ch_start}_{ch_end}.dcal"
                             )
                             os.system(f"rm -rf {final_leakage_caltable}")
                             os.system(f"cp -r {dcal} {final_leakage_caltable}")

@@ -216,16 +216,16 @@ def get_pbcor_image(
             imagedata[0, 1, :, :] = np.real(B["Q"])
             imagedata[0, 2, :, :] = np.real(B["U"])
             imagedata[0, 3, :, :] = np.real(B["V"])
-            fullpol=True
+            fullpol = True
         elif stokesaxis == 4:
             imagedata[0, 0, :, :] = np.real(B["I"])
             imagedata[1, 0, :, :] = np.real(B["Q"])
             imagedata[2, 0, :, :] = np.real(B["U"])
             imagedata[3, 0, :, :] = np.real(B["V"])
-            fullpol=True
+            fullpol = True
         else:
             imagedata[0, 0, :, :] = np.real(B["I"])
-            fullpol=False
+            fullpol = False
 
         if os.path.exists(outfile):
             os.system(f"rm -rf {outfile}")

@@ -142,7 +142,7 @@ def applysol(
                 )
             if len(quartical_table) > 0:
                 for qc in quartical_table:
-                    if os.path.exists(quartical_table) is False:
+                    if os.path.exists(qc) is False:
                         print(f"Quartical table: {qc} is not present.")
                         os.system(f"touch {msname}/.nopolselfcal")
                     else:

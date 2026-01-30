@@ -423,13 +423,12 @@ def correct_image_leakage(
         model_Q = modeldata[1, 0, ...]
         model_U = modeldata[2, 0, ...]
         model_V = modeldata[3, 0, ...]
-        modelheader = fits.getheader(modelname)
 
     ###################################
     # Creating mask
     ####################################
     imageheader = fits.getheader(imagename)
-
+    modelheader = fits.getheader(modelname)
     pix_size = abs(imageheader["CDELT1"]) * 3600.0  # In arcsec
     radius = int((disc_size * 60) / pix_size)
     mask = create_circular_mask_array(image_I, radius)
@@ -534,8 +533,7 @@ def correct_pbcor_leakage(
         Leakage and leakage error list
     """
     leakage_info = []
-    freq = fits.getheader(imagename)["CRVAL3"]
-    pbfile = f"freq_{freq}_pb.npy"
+    pbfile = imagename.split(".fits")[0] + "_pb.npy"
     if pbcor is False:
         pbcor_image = imagename
         pbcor_model = modelname
@@ -552,11 +550,10 @@ def correct_pbcor_leakage(
             "--interpolated",
             "--num_threads",
             f"{ncpu}",
+            "--save_pb",
             "--pb_jones_file",
             f"{pbfile}",
         ]
-        if os.path.exists(pbfile) is False:
-            pbcor_cmds.append("--save_pb")
         logger.info(f"Correcting primary beam: {imagename} to {pbcor_image}.\n")
         result = subprocess.run(
             pbcor_cmds,
@@ -589,7 +586,6 @@ def correct_pbcor_leakage(
             text=True,
             check=False,
         )
-        
     if leakagecor is False:
         leakagecor_image = pbcor_image
         leakagecor_model = pbcor_model
@@ -685,58 +681,6 @@ def correct_pbcor_leakage(
             check=False,
         )
     return final_image, final_model, leakage_info
-
-
-def correct_spectrosnap_pbleak(
-    image_dic,
-    model_dic,
-    metafits,
-    logger,
-    pbcor=True,
-    leakagecor=True,
-    pbuncor=True,
-    ncpu=-1,
-):
-    images = list(image_dic.keys())
-    models = list(model_dic.keys())
-    leakage_info_list = []
-    for i in range(len(images)):
-        imagename = images[i]
-        modelname = models[i]
-        if "MFS" not in imagename:
-            wsclean_images = image_dic[imagename]
-            wsclean_models = model_dic[modelname]
-            valid_image = check_valid_image(imagename)
-            if valid_image:
-                cor_imagename, cor_modelname, leakage_info = correct_pbcor_leakage(
-                    imagename,
-                    modelname,
-                    metafits,
-                    logger,
-                    pbcor=pbcor,
-                    leakagecor=leakagecor,
-                    pbuncor=pbuncor,
-                    ncpu=ncpu,
-                )
-                image_data = fits.getdata(cor_imagename)
-                model_data = fits.getdata(cor_modelname)
-                for i in range(len(wsclean_images)):
-                    header = fits.getheader(wsclean_images[i])
-                    data = fits.getdata(wsclean_images[i])
-                    data[0, 0, ...] = image_data[i, 0, ...]
-                    fits.writeto(
-                        wsclean_images[i], data=data, header=header, overwrite=True
-                    )
-                    header = fits.getheader(wsclean_models[i])
-                    data = fits.getdata(wsclean_models[i])
-                    data[0, 0, ...] = model_data[i, 0, ...]
-                    fits.writeto(
-                        wsclean_models[i], data=data, header=header, overwrite=True
-                    )
-                leakage_info_list.append(leakage_info)
-            # os.system(f"rm -rf {imagename} {modelname}")
-    os.system(f"rm -rf *_pbcor.fits *_leakagecor.fits *_pbuncor.fits *pb.npy")
-    return leakage_info_list
 
 
 def selfcal_round(
@@ -915,20 +859,26 @@ def selfcal_round(
         ######################################
         # Determine spectro-temporal chunking
         ######################################
-        if calmode == "ap" or do_polcal:
-            nchans = max(
-                1, round(bw / 0.32)
-            )  # Fixed to 320 kHz, 4 channels per coarse channels
+        if do_intensity_cal:
+            if calmode == "ap":
+                nchans = max(
+                    1, round(bw / 0.32)
+                )  # Fixed to 320 kHz, 4 channels per coarse channels
+            else:
+                nchans = 1
+            if min_tol_factor <= 0:
+                min_tol_factor = 1.0  # In percentage
+            nintervals, _ = get_optimal_image_interval(
+                msname,
+                temporal_tol_factor=float(min_tol_factor / 100.0),
+                spectral_tol_factor=0.1,
+            )
         else:
-            nchans = 1
-        if min_tol_factor <= 0:
-            min_tol_factor = 1.0  # In percentage
-        nintervals, _ = get_optimal_image_interval(
-            msname,
-            temporal_tol_factor=float(min_tol_factor / 100.0),
-            spectral_tol_factor=0.1,
-        )
-        
+            nchans = max(
+                    1, round(bw / 0.32)
+                ) 
+            nintervals = 1
+
         os.system(f"rm -rf {prefix}*image.fits {prefix}*residual.fits")
 
         if weight == "briggs":
@@ -953,12 +903,10 @@ def selfcal_round(
         ]
         if do_intensity_cal:
             wsclean_args.append("-pol I")
-            pol = "I"
             if calmode == "p":
                 wsclean_args.append("-no-negative")
         else:
             wsclean_args.append("-pol IQUV")
-            pol = "IQUV"
 
         ngrid = int(ncpu / 2)
         if ngrid > 1:
@@ -1006,7 +954,7 @@ def selfcal_round(
         # Image naming
         #####################################
         wsclean_args.append(f"-name {prefix}")
-        if use_previous_model and do_polcal is False:
+        if use_previous_model:
             previous_models = glob.glob(f"{prefix}*model.fits")
             total_models_expected = nintervals * nchans
             if len(previous_models) == total_models_expected:
@@ -1028,9 +976,6 @@ def selfcal_round(
             imagelist = []
             modellist = []
             pollist = ["I", "Q", "U", "V"]
-            wsclean_images_dic = {}
-            wsclean_models_dic = {}
-            wsclean_residuals_dic = {}
             for suffix in ["image", "model", "residual"]:
                 stokeslist = []
                 for p in pollist:
@@ -1044,63 +989,54 @@ def selfcal_round(
                     image_prefix = (
                         selfcaldir
                         + "/"
-                        + os.path.basename(wsclean_images[0])
-                        .split(f"-{suffix}")[0]
-                        .split("-I")[0]
+                        + os.path.basename(wsclean_images[0]).split(f"-{suffix}")[0]
                     )
                     image_cube = make_stokes_wsclean_imagecube(
                         wsclean_images,
-                        image_prefix + f"-IQUV-{suffix}.fits",
-                        keep_wsclean_images=True,
+                        image_prefix + f"_IQUV_{suffix}.fits",
+                        keep_wsclean_images=False,
                     )
                     if suffix == "image":
-                        wsclean_images_dic[image_cube] = wsclean_images
-                    elif suffix == "model":
-                        wsclean_models_dic[image_cube] = wsclean_images
-                    elif suffix == "residual":
-                        wsclean_residuals_dic[image_cube] = wsclean_images
+                        imagelist.append(image_cube)
+                    if suffix == "model":
+                        modellist.append(image_cube)
 
-            ################################
-            # Leakage correction
-            ################################
-            if pbcor is True or leakagecor is True or pbuncor is True:
-                leakage_info_list = correct_spectrosnap_pbleak(
-                    wsclean_images_dic,
-                    wsclean_models_dic,
-                    metafits,
-                    logger,
-                    pbcor=pbcor,
-                    leakagecor=leakagecor,
-                    pbuncor=pbuncor,
-                    ncpu=ncpu,
-                )
-            ####################################
-            # Predict models
-            ####################################
-            delmod(vis=msname, otf=True, scr=True)
-            wsclean_cmd = "wsclean " + " ".join(wsclean_args) + " -predict " + msname
-            logger.info(f"WSClean command: {wsclean_cmd}\n")
-            msg = run_wsclean(wsclean_cmd, "solarwsclean", verbose=True)
-
-            #######################################
-            # Remove chunk files
-            #######################################
-            images = list(wsclean_images_dic.keys())
-            models = list(wsclean_models_dic.keys())
-            residuals = list(wsclean_residuals_dic.keys())
-            for i in range(len(images)):
-                imagename = images[i]
-                modelname = models[i]
-                residualname = residuals[i]
-                wsclean_images = wsclean_images_dic[imagename]
-                wsclean_models = wsclean_models_dic[modelname]
-                wsclean_residuals = wsclean_residuals_dic[residualname]
-                for img in wsclean_images:
-                    os.system(f"rm -rf {img}")
-                for mod in wsclean_models:
-                    os.system(f"rm -rf {mod}")
-                for res in wsclean_residuals:
-                    os.system(f"rm -rf {res}")
+            #####################################
+            # PB correction and residual leakages
+            #####################################
+            if pbcor is True or leakagecor is True or pbuncor is True and do_polcal:
+                delmod(vis=msname, otf=True, scr=True)
+                for count in range(len(imagelist)):
+                    imagename = imagelist[count]
+                    modelname = modellist[count]
+                    if "MFS" not in imagename:
+                        valid_image = check_valid_image(imagename)
+                        if valid_image:
+                            imagename, modelname, leakage_info = correct_pbcor_leakage(
+                                imagename,
+                                modelname,
+                                metafits,
+                                logger,
+                                pbcor=pbcor,
+                                leakagecor=leakagecor,
+                                pbuncor=pbuncor,
+                                ncpu=ncpu,
+                            )
+                            casa_modelname = f"{modelname.split('.fits')[0]}.model"
+                            importfits(
+                                fitsimage=modelname,
+                                imagename=casa_modelname,
+                                defaultaxes=True,
+                                defaultaxesvalues=["ra", "dec", "stokes", "freq"],
+                                overwrite=True,
+                            )
+                            header = imhead(imagename=casa_modelname,mode="list")
+                            cent_freq = header["crval4"]/10**6
+                            bw = header["cdelt4"]/10**6
+                            spw=f"0:{cent_freq-(bw/2)}~{cent_freq+(bw/2)}MHz"
+                            ft(vis=msname, model=casa_modelname, spw=spw, incremental=True, usescratch=True)
+                            os.system(f"rm -rf {casa_modelname}")
+                            leakage_info_list.append(leakage_info)
 
         #####################################
         # Analyzing images
@@ -1119,18 +1055,10 @@ def selfcal_round(
         #######################################################################
         # Final frequency averaged images for backup or calculating dynamic ranges
         #######################################################################
-        if do_polcal:
-            keep_wsclean_images=False
-        else:
-            keep_wsclean_images=True
-        final_image = (
-            prefix.replace("present", f"{round_number}") + f"_{pol}_image.fits"
-        )
-        final_model = (
-            prefix.replace("present", f"{round_number}") + f"_{pol}_model.fits"
-        )
+        final_image = prefix.replace("present", f"{round_number}") + "_I_image.fits"
+        final_model = prefix.replace("present", f"{round_number}") + "_I_model.fits"
         final_residual = (
-            prefix.replace("present", f"{round_number}") + f"_{pol}_residual.fits"
+            prefix.replace("present", f"{round_number}") + "_I_residual.fits"
         )
 
         if len(wsclean_images) == 0:
@@ -1140,19 +1068,19 @@ def selfcal_round(
             os.system(f"cp -r {wsclean_images[0]} {final_image}")
         else:
             final_image = make_timeavg_image(
-                wsclean_images, final_image, keep_wsclean_images=keep_wsclean_images
+                wsclean_images, final_image, keep_wsclean_images=True
             )
         if len(wsclean_models) == 1:
             os.system(f"cp -r {wsclean_models[0]} {final_model}")
         else:
             final_model = make_timeavg_image(
-                wsclean_models, final_model, keep_wsclean_images=keep_wsclean_images
+                wsclean_models, final_model, keep_wsclean_images=True
             )
         if len(wsclean_residuals) == 1:
             os.system(f"cp -r {wsclean_residuals[0]} {final_residual}")
         else:
             final_residual = make_timeavg_image(
-                wsclean_residuals, final_residual, keep_wsclean_images=keep_wsclean_images
+                wsclean_residuals, final_residual, keep_wsclean_images=True
             )
         os.system("rm -rf *psf.fits")
 
@@ -1261,7 +1189,7 @@ def selfcal_round(
                     return 3, applycal_gaintable, 0, 0, "", "", "", []
 
                 applycal_gaintable.append(bpass_caltable)
-                interp.append("linear,linearflag")
+                interp.append("linear,linear")
 
             #########################################
             # Flagging bad gains
@@ -1324,7 +1252,7 @@ def selfcal_round(
                 "dask.threads=1",
                 "D.type=complex",
                 f"D.time_interval={solint}",
-                f"D.freq_interval={int(freqres*1000.0)}kHz",
+                f"D.freq_interval=1",
             ]
             if solve_array_leakage:
                 quartical_args.append("D.solve_per=array")
