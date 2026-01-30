@@ -1,5 +1,0 @@
-vis   = '/Data2/test_paircars2/1111474560/selfcal_1111474560_ch103-104_spw_0~7_selfcal_int/intselfcal_selfcal_1111474560_ch103-104_spw_0~7.ms'
-otf   = True
-field = ''
-scr   = True
-#delmod( vis='/Data2/test_paircars2/1111474560/selfcal_1111474560_ch103-104_spw_0~7_selfcal_int/intselfcal_selfcal_1111474560_ch103-104_spw_0~7.ms',otf=True,field='',scr=True )
