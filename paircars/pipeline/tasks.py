@@ -1,4 +1,5 @@
 import os
+import socket
 from multiprocessing import Event
 from prefect import task
 from prefect.context import get_run_context
@@ -215,7 +216,6 @@ def run_ds_jobs(
 @task(
     name="split",
     retries=2,
-    timeout_seconds=1800,
     retry_delay_seconds=exponential_backoff(backoff_factor=60),
     log_prints=True,
 )
@@ -1613,10 +1613,11 @@ def send_task_notification(
         Any attachment to send
     """
     internet_on = internet_available()
+    hostname = socket.gethostname()
     if internet_on:
         try:
             email_subject = (
-                f"P-AIRCARS Logger Details: {logger_timestamp}, OBSID: {obsid}"
+                f"P-AIRCARS Log: {logger_timestamp}, OBSID: {obsid}, Hostname: {hostname}"
             )
             if flow_name == "":
                 email_msg = f"{msg}"

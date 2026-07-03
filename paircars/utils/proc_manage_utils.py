@@ -324,7 +324,10 @@ def submit_local_master_flow(args, jobid):
         print(
             f"Job scheduler is not local. Available job scheduler is : {scheduler_name}"
         )
-        return 1
+        cont=input("Do you want to continue to run P-AIRCARS in current node only? Y/N")
+        if cont.lower()=="n":
+            return 1
+            
     args_list = [shlex.quote(arg) for arg in sys.argv[1:]]
     if "--log2term" in args_list:
         args_list.remove("--log2term")
@@ -378,7 +381,7 @@ def submit_local_master_flow(args, jobid):
         try:
             # Always run job in background
             with open(log_file, "a", buffering=1) as log:
-                subprocess.Popen(
+                proc = subprocess.Popen(
                     ["bash", script_path],
                     stdout=log,
                     stderr=subprocess.STDOUT,
@@ -398,9 +401,10 @@ def submit_local_master_flow(args, jobid):
             with open(log_file, "r") as log:
                 log.seek(0, os.SEEK_END)
                 while True:
+                    exit_code = proc.poll()
                     line = log.readline()
                     wait_time = time.time() - last_write_time
-                    if (
+                    if exit_code is not None and (
                         traceback_waittime is not None
                         and wait_time > traceback_waittime
                     ):

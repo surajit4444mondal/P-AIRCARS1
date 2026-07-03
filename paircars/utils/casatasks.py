@@ -184,12 +184,12 @@ def single_mstransform(
                     flagbackup=False,
                 )
         os.system(f"touch {outputms}/.splited")
-        return outputms
+        return 0, outputms
     except Exception:
         traceback.print_exc()
         if os.path.exists(outputms):
             os.system("rm -rf " + outputms)
-        return
+        return 1, outputms
 
 
 def calc_normzlized_crosscorr(data, flag, ant1, ant2, time):

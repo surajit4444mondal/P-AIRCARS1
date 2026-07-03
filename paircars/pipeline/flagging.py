@@ -12,7 +12,11 @@ from paircars.utils.basic_utils import (
     print_banner,
     capture_all_output,
 )
-from paircars.utils.flagging import flagsummary, do_flag_backup
+from paircars.utils.flagging import (
+    flagsummary, 
+    flag_badchan,
+    do_flag_backup,
+)
 from paircars.utils.logger_utils import (
     SmartDefaultsHelpFormatter,
     clean_shutdown,
@@ -51,6 +55,7 @@ def single_ms_flag(
     run_solarflagger=False,
     normalize=False,
     threshold=5.0,
+    force_flag=False,
     n_threads=1,
     mem_limit=1,
 ):
@@ -83,6 +88,8 @@ def single_ms_flag(
         Use normalization in solar flagger
     threshold : float, optional
         Flagging threshold
+    force_flag : bool, optional
+        Force flag
     n_threads : int, optional
         Number of OpenMP threads
     mem_limit : float, optional
@@ -100,6 +107,9 @@ def single_ms_flag(
     from casatasks import flagdata
 
     msname = msname.rstrip("/")
+    if os.path.exists(f"{msname}/.flag_succeed") and not force_flag:
+        print(f"Flagging of ms: {msname} is already done.")
+        return 0
     os.system(f"rm -rf {msname}/.flag_*")
     print(f"Flagging ms: {msname}")
     try:
@@ -108,23 +118,10 @@ def single_ms_flag(
         ##############################
         if badspw != "":
             try:
-                flag_cmd = (
-                    f"flagdata("
-                    f"vis='{msname}',"
-                    f"mode='manual',"
-                    f"spw='{badspw}',"
-                    f"cmdreason='badchan',"
-                    f"flagbackup=False)"
-                )
+                flag_cmd = f"flag_badchan(\'{msname}\',\'{badspw}\')"
                 print(flag_cmd)
                 with suppress_output():
-                    flagdata(
-                        vis=msname,
-                        mode="manual",
-                        spw=badspw,
-                        cmdreason="badchan",
-                        flagbackup=False,
-                    )
+                    flag_badchan(msname,badspw)
             except Exception:
                 traceback.print_exc()
                 pass
@@ -485,7 +482,8 @@ def do_flagging(
     run_solarflagger=False,
     normalize=False,
     threshold=5.0,
-    restore_flag=True,
+    restore_flag=False,
+    force_flag=False,
     n_threads=1,
     mem_limit=1,
     logger=None,
@@ -531,6 +529,8 @@ def do_flagging(
         Flag threshold
     restore_flag : bool, optional
         Restore previous flags
+    force_flag : bool, optional
+        Force flag
     n_threads : int, optional
         CPU threads to use
     mem_limit : float, optional
@@ -608,6 +608,7 @@ def do_flagging(
                     threshold=threshold,
                     run_solarflagger=run_solarflagger,
                     normalize=normalize,
+                    force_flag=force_flag,
                     n_threads=n_threads,
                     mem_limit=mem_limit,
                 )
@@ -666,7 +667,8 @@ def main(
     run_solarflagger=False,
     normalize=False,
     threshold=5.0,
-    restore_flag=True,
+    restore_flag=False,
+    force_flag=False,
     cpu_frac=0.8,
     mem_frac=0.8,
     logfile=None,
@@ -715,6 +717,8 @@ def main(
         Flagging threshold
     restore_flag : bool, optional
         Restore previous flags
+    force_flag : bool, optional
+        Force flag
     cpu_frac : float, optional
         Fraction of total CPU resources to use. Default is 0.8.
     mem_frac : float, optional
@@ -850,6 +854,7 @@ def main(
             normalize=normalize,
             threshold=threshold,
             restore_flag=restore_flag,
+            force_flag=force_flag,
             flag_backup=flagbackup,
             n_threads=n_threads,
             mem_limit=mem_limit,
@@ -956,10 +961,16 @@ def cli():
         "--flagdimension", type=str, default="freqtime", help="Flag dimension"
     )
     adv_args.add_argument(
-        "--no_restore",
+        "--restore",
         dest="restore_flag",
-        action="store_false",
-        help="Do not restore flags",
+        action="store_true",
+        help="Restore flags",
+    )
+    adv_args.add_argument(
+        "--force_flag",
+        dest="force_flag",
+        action="store_true",
+        help="Force flag",
     )
     adv_args.add_argument("--verbose", action="store_true", help="Verbose logs")
     adv_args.add_argument("--jobid", type=int, default=0, help="Job ID")
@@ -999,6 +1010,7 @@ def cli():
         normalize=args.normalize,
         threshold=args.threshold,
         restore_flag=args.restore_flag,
+        force_flag=args.force_flag,
         cpu_frac=args.cpu_frac,
         mem_frac=args.mem_frac,
         jobid=args.jobid,

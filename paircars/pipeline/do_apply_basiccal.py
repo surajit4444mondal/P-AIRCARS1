@@ -235,7 +235,7 @@ def applysol(
                                     print("Quartical solutions did not apply.")
                                 else:
                                     print(
-                                        "Quartical solutions applied successfully from: {qc}."
+                                        f"Quartical solutions applied successfully from: {qc}."
                                     )
                                     qc_success = True
                                 os.system(f"rm -rf {quartical_log}")

@@ -88,6 +88,35 @@ def do_flag_backup(msname, flagtype="flagdata"):
     af.done()
 
 
+def flag_badchan(msname,spw):
+    """
+    Flag bad channels
+    
+    Parameters
+    ----------
+    msname : str
+        Measurement set
+    spw : str
+       Spectral window
+    """ 
+    from casatools import table 
+    tb=table()
+    tb.open(msname,nomodify=False)
+    flag=tb.getcol("FLAG")
+    spw = spw.split("0:")[-1].split(";")
+    for s in spw:
+        start_chan = int(s.split("~")[0])
+        end_chan = int(s.split("~")[-1])
+        if start_chan==end_chan:
+            flag[:,start_chan,:]=True
+        else:
+            for chan in range(start_chan,end_chan+1):
+                flag[:,chan,:]=True
+    tb.putcol("FLAG",flag)
+    tb.flush()
+    tb.close()
+    return
+
 def uvbin_flag(
     msname,
     uvbin_size=10,

@@ -334,6 +334,8 @@ def get_selfcal_ntimes(msname):
     int
         Number of time chunks
     """
+    good_chans = get_good_chans(msname)
+    good_chan = int(good_chans.split("0:")[-1].split(";")[0].split("~")[0])
     msmd = msmetadata()
     msmd.open(msname)
     freq = msmd.meanfreq(0)
@@ -342,10 +344,12 @@ def get_selfcal_ntimes(msname):
     uvmax = round(100 * wavelength, 1)
     mstool = casamstool()
     mstool.open(msname)
+    mstool.selectchannel(nchan=1, start=good_chan, width=1)
     mstool.select({"uvdist": [0.01, uvmax]})
     flags = mstool.getdata("FLAG", ifraxis=True)["flag"]
     mstool.close()
-    flags = np.sum(flags, axis=(0, 1)).astype("bool")
+    flags = flags[:,good_chan,...]
+    flags = np.sum(flags, axis=0).astype("bool")
     shape = flags.shape
     if len(shape) == 1:
         n_points = np.nansum(~flags)

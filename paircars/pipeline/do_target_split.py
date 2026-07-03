@@ -124,7 +124,6 @@ def split_target_scans(
     if len(mslist) == 0:
         logger.critical("Please provide a valid measurement set list.")
         return 1, []
-
     try:
         os.chdir(workdir)
         logger.debug(f"Current working directory: {os.getcwd()}")
@@ -139,7 +138,7 @@ def split_target_scans(
         else:
             flag_central_chan = True
         logger.debug(f"Flag central channel: {flag_central_chan} for {mode}")
-
+        
         tasks = []
         splited_ms_list = []
 
@@ -178,12 +177,12 @@ def split_target_scans(
                 coarse_chan = coarse_chans[c]
                 if coarse_chan in use_coarse_chans:
                     chan = coarse_channel_bands[c]
-                    good_chans = chan[2]
-                    good_chans = [f"{i}" for i in good_chans]
-                    good_spwlist.append(f"0:{';'.join(good_chans)}")
+                    start_chan = chan[0]
+                    end_chan = chan[1]
+                    good_spwlist.append(f"0:{start_chan}~{end_chan}")
                     coarse_chlist.append(f"{coarse_chan}")
 
-            timerange_list = get_timeranges(
+            only_disk_msg, timerange_list = get_timeranges(
                 msname,
                 time_interval,
                 time_window,
@@ -191,6 +190,8 @@ def split_target_scans(
                 quack_timestamps=quack_timestamps,
             )
             timerange = ",".join(timerange_list)
+            if only_disk_msg!=0:
+                print (f"Disk timinings determination failed for ms: {msname}")
             for i in range(len(coarse_chlist)):
                 good_spw = good_spwlist[i]
                 coarse_chan = coarse_chlist[i]
@@ -228,9 +229,9 @@ def split_target_scans(
         result_wrapper = dask_client.gather(future)
         result = []
         for r in result_wrapper:
-            result.append(r[0])
+            result.append(r[0][1])
             logger.debug("================")
-            logger.debug(f"Worker log for: {os.path.basename(r[0])}")
+            logger.debug(f"Worker log for: {os.path.basename(r[0][1])}")
             logger.debug("================")
             for line in r[1].splitlines():
                 logger.debug(line)
@@ -268,6 +269,7 @@ def main(
     prefix="targets",
     force_split=False,
     only_disk=False,
+    flag_bad_chans=False,
     cpu_frac=0.8,
     mem_frac=0.8,
     logfile=None,
@@ -309,6 +311,8 @@ def main(
         Force to split
     only_disk : bool, optional
         Split only disk visible times
+    flag_bad_chans : bool, optional
+        Flag bad channels or not
     cpu_frac : float, optional
         Fraction of available CPUs to allocate per task. Default is 0.8.
     mem_frac : float, optional
@@ -458,9 +462,11 @@ def main(
             logger.debug("List of splited measurement sets:")
             logger.debug(f"{splited_mslist}")
             msg = 0
+        return msg, expected, succeed
     except Exception:
         logger.exception("Exception occured in spliting.", exc_info=True)
-        msg = 1
+        msg=1
+        return msg, expected, succeed
     finally:
         time.sleep(5)
         clean_shutdown(observer)
@@ -472,11 +478,7 @@ def main(
             dask_cluster.close()
             drop_cache(workdir)
             os.system(f"rm -rf {dask_dir}")
-        if msg == 0:
-            logger.info("All measurement sets are splited successfully.")
-        else:
-            logger.error("Error occured in spliting measurement sets.")
-        return msg, expected, succeed
+        
 
 
 def cli():
@@ -560,6 +562,7 @@ def cli():
         default="targets",
         help="Splited ms prefix name",
     )
+    adv_args.add_argument("--only_disk", action="store_true", help="Split only disk timestamps")
     adv_args.add_argument("--force_split", action="store_true", help="Force to split")
     adv_args.add_argument("--verbose", action="store_true", help="Verbose logs")
     adv_args.add_argument("--jobid", type=int, default=0, help="Job ID")
@@ -602,6 +605,7 @@ def cli():
         freqres=args.freqres,
         timeres=args.timeres,
         prefix=args.prefix,
+        only_disk=args.only_disk,
         cpu_frac=args.cpu_frac,
         mem_frac=args.mem_frac,
         jobid=args.jobid,

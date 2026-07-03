@@ -47,6 +47,7 @@ def get_timeranges(
     time_window,
     quack_timestamps=-1,
     only_disk=False,
+    disk_chan=-1,
 ):
     """
     Get time ranges for a scan with certain time intervals
@@ -63,9 +64,13 @@ def get_timeranges(
         Number of timestamps ignored at the start and end of each scan
     only_disk : bool, optional
         Whether select timestamps with disk visibilties
+    disk_chan : int, optional
+        Use this channel to search disk timings
 
     Returns
     -------
+    int
+        Whether only disk timing determined successfully or not
     list
         List of time ranges
     """
@@ -75,32 +80,40 @@ def get_timeranges(
     msmd.close()
     msmd.done()
     time_ranges = []
+    only_disk_msg=0
     if len(times) == 1:
         time_ranges.append(mjdsec_to_timestamp(times[0], str_format=1))
-        return time_ranges
+        return only_disk_msg, time_ranges
     if (
         quack_timestamps > 0 and len(times) > 2 * quack_timestamps + 3
     ):  # At least 3 timestamps remain after quack flagging
         quack_timestamps += 1
         times = times[quack_timestamps:-quack_timestamps]
     if only_disk:
-        _, _, disk_timestamps = determine_disk_visibility(msname)
-        if len(disk_timestamps) == 0:
-            print(f"No timestamp with disk visibility for ms: {msname}.")
-            filtered_timestamps = times
-        elif len(disk_timestamps) >= len(times):
-            print(f"All timestamps have disk visibilties for ms: {msname}.")
-            filtered_timestamps = times
-        else:
-            filtered_timestamps = []
-            for t in range(len(times)):
-                if t in disk_timestamps:
-                    filtered_timestamps.append(times[t])
-            print(
-                f"{len(filtered_timestamps)} number of timestamps among {len(times)} have disk visibiltiies for ms: {msname}."
-            )
-            if len(filtered_timestamps) == 0:
+        try:
+            _, _, disk_timestamps = determine_disk_visibility(msname, chan=disk_chan)
+            if len(disk_timestamps) == 0:
+                print(f"No timestamp with disk visibility for ms: {msname}.")
                 filtered_timestamps = times
+            elif len(disk_timestamps) >= len(times):
+                print(f"All timestamps have disk visibilties for ms: {msname}.")
+                filtered_timestamps = times
+            else:
+                filtered_timestamps = []
+                for t in range(len(times)):
+                    if t in disk_timestamps:
+                        filtered_timestamps.append(times[t])
+                print(
+                    f"{len(filtered_timestamps)} number of timestamps among {len(times)} have disk visibiltiies for ms: {msname}."
+                )
+                if len(filtered_timestamps) == 0:
+                    filtered_timestamps = times
+        except Exception:
+            print("Error occured in determing disk visibilities. Using all timestamps.")
+            filtered_timestamps = times  
+            only_disk_msg=1  
+    else:
+        filtered_timestamps=times
 
     start_time = min(times)
     end_time = max(times)
@@ -112,7 +125,7 @@ def get_timeranges(
                 + mjdsec_to_timestamp(end_time, str_format=1)
             )
             time_ranges.append(t)
-            return time_ranges
+            return only_disk_msg, time_ranges
     timeres = times[1] - times[0]
     ntime_chunk = max(1, int(time_interval / timeres))
     ntime = int(time_window / timeres)
@@ -144,7 +157,7 @@ def get_timeranges(
             )
         else:
             time_ranges.append(f"{mjdsec_to_timestamp(start_time, str_format=1)}")
-    return time_ranges
+    return only_disk_msg, time_ranges
 
 
 def calc_fractional_bandwidth(msname):

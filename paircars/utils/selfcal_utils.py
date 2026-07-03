@@ -17,7 +17,6 @@ from .calibration import (
     quartical_matrix_normalize,
     get_cal_flag_info,
 )
-from .casatasks import normalized_crosscorr_ms
 from .imaging import (
     calc_sun_dia,
     get_optimal_image_interval,
@@ -118,7 +117,7 @@ def do_uvsub_flag(msname, threshold_list=[10, 7, 5], ncpu=1):
                 count += 1
 
 
-def determine_disk_visibility(msname):
+def determine_disk_visibility(msname,chan=-1):
     """
     Determine whether solar disk is visible or not
 
@@ -126,7 +125,9 @@ def determine_disk_visibility(msname):
     ----------
     msname : str
         Measurement set
-
+    chan : int, optional
+        Channel number to use
+        
     Returns
     -------
     numpy.array
@@ -136,15 +137,15 @@ def determine_disk_visibility(msname):
     numpy.array
         Timestamps where disk is detected at least in one channel
     """
+    import warnings
+    warnings.simplefilter("ignore", RuntimeWarning)
     from casatools import ms as casamstool, table
-
     msmd = msmetadata()
     msmd.open(msname)
     freq = msmd.meanfreq(0)
     msmd.nchan(0)
     msmd.close()
     wavelength = (3 * 10**8) / freq
-    uvdist = 10.0 * wavelength
     tb = table()
     tb.open(msname)
     colnames = tb.colnames()
@@ -153,35 +154,63 @@ def determine_disk_visibility(msname):
         datacolumn = "corrected"
     else:
         datacolumn = "data"
-    normed_msname = normalized_crosscorr_ms(msname, datacolumn=datacolumn.upper())
     mstool = casamstool()
     uvdist = 150.0 * wavelength
-    mstool.open(normed_msname)
-    mstool.select({"uvdist": [uvdist - 10.0, uvdist + 10.0]})
+    mstool.open(msname)
+    if chan>0:
+        mstool.selectchannel(nchan=1,start=chan, width=1)
+        print(f"Using channel: {chan}")
+    print(f"UV range: {uvdist-10.0}, {uvdist+10.0}")
+    selection_ok = mstool.select({"uvdist": [uvdist - 10.0, uvdist + 10.0]})
+    if not selection_ok:
+        mstool.close()
+        mstool.open(msname)
+        if chan>0:
+            mstool.selectchannel(nchan=1,start=chan, width=1)
+        mstool.select({"uvdist": [uvdist - 50.0, uvdist + 50.0]})
+    mstool.selectpolarization("I")
     if datacolumn == "corrected":
-        data_first_lobe = np.nanmedian(
-            np.abs(mstool.getdata("CORRECTED_DATA", ifraxis=True)["corrected_data"]),
-            axis=2,
-        )
+        data_first_lobe = np.abs(mstool.getdata("CORRECTED_DATA", ifraxis=True)["corrected_data"])
     else:
-        data_first_lobe = np.nanmedian(
-            np.abs(mstool.getdata("DATA", ifraxis=True)["data"]), axis=2
-        )
+        data_first_lobe = np.abs(mstool.getdata("DATA", ifraxis=True)["data"])
+    data_first_lobe_flag = mstool.getdata("FLAG", ifraxis=True)["flag"]
     mstool.close()
-    r_I = (data_first_lobe[0, ...] + data_first_lobe[-1, ...]) / 2.0
+    data_first_lobe_flag = np.any(data_first_lobe_flag,axis=0)
+    data_first_lobe[0,...][data_first_lobe_flag]=np.nan
+    data_first_lobe = np.nanmedian(data_first_lobe,axis=2)
+    mstool.open(msname)
+    mstool.selectpolarization("I")
+    if chan>0:
+        mstool.selectchannel(nchan=1,start=chan, width=1)
+    mstool.select({"uvdist": [0.0,0.0]})
+    if datacolumn == "corrected":
+        data_autocorr = np.abs(mstool.getdata("CORRECTED_DATA", ifraxis=True)["corrected_data"])
+    else:
+        data_autocorr = np.abs(mstool.getdata("DATA", ifraxis=True)["data"])
+    data_autocorr_flag = mstool.getdata("FLAG", ifraxis=True)["flag"]
+    data_autocorr_flag = np.any(data_autocorr_flag,axis=0)
+    mstool.close()
+    data_autocorr[0,...][data_autocorr_flag]=np.nan
+    data_autocorr = np.nanmedian(data_autocorr,axis=2)
+    r_I = data_first_lobe[0, ...]/data_autocorr[0,...]
     detected = r_I < 0.1
     n_detected_per_time = np.nansum(detected, axis=0)
     detected_timestamps = np.where(n_detected_per_time > 0)[0]
     pos = np.where(r_I >= 0.1)
-    os.system(f"rm -rf {normed_msname}")
     if len(pos) == 0:
         return np.array([], dtype=int), np.array([], dtype=int), detected_timestamps
     elif len(pos) == 1:
-        chans = pos[0]
+        if chan>1:
+            chans = np.array([chan])
+        else:
+            chans = pos[0]
         timestamps = np.zeros_like(chans)
         return chans, timestamps, detected_timestamps
     else:
-        chans = pos[0]
+        if chan>1:
+            chans = np.array([chan])
+        else:
+            chans = pos[0]
         timestamps = pos[1]
         return chans, timestamps, detected_timestamps
 
@@ -337,57 +366,55 @@ def quiet_sun_selfcal(msname, logger, selfcaldir, refant="1", solint="60s"):
     try:
         result = flag_non_disk(msname)
         if result != 0:
-            logger.info("Could not flag non-disk time properly.")
-            msg = 1
-        else:
-            ###################################
-            # Import simulated QS model
-            ###################################
-            qs_model = make_qs_model(
-                msname, clname=f"{os.path.basename(msname).split('.ms')[0]}_qs.cl"
-            )
-            delmod(vis=msname, otf=True, scr=True)
-            ft(vis=msname, complist=qs_model, usescratch=True)
-            os.system(f"rm -rf {qs_model}")
+            logger.warning("Could not flag non-disk time properly.")
+        ###################################
+        # Import simulated QS model
+        ###################################
+        qs_model = make_qs_model(
+            msname, clname=f"{os.path.basename(msname).split('.ms')[0]}_qs.cl"
+        )
+        delmod(vis=msname, otf=True, scr=True)
+        ft(vis=msname, complist=qs_model, usescratch=True)
+        os.system(f"rm -rf {qs_model}")
 
-            #####################
-            # Perform calibration
-            #####################
+        #####################
+        # Perform calibration
+        #####################
+        logger.info(
+            f"gaincal(vis='{msname}',caltable='{bpass_caltable}',uvrange='<100lambda',refant='{refant}',solint='{solint}',minsnr=3,calmode='p')\n"
+        )
+        with suppress_output():
+            gaincal(
+                vis=msname,
+                caltable=bpass_caltable,
+                uvrange="<100lambda",
+                refant=refant,
+                minsnr=3,
+                solint=f"{solint}",
+                solnorm=True,
+                calmode="p",
+            )
+        if not os.path.exists(bpass_caltable):
+            logger.info("No gain solutions are found.\n")
+            msg = 1
+            bpass_caltable = ""
+        else:
+            ########################
+            # Applying solutions
+            ########################
+
             logger.info(
-                f"gaincal(vis='{msname}',caltable='{bpass_caltable}',uvrange='<100lambda',refant='{refant}',solint='{solint}',minsnr=1,calmode='p')\n"
+                f"applycal(vis={msname},gaintable=[{bpass_caltable}],interp=['linear'],applymode='calonly',calwt=[False])\n"
             )
             with suppress_output():
-                gaincal(
+                applycal(
                     vis=msname,
-                    caltable=bpass_caltable,
-                    uvrange="<100lambda",
-                    refant=refant,
-                    minsnr=1,
-                    solint=f"{solint}",
-                    solnorm=True,
-                    calmode="p",
+                    gaintable=[bpass_caltable],
+                    interp=["linear"],
+                    applymode="calonly",
+                    calwt=[False],
                 )
-            if not os.path.exists(bpass_caltable):
-                logger.info("No gain solutions are found.\n")
-                msg = 2
-                bpass_caltable = ""
-            else:
-                ########################
-                # Applying solutions
-                ########################
-
-                logger.info(
-                    f"applycal(vis={msname},gaintable=[{bpass_caltable}],interp=['linear'],applymode='calonly',calwt=[False])\n"
-                )
-                with suppress_output():
-                    applycal(
-                        vis=msname,
-                        gaintable=[bpass_caltable],
-                        interp=["linear"],
-                        applymode="calonly",
-                        calwt=[False],
-                    )
-                msg = 0
+            msg = 0
     except Exception:
         logger.exception(traceback.print_exc())
         msg = 2

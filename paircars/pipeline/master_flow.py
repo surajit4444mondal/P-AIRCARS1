@@ -215,7 +215,7 @@ def master_control(
 
     do_sidereal_cor : bool, optional
         Perform solar sidereal motion correction or not
-    do_move_solarcenter: boo, optional
+    do_move_solarcenter: bool, optional
         Move phasecenter to solar center
     make_ds : bool, optional
         Make dynamic spectra
@@ -592,6 +592,8 @@ def master_control(
             has_cal = False
         basic_caldir = f"{cal_outdir}/caltables"
         os.makedirs(basic_caldir, exist_ok=True)
+    else:
+        basic_caldir=""
 
     #######################################
     # Preparing target working directories
@@ -896,23 +898,24 @@ def master_control(
         #################################################
         # Determining maximum allowed frequency averaging
         #################################################
-        masterlogger.info("Estimating optimal frequency averaging.")
-        max_freqres_list = []
-        freqres_list = []
-        msmd = msmetadata()
+        # TODO: optimize using highest freq ms only
+        highest_freq_ms = target_mslist[0]
+        init_coarse_chan = max(get_MWA_coarse_chan(highest_freq_ms))
         for msname in target_mslist:
-            max_freqres = calc_bw_smearing_freqwidth(msname, full_FoV=full_FoV)
-            max_freqres_list.append(max_freqres)
-            msmd.open(msname)
-            freqres = msmd.chanres(0, unit="MHz")[0]
-            msmd.close()
-            freqres_list.append(freqres)
-        freqres = min(freqres_list)
+            coarse_chan = max(get_MWA_coarse_chan(msname))
+            if coarse_chan > init_coarse_chan:
+                init_coarse_chan = coarse_chan
+                highest_freq_ms = msname
+        
+        masterlogger.info(f"Estimating optimal frequency averaging using highest frequency measurement set: {highest_freq_ms}.")
+        max_freqres = calc_bw_smearing_freqwidth(highest_freq_ms, full_FoV=full_FoV)
+        msmd.open(msname)
+        freqres = msmd.chanres(0, unit="MHz")[0]
+        msmd.close()
         if freqres > 0.16:
             masterlogger.info(
                 f"Frequency resolution: {round(freqres*1000,1)}kHz is more than 160kHz. Assuming channel flagging is already done before averaing."
             )
-        max_freqres = min(max_freqres_list)
         if image_freqres > 0:
             image_freqres = max(image_freqres, freqres)
             freqavg = round(min(image_freqres, max_freqres), 2)
@@ -931,26 +934,19 @@ def master_control(
         ################################################
         # Determining maximum allowed temporal averaging
         ################################################
-        masterlogger.debug("Estimating optimal temporal averaging.")
-        max_timeres_list = []
-        timeres_list = []
-        for msname in target_mslist:
-            if solar_data:  # For solar data, it is assumed Sun is tracked.
-                max_timeres = calc_time_smearing_timewidth(msname)
-            else:
-                max_timeres = min(
-                    calc_time_smearing_timewidth(msname),
-                    max_time_solar_smearing(msname),
-                )
-            max_timeres_list.append(max_timeres)
-            msmd.open(msname)
-            times = msmd.timesforspws(0)
-            timeres = np.nanmean(np.diff(times))
-            msmd.close()
-            timeres_list.append(timeres)
-        timeres = min(timeres_list)
+        masterlogger.debug(f"Estimating optimal temporal averaging using highest frequency measurement set: {highest_freq_ms}.")
+        if solar_data:  # For solar data, it is assumed Sun is tracked.
+            max_timeres = calc_time_smearing_timewidth(highest_freq_ms)
+        else:
+            max_timeres = min(
+                calc_time_smearing_timewidth(highest_freq_ms),
+                max_time_solar_smearing(highest_freq_ms),
+            )
+        msmd.open(highest_freq_ms)
+        times = msmd.timesforspws(0)
+        timeres = np.nanmean(np.diff(times))
+        msmd.close() 
         quack_timestamps = int(4.0 / timeres)
-        max_timeres = min(max_timeres_list)
         if image_timeres > (2 * 3660):  # If more than 2 hours
             masterlogger.info(
                 "Image time integration is more than 2 hours, which may cause smearing due to solar differential rotation."
@@ -1826,7 +1822,7 @@ def cli():
         "--no_solarcenter_move",
         action="store_false",
         dest="do_move_solarcenter",
-        help="Disable moving phaseceneter to solar center",
+        help="Disable moving phasecenter to solar center",
     )
     advanced.add_argument(
         "--no_selfcal",

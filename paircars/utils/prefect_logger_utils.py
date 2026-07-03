@@ -45,7 +45,6 @@ async def save_logs_by_task_id(
                     log_filter=log_filter,
                     sort=LogSort.TIMESTAMP_ASC,
                 )
-                print(f"[LOG STREAM] fetched {len(logs)} logs")
                 with open(logfile, "a") as f:
                     for log in logs:
                         if log.id in seen_ids:
@@ -66,7 +65,6 @@ async def save_logs_by_task_id(
                         if log.timestamp > last_timestamp:
                             last_timestamp = log.timestamp
             except Exception as e:
-                print("LOG ERROR:", e)
                 with open(logfile, "a") as f:
                     f.write(f"Error fetching task logs: {e}\n")
             if should_stop:
@@ -90,7 +88,6 @@ async def save_logs_by_task_id(
 
                 if not logs:
                     break
-                print(f"[FINAL DRAIN] fetched {len(logs)} logs")
                 with open(logfile, "a") as f:
                     for log in logs:
                         if log.id in seen_ids:
@@ -152,7 +149,6 @@ async def save_logs_by_flow_id(
                     log_filter=log_filter,
                     sort=LogSort.TIMESTAMP_ASC,
                 )
-                print(f"[LOG STREAM] fetched {len(logs)} logs")
                 with open(logfile, "a") as f:
                     for log in logs:
                         # avoid duplicates
@@ -201,7 +197,6 @@ async def save_logs_by_flow_id(
 
                 if not logs:
                     break
-                print(f"[FINAL DRAIN] fetched {len(logs)} logs")
                 with open(logfile, "a") as f:
                     for log in logs:
                         if log.id in seen_ids:

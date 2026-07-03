@@ -255,7 +255,7 @@ def cli():
         "--no_solarcenter_move",
         action="store_false",
         dest="do_move_solarcenter",
-        help="Disable moving phaseceneter to solar center",
+        help="Disable moving phasecenter to solar center",
     )
     advanced.add_argument(
         "--no_selfcal",

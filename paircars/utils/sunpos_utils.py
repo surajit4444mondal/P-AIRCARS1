@@ -1,5 +1,6 @@
 import astropy.units as u
 import os
+import copy
 import traceback
 import numpy as np
 from astropy.time import Time
@@ -197,7 +198,7 @@ def move_to_sun(msname, ncpu=1, only_uvw=False):
     return msg
 
 
-def cal_solar_phaseshift(imagename, sigma=10):
+def cal_solar_phaseshift(imagename, sigma=10, use_gaussian=False):
     """
     Calculate the difference between solar center and phase center of the image
 
@@ -207,6 +208,8 @@ def cal_solar_phaseshift(imagename, sigma=10):
         Name of the image
     sigma : float
         If Gaussian fitting is not used, threshold for estimating center of mass as solar center (default =10)
+    use_gaussian : bool, optional
+        Use gaussian fitting or not
 
     Returns
     -------
@@ -263,10 +266,9 @@ def cal_solar_phaseshift(imagename, sigma=10):
     else:
         data2d = data
     circular_mask = create_circular_mask_array(data2d, pix_radius)
-    try:
+    if use_gaussian:
         from scipy.optimize import curve_fit
         from scipy.ndimage import gaussian_filter
-
         data2d = gaussian_filter(data2d, sigma=3)
         max_pos = np.where(data2d == np.nanmax(data2d))
         y0, x0 = max_pos[0][0], max_pos[1][0]
@@ -277,43 +279,26 @@ def cal_solar_phaseshift(imagename, sigma=10):
         y_grid, x_grid = np.mgrid[y_min:y_max, x_min:x_max]
         subdata = data2d[y_min:y_max, x_min:x_max]
         base_mean = np.nanmean(data2d[~circular_mask])
-        sigma = int((sun_dia / 2) * 60.0 / cellsize)
-        p0 = [np.nanmax(subdata), x0, y0, sigma, sigma, base_mean]
+        gauss_sigma = int((sun_dia / 2) * 60.0 / cellsize)
+        p0 = [np.nanmax(subdata), x0, y0, gauss_sigma, gauss_sigma, base_mean]
         popt, pcov = curve_fit(
             gaussian_2d, (x_grid, y_grid), subdata.ravel(), p0=p0, maxfev=5000
         )
         apparent_pix_ra = int(popt[1])
         apparent_pix_dec = int(popt[2])
-    except Exception:
-        from casatasks import imsmooth, exportfits
-
-        imsmooth(
-            imagename=imagename,
-            outfile=f"{imagename}.smoothed",
-            targetres=True,
-            beam={
-                "major": f"{sun_dia}arcmin",
-                "minor": f"{sun_dia}arcmin",
-                "pa": "0deg",
-            },
-            overwrite=True,
-        )
-        exportfits(
-            imagename=f"{imagename}.smoothed",
-            fitsimage=f"{imagename}.smoothed.fits",
-            overwrite=True,
-        )
-        os.system(f"rm -rf {imagename}.smoothed")
-        data_smoothed = fits.getdata(f"{imagename}.smoothed.fits")
-        os.system(f"rm -rf {imagename}.smoothed.fits")
-        if data_smoothed.ndim == 4:
-            data2d_smoothed = data_smoothed[0, 0, ...]
-        elif data.ndim == 3:
-            data2d_smoothed = data_smoothed[0, ...]
-        else:
-            data2d_smoothed = data_smoothed
-        max_pos = np.where(data2d_smoothed == np.nanmax(data2d_smoothed))
-        apparent_pix_dec, apparent_pix_ra = max_pos[0][0], max_pos[1][0]
+    else:
+        from scipy.ndimage import center_of_mass
+        max_pos = np.where(data2d == np.nanmax(data2d))
+        center_x, center_y = max_pos[1][0], max_pos[0][0]
+        sun_rad_pix = 2*sun_dia*60/cellsize # 2 solar radii
+        masked_array=create_circular_mask_array(data2d,sun_rad_pix,center_x=center_x,center_y=center_y)
+        masked_data2d = copy.deepcopy(data2d)
+        masked_data2d[masked_array]=np.nan
+        rms = np.nanstd(masked_data2d)
+        mask = data2d<sigma*rms
+        data2d[mask]=False
+        data2d[~mask]=True
+        apparent_pix_dec, apparent_pix_ra = center_of_mass(data2d)
     try:
         w = WCS(imagename).celestial
         result = w.array_index_to_world(apparent_pix_dec, apparent_pix_ra)
@@ -345,6 +330,7 @@ def shift_solarcenter(
     sun_decdeg=None,
     apparent_pix_ra=None,
     apparent_pix_dec=None,
+    use_gaussian=False,
     overwrite=True,
 ):
     """
@@ -364,6 +350,8 @@ def shift_solarcenter(
         Apparent solar center pixel in RA
     apparent_pix_dec : int, optional
         Apparent solar center pixel in DEC
+    use_gaussian : bool, optional
+        Use gaussian fitting or not
     overwrite : bool, optional
         Overwrite existing image or not
 
@@ -393,7 +381,7 @@ def shift_solarcenter(
             apparent_pix_ra,
             apparent_pix_dec,
             seperation_arcsec,
-        ) = cal_solar_phaseshift(imagename, sigma=sigma)
+        ) = cal_solar_phaseshift(imagename, sigma=sigma, use_gaussian=use_gaussian)
     shifted = False
     r_offset = 0
     try:
@@ -407,8 +395,8 @@ def shift_solarcenter(
             ny, nx = data.shape
         center_ra = nx // 2
         center_dec = ny // 2
-        offset_ra = center_ra - apparent_pix_ra
-        offset_dec = center_dec - apparent_pix_dec
+        offset_ra = int(center_ra - apparent_pix_ra)
+        offset_dec = int(center_dec - apparent_pix_dec)
         r_offset = max(offset_ra, offset_dec)
         if abs(offset_ra) > 0 or abs(offset_dec) > 0:
             header["CRVAL1"] = float(sun_radeg)
