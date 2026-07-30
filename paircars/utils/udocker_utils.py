@@ -481,80 +481,80 @@ def run_solar_sidereal_cor(
     int
         Success message
     """
-    limit_threads(n_threads=ncpu)
-    env = os.environ.copy()
-    env_vars = [
-        "OMP_NUM_THREADS",
-        "OPENBLAS_NUM_THREADS",
-        "MKL_NUM_THREADS",
-        "NUMEXPR_NUM_THREADS",
-        "VECLIB_MAXIMUM_THREADS",
-        "RAYON_NUM_THREADS",
-    ]
-    init_udocker()
-    if check_container:
-        container_present = check_udocker_container(container_name)
-        if not container_present:
-            print(f"Initializing {container_name}...")
-            container_name = initialize_wsclean_container(
-                name=container_name, verbose=True
-            )
-            if container_name is None:
-                print(
-                    f"Container {container_name} is not initiated. First initiate container and then run."
+    with limit_threads(n_threads=ncpu):
+        env = os.environ.copy()
+        env_vars = [
+            "OMP_NUM_THREADS",
+            "OPENBLAS_NUM_THREADS",
+            "MKL_NUM_THREADS",
+            "NUMEXPR_NUM_THREADS",
+            "VECLIB_MAXIMUM_THREADS",
+            "RAYON_NUM_THREADS",
+        ]
+        init_udocker()
+        if check_container:
+            container_present = check_udocker_container(container_name)
+            if not container_present:
+                print(f"Initializing {container_name}...")
+                container_name = initialize_wsclean_container(
+                    name=container_name, verbose=True
                 )
-                return 1
-    msname = os.path.abspath(msname)
-    mspath = os.path.dirname(msname)
-    temp_name = "chgcenter_udocker_" + next(tempfile._get_candidate_names())
-    temp_docker_path = os.path.join(mspath, temp_name)
-    if only_uvw:
-        cmd = (
-            "chgcentre -only-uvw -solarcenter "
-            + temp_docker_path
-            + "/"
-            + os.path.basename(msname)
-        )
-    else:
-        cmd = (
-            "chgcentre -solarcenter "
-            + temp_docker_path
-            + "/"
-            + os.path.basename(msname)
-        )
-    cmd_args = cmd.split(" ")
-    try:
-        full_command = ["udocker", "--quiet", "run", "--nobanner"]
-        env_keys = list(env.keys())
-        for var in env_vars:
-            if var in env_keys:
-                full_command.append(f"--env={var}={env[var]}")
-        full_command = (
-            full_command
-            + [
-                f"--volume={mspath}:{temp_docker_path}",
-                "--workdir",
-                f"{temp_docker_path}",
-                "paircarswsclean",
-            ]
-            + cmd_args
-        )
-        if verbose:
-            print(f"{cmd}\n")
-            result = subprocess.run(
-                full_command,
+                if container_name is None:
+                    print(
+                        f"Container {container_name} is not initiated. First initiate container and then run."
+                    )
+                    return 1
+        msname = os.path.abspath(msname)
+        mspath = os.path.dirname(msname)
+        temp_name = "chgcenter_udocker_" + next(tempfile._get_candidate_names())
+        temp_docker_path = os.path.join(mspath, temp_name)
+        if only_uvw:
+            cmd = (
+                "chgcentre -only-uvw -solarcenter "
+                + temp_docker_path
+                + "/"
+                + os.path.basename(msname)
             )
         else:
-            result = subprocess.run(
-                full_command,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+            cmd = (
+                "chgcentre -solarcenter "
+                + temp_docker_path
+                + "/"
+                + os.path.basename(msname)
             )
-        exit_code = result.returncode
-        return 0 if exit_code == 0 else 1
-    except Exception:
-        traceback.print_exc()
-        return 1
+        cmd_args = cmd.split(" ")
+        try:
+            full_command = ["udocker", "--quiet", "run", "--nobanner"]
+            env_keys = list(env.keys())
+            for var in env_vars:
+                if var in env_keys:
+                    full_command.append(f"--env={var}={env[var]}")
+            full_command = (
+                full_command
+                + [
+                    f"--volume={mspath}:{temp_docker_path}",
+                    "--workdir",
+                    f"{temp_docker_path}",
+                    "paircarswsclean",
+                ]
+                + cmd_args
+            )
+            if verbose:
+                print(f"{cmd}\n")
+                result = subprocess.run(
+                    full_command,
+                )
+            else:
+                result = subprocess.run(
+                    full_command,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            exit_code = result.returncode
+            return 0 if exit_code == 0 else 1
+        except Exception:
+            traceback.print_exc()
+            return 1
 
 
 def run_chgcenter(
@@ -596,88 +596,88 @@ def run_chgcenter(
     int
         Success message
     """
-    limit_threads(n_threads=ncpu)
-    env = os.environ.copy()
-    env_vars = [
-        "OMP_NUM_THREADS",
-        "OPENBLAS_NUM_THREADS",
-        "MKL_NUM_THREADS",
-        "NUMEXPR_NUM_THREADS",
-        "VECLIB_MAXIMUM_THREADS",
-        "RAYON_NUM_THREADS",
-    ]
-    init_udocker()
-    if check_container:
-        container_present = check_udocker_container(container_name)
-        if not container_present:
-            print(f"Initializing {container_name}...")
-            container_name = initialize_wsclean_container(
-                name=container_name, verbose=True
-            )
-            if container_name is None:
-                print(
-                    f"Container {container_name} is not initiated. First initiate container and then run."
+    with limit_threads(n_threads=ncpu):
+        env = os.environ.copy()
+        env_vars = [
+            "OMP_NUM_THREADS",
+            "OPENBLAS_NUM_THREADS",
+            "MKL_NUM_THREADS",
+            "NUMEXPR_NUM_THREADS",
+            "VECLIB_MAXIMUM_THREADS",
+            "RAYON_NUM_THREADS",
+        ]
+        init_udocker()
+        if check_container:
+            container_present = check_udocker_container(container_name)
+            if not container_present:
+                print(f"Initializing {container_name}...")
+                container_name = initialize_wsclean_container(
+                    name=container_name, verbose=True
                 )
-                return 1
-    msname = os.path.abspath(msname)
-    mspath = os.path.dirname(msname)
-    temp_name = "chgcenter_udocker_" + next(tempfile._get_candidate_names())
-    temp_docker_path = os.path.join(mspath, temp_name)
-    if only_uvw:
-        cmd = (
-            "chgcentre -only-uvw "
-            + temp_docker_path
-            + "/"
-            + os.path.basename(msname)
-            + " "
-            + ra
-            + " "
-            + dec
-        )
-    else:
-        cmd = (
-            "chgcentre "
-            + temp_docker_path
-            + "/"
-            + os.path.basename(msname)
-            + " "
-            + ra
-            + " "
-            + dec
-        )
-    cmd_args = cmd.split(" ")
-    try:
-        full_command = ["udocker", "--quiet", "run", "--nobanner"]
-        env_keys = list(env.keys())
-        for var in env_vars:
-            if var in env_keys:
-                full_command.append(f"--env={var}={env[var]}")
-        full_command = (
-            full_command
-            + [
-                f"--volume={mspath}:{temp_docker_path}",
-                "--workdir",
-                f"{temp_docker_path}",
-                f"{container_name}",
-            ]
-            + cmd_args
-        )
-        if verbose:
-            print(f"{cmd}\n")
-            result = subprocess.run(
-                full_command,
+                if container_name is None:
+                    print(
+                        f"Container {container_name} is not initiated. First initiate container and then run."
+                    )
+                    return 1
+        msname = os.path.abspath(msname)
+        mspath = os.path.dirname(msname)
+        temp_name = "chgcenter_udocker_" + next(tempfile._get_candidate_names())
+        temp_docker_path = os.path.join(mspath, temp_name)
+        if only_uvw:
+            cmd = (
+                "chgcentre -only-uvw "
+                + temp_docker_path
+                + "/"
+                + os.path.basename(msname)
+                + " "
+                + ra
+                + " "
+                + dec
             )
         else:
-            result = subprocess.run(
-                full_command,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+            cmd = (
+                "chgcentre "
+                + temp_docker_path
+                + "/"
+                + os.path.basename(msname)
+                + " "
+                + ra
+                + " "
+                + dec
             )
-        exit_code = result.returncode
-        return 0 if exit_code == 0 else 1
-    except Exception:
-        traceback.print_exc()
-        return 1
+        cmd_args = cmd.split(" ")
+        try:
+            full_command = ["udocker", "--quiet", "run", "--nobanner"]
+            env_keys = list(env.keys())
+            for var in env_vars:
+                if var in env_keys:
+                    full_command.append(f"--env={var}={env[var]}")
+            full_command = (
+                full_command
+                + [
+                    f"--volume={mspath}:{temp_docker_path}",
+                    "--workdir",
+                    f"{temp_docker_path}",
+                    f"{container_name}",
+                ]
+                + cmd_args
+            )
+            if verbose:
+                print(f"{cmd}\n")
+                result = subprocess.run(
+                    full_command,
+                )
+            else:
+                result = subprocess.run(
+                    full_command,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            exit_code = result.returncode
+            return 0 if exit_code == 0 else 1
+        except Exception:
+            traceback.print_exc()
+            return 1
 
 
 def run_shadems(
@@ -906,97 +906,97 @@ def run_hyperdrive(
     int
         Success message
     """
-    limit_threads(n_threads=ncpu)
-    env = os.environ.copy()
-    env_vars = [
-        "OMP_NUM_THREADS",
-        "OPENBLAS_NUM_THREADS",
-        "MKL_NUM_THREADS",
-        "NUMEXPR_NUM_THREADS",
-        "VECLIB_MAXIMUM_THREADS",
-        "RAYON_NUM_THREADS",
-    ]
-    init_udocker()
-    if check_container:
-        container_present = check_udocker_container(container_name)
-        if not container_present:
-            print(f"Initializing {container_name}...")
-            container_name = initialize_hyperdrive_container(
-                name=container_name, verbose=True
-            )
-            if container_name is None:
-                print(
-                    f"Container {container_name} is not initiated. First initiate container and then run."
+    with limit_threads(n_threads=ncpu):
+        env = os.environ.copy()
+        env_vars = [
+            "OMP_NUM_THREADS",
+            "OPENBLAS_NUM_THREADS",
+            "MKL_NUM_THREADS",
+            "NUMEXPR_NUM_THREADS",
+            "VECLIB_MAXIMUM_THREADS",
+            "RAYON_NUM_THREADS",
+        ]
+        init_udocker()
+        if check_container:
+            container_present = check_udocker_container(container_name)
+            if not container_present:
+                print(f"Initializing {container_name}...")
+                container_name = initialize_hyperdrive_container(
+                    name=container_name, verbose=True
                 )
-                return 1
-    cmd_args = hyperdrive_cmd.split(" ")
-    outpath = None
-    beampath = None
-    sourcepath = None
-    metapath = None
-    for i in range(len(cmd_args)):
-        cmd = cmd_args[i]
-        if cmd == "-m":
-            metafits_name = cmd_args[i + 1]
-            metapath = os.path.dirname(os.path.abspath(metafits_name))
-            temp_name = "hyperdrive_udocker_" + next(tempfile._get_candidate_names())
-            temp_docker_metapath = os.path.join(metapath, temp_name)
-            cmd_args[i + 1] = (
-                f"{temp_docker_metapath}/{os.path.basename(metafits_name)}"
-            )
-        if cmd == "--output-model-files":
-            outfile_name = cmd_args[i + 1]
-            outpath = os.path.dirname(os.path.abspath(outfile_name))
-            temp_name = "hyperdrive_udocker_" + next(tempfile._get_candidate_names())
-            temp_docker_outpath = os.path.join(outpath, temp_name)
-            cmd_args[i + 1] = f"{temp_docker_outpath}/{os.path.basename(outfile_name)}"
-        if cmd == "--beam-file":
-            beamfile = cmd_args[i + 1]
-            beampath = os.path.dirname(os.path.abspath(beamfile))
-            temp_name = "hyperdrive_udocker_" + next(tempfile._get_candidate_names())
-            temp_docker_beampath = os.path.join(beampath, temp_name)
-            cmd_args[i + 1] = f"{temp_docker_beampath}/{os.path.basename(beamfile)}"
-        if cmd == "-s":
-            sourcefile = cmd_args[i + 1]
-            sourcepath = os.path.dirname(os.path.abspath(sourcefile))
-            temp_name = "hyperdrive_udocker_" + next(tempfile._get_candidate_names())
-            temp_docker_sourcepath = os.path.join(sourcepath, temp_name)
-            cmd_args[i + 1] = f"{temp_docker_sourcepath}/{os.path.basename(sourcefile)}"
-    try:
-        full_command = ["udocker", "--quiet", "run", "--nobanner"]
-        env_keys = list(env.keys())
-        for var in env_vars:
-            if var in env_keys:
-                full_command.append(f"--env={var}={env[var]}")
-        if outpath is not None:
-            full_command.append(f"--volume={outpath}:{temp_docker_outpath}")
-        if beampath is not None:
-            full_command.append(f"--volume={beampath}:{temp_docker_beampath}")
-        if sourcepath is not None:
-            full_command.append(f"--volume={sourcepath}:{temp_docker_sourcepath}")
-        if metapath is not None:
-            full_command.append(f"--volume={metapath}:{temp_docker_metapath}")
-        full_command += [
-            f"{container_name}",
-        ] + cmd_args
-        if verbose:
-            print(f"{hyperdrive_cmd}\n")
-            result = subprocess.run(
-                full_command,
-                env=env,
-            )
-        else:
-            result = subprocess.run(
-                full_command,
-                env=env,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        exit_code = result.returncode
-        return 0 if exit_code == 0 else 1
-    except Exception:
-        traceback.print_exc()
-        return 1
+                if container_name is None:
+                    print(
+                        f"Container {container_name} is not initiated. First initiate container and then run."
+                    )
+                    return 1
+        cmd_args = hyperdrive_cmd.split(" ")
+        outpath = None
+        beampath = None
+        sourcepath = None
+        metapath = None
+        for i in range(len(cmd_args)):
+            cmd = cmd_args[i]
+            if cmd == "-m":
+                metafits_name = cmd_args[i + 1]
+                metapath = os.path.dirname(os.path.abspath(metafits_name))
+                temp_name = "hyperdrive_udocker_" + next(tempfile._get_candidate_names())
+                temp_docker_metapath = os.path.join(metapath, temp_name)
+                cmd_args[i + 1] = (
+                    f"{temp_docker_metapath}/{os.path.basename(metafits_name)}"
+                )
+            if cmd == "--output-model-files":
+                outfile_name = cmd_args[i + 1]
+                outpath = os.path.dirname(os.path.abspath(outfile_name))
+                temp_name = "hyperdrive_udocker_" + next(tempfile._get_candidate_names())
+                temp_docker_outpath = os.path.join(outpath, temp_name)
+                cmd_args[i + 1] = f"{temp_docker_outpath}/{os.path.basename(outfile_name)}"
+            if cmd == "--beam-file":
+                beamfile = cmd_args[i + 1]
+                beampath = os.path.dirname(os.path.abspath(beamfile))
+                temp_name = "hyperdrive_udocker_" + next(tempfile._get_candidate_names())
+                temp_docker_beampath = os.path.join(beampath, temp_name)
+                cmd_args[i + 1] = f"{temp_docker_beampath}/{os.path.basename(beamfile)}"
+            if cmd == "-s":
+                sourcefile = cmd_args[i + 1]
+                sourcepath = os.path.dirname(os.path.abspath(sourcefile))
+                temp_name = "hyperdrive_udocker_" + next(tempfile._get_candidate_names())
+                temp_docker_sourcepath = os.path.join(sourcepath, temp_name)
+                cmd_args[i + 1] = f"{temp_docker_sourcepath}/{os.path.basename(sourcefile)}"
+        try:
+            full_command = ["udocker", "--quiet", "run", "--nobanner"]
+            env_keys = list(env.keys())
+            for var in env_vars:
+                if var in env_keys:
+                    full_command.append(f"--env={var}={env[var]}")
+            if outpath is not None:
+                full_command.append(f"--volume={outpath}:{temp_docker_outpath}")
+            if beampath is not None:
+                full_command.append(f"--volume={beampath}:{temp_docker_beampath}")
+            if sourcepath is not None:
+                full_command.append(f"--volume={sourcepath}:{temp_docker_sourcepath}")
+            if metapath is not None:
+                full_command.append(f"--volume={metapath}:{temp_docker_metapath}")
+            full_command += [
+                f"{container_name}",
+            ] + cmd_args
+            if verbose:
+                print(f"{hyperdrive_cmd}\n")
+                result = subprocess.run(
+                    full_command,
+                    env=env,
+                )
+            else:
+                result = subprocess.run(
+                    full_command,
+                    env=env,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            exit_code = result.returncode
+            return 0 if exit_code == 0 else 1
+        except Exception:
+            traceback.print_exc()
+            return 1
 
 
 def run_postgres(

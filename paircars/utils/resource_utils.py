@@ -160,19 +160,38 @@ def tmp_with_cache_rel(required_gb, workdir, prefix="solar_", verbose=False):
                 drop_cache(tempdir)
 
 
+@contextmanager
 def limit_threads(n_threads=-1):
     """
-    Limit number of threads usuage
+    Temporarily limit the number of threads used by numerical libraries.
 
     Parameters
     ----------
     n_threads : int, optional
-        Number of threads
+        Number of threads. If <= 0, no changes are made.
     """
-    if n_threads > 0:
-        os.environ["OMP_NUM_THREADS"] = str(n_threads)
-        os.environ["OPENBLAS_NUM_THREADS"] = str(n_threads)
-        os.environ["MKL_NUM_THREADS"] = str(n_threads)
-        os.environ["VECLIB_MAXIMUM_THREADS"] = str(n_threads)
-        os.environ["NUMEXPR_NUM_THREADS"] = str(n_threads)
-        os.environ["RAYON_NUM_THREADS"] = str(n_threads)
+    env_vars = [
+        "OMP_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "VECLIB_MAXIMUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+        "RAYON_NUM_THREADS",
+    ]
+    if n_threads <= 0:
+        yield
+        return
+    # Save current values (None if not set)
+    old_env = {var: os.environ.get(var) for var in env_vars}
+    try:
+        value = str(n_threads)
+        for var in env_vars:
+            os.environ[var] = value
+        yield
+    finally:
+        # Restore previous environment
+        for var, old_value in old_env.items():
+            if old_value is None:
+                os.environ.pop(var, None)
+            else:
+                os.environ[var] = old_value

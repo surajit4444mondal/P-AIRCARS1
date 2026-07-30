@@ -13,8 +13,9 @@ from paircars.utils.basic_utils import (
     capture_all_output,
 )
 from paircars.utils.flagging import (
-    flagsummary, 
+    flagsummary,
     flag_badchan,
+    flag_badants,
     do_flag_backup,
 )
 from paircars.utils.logger_utils import (
@@ -47,15 +48,17 @@ def single_ms_flag(
     badspw="",
     bad_ants_str="",
     datacolumn="data",
-    use_tfcrop=True,
+    use_tfcrop=False,
     use_rflag=False,
     flagdimension="freqtime",
-    flag_autocorr=True,
-    flag_quack=True,
+    flag_autocorr=False,
+    flag_quack=False,
     run_solarflagger=False,
     normalize=False,
     threshold=5.0,
     force_flag=False,
+    restore_flag=True,
+    flag_backup=True,
     n_threads=1,
     mem_limit=1,
 ):
@@ -90,6 +93,10 @@ def single_ms_flag(
         Flagging threshold
     force_flag : bool, optional
         Force flag
+    restore_flag : bool, optional
+        Restore previous flags
+    flag_backup : bool, optional
+        Flag backup
     n_threads : int, optional
         Number of OpenMP threads
     mem_limit : float, optional
@@ -103,8 +110,8 @@ def single_ms_flag(
     n_threads = max(1, n_threads)
     mem_limit = abs(mem_limit)
 
-    limit_threads(n_threads=n_threads)
-    from casatasks import flagdata
+    with limit_threads(n_threads=n_threads):
+        from casatasks import flagdata
 
     msname = msname.rstrip("/")
     if os.path.exists(f"{msname}/.flag_succeed") and not force_flag:
@@ -113,15 +120,22 @@ def single_ms_flag(
     os.system(f"rm -rf {msname}/.flag_*")
     print(f"Flagging ms: {msname}")
     try:
+        if restore_flag:
+            print(f"Restoring all previous flags for ms: {msname}")
+            with suppress_output():
+                flagdata(vis=msname, mode="unflag", spw="0", flagbackup=False)
+        if flag_backup:
+            print(f"Taking flag backup for ms: {msname}") 
+            do_flag_backup(msname, flagtype="flagdata")
         ##############################
         # Flagging bad channels
         ##############################
         if badspw != "":
             try:
-                flag_cmd = f"flag_badchan(\'{msname}\',\'{badspw}\')"
+                flag_cmd = f"flag_badchan('{msname}','{badspw}')"
                 print(flag_cmd)
                 with suppress_output():
-                    flag_badchan(msname,badspw)
+                    flag_badchan(msname, badspw)
             except Exception:
                 traceback.print_exc()
                 pass
@@ -131,22 +145,10 @@ def single_ms_flag(
         ##############################
         if bad_ants_str != "":
             try:
-                flag_cmd = (
-                    f"flagdata("
-                    f"vis='{msname}',"
-                    f"mode='manual',"
-                    f"antenna='{bad_ants_str}',"
-                    f"cmdreason='badant',"
-                    f"flagbackup=False)"
-                )
+                flag_cmd = f"flag_badants('{msname}',antlist={bad_ants_str.split(',')})"
+                print(flag_cmd)
                 with suppress_output():
-                    flagdata(
-                        vis=msname,
-                        mode="manual",
-                        antenna=bad_ants_str,
-                        cmdreason="badant",
-                        flagbackup=False,
-                    )
+                    flag_badants(msname, antlist=bad_ants_str.split(","))
             except Exception:
                 traceback.print_exc()
                 pass
@@ -442,20 +444,14 @@ def single_ms_flag(
             print(f"Using solar flagger. Normalization used: {normalize}")
             do_flag_backup(msname, flagtype="solarflag")
             for th in range(10, int(threshold), 2):
-                count = 0
-                while count < 10:
-                    result, n_final_flagged, n_additional_flagged = flagger(
-                        msname,
-                        datacolumn,
-                        threshold=max(5.0, th),
-                        normalize=normalize,
-                        num_processes=n_threads,
-                        flagbackup=False,
-                    )
-                    if n_additional_flagged == 0:
-                        break
-                    else:
-                        count += 1
+                result, n_final_flagged, n_additional_flagged = flagger(
+                    msname,
+                    datacolumn,
+                    threshold=max(5.0, th),
+                    normalize=normalize,
+                    num_processes=n_threads,
+                    flagbackup=False,
+                )
         os.system(f"touch {msname}/.flag_succeed")
         return 0
     except Exception:
@@ -473,10 +469,10 @@ def do_flagging(
     datacolumn="data",
     flag_bad_ants=True,
     flag_bad_spw=True,
-    use_tfcrop=True,
+    use_tfcrop=False,
     use_rflag=False,
     flagdimension="freqtime",
-    flag_autocorr=True,
+    flag_autocorr=False,
     flag_quack=True,
     flag_backup=True,
     run_solarflagger=False,
@@ -556,20 +552,29 @@ def do_flagging(
         failed = len(mslist)
 
     try:
-        limit_threads(n_threads=n_threads)
-        from casatasks import flagdata
+        with limit_threads(n_threads=n_threads):
+            from casatools import msmetadata
+            from casatasks import flagdata
 
         header = fits.getheader(metafits)
         mode = header["MODE"]
-        if "MWAX" in mode:
-            flag_central_chan = False
-        else:
-            flag_central_chan = True
-        logger.debug(f"Flag central channel: {flag_central_chan} for {mode}")
+        meta_chanres = header["FINECHAN"]
 
         tasks = []
         test_msname = os.path.abspath(mslist[0].rstrip("/"))
         if flag_bad_spw:
+            if "MWAX" in mode:
+                flag_central_chan = False
+            else:
+                msmd = msmetadata()
+                msmd.open(mslist[0])
+                chanres = msmd.chanres(0, unit="kHz")[0]
+                msmd.close()
+                if chanres > meta_chanres:
+                    flag_central_chan = False
+                else:
+                    flag_central_chan = True
+            logger.debug(f"Flag central channel: {flag_central_chan}")
             badspw = get_bad_chans(test_msname, flag_central_chan=flag_central_chan)
             if badspw != "":
                 logger.info(f"Bad spws: {badspw}.")
@@ -577,6 +582,7 @@ def do_flagging(
                 logger.info("No bad spectral window.")
         else:
             badspw = ""
+
         if flag_bad_ants:
             bad_ants_str = get_mwa_bad_ants(metafits)
             if bad_ants_str != "":
@@ -609,6 +615,8 @@ def do_flagging(
                     run_solarflagger=run_solarflagger,
                     normalize=normalize,
                     force_flag=force_flag,
+                    restore_flag=restore_flag,
+                    flag_backup=flag_backup,
                     n_threads=n_threads,
                     mem_limit=mem_limit,
                 )
@@ -660,7 +668,7 @@ def main(
     flag_bad_spw=True,
     use_tfcrop=False,
     use_rflag=False,
-    flag_autocorr=True,
+    flag_autocorr=False,
     flag_quack=True,
     flagbackup=True,
     flagdimension="freqtime",
@@ -780,10 +788,6 @@ def main(
             observer = init_logger(
                 "do_flagging", logfile, jobname=jobname, password=password
             )
-    if observer is None:
-        logger.info(
-            "Remote link or jobname is blank. Not transmiting to remote logger."
-        )
 
     if len(mslist) == 0:
         logger.critical("Please provide a valid measurement set list.")
@@ -865,7 +869,8 @@ def main(
         msg = 1
     finally:
         time.sleep(5)
-        clean_shutdown(observer)
+        if observer is not None:
+            clean_shutdown(observer)
         for msname in mslist:
             drop_cache(msname)
         if dask_cluster is not None:
@@ -922,10 +927,10 @@ def cli():
     )
     adv_args.add_argument("--use_rflag", action="store_true", help="Use rflag flagging")
     adv_args.add_argument(
-        "--no_flag_autocorr",
+        "--flag_autocorr",
         dest="flag_autocorr",
-        action="store_false",
-        help="Do not flag auto-correlations",
+        action="store_true",
+        help="Flag auto-correlations",
     )
     adv_args.add_argument(
         "--no_flag_quack",

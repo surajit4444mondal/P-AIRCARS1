@@ -342,8 +342,6 @@ def main(
             observer = init_logger(
                 "apply_selfcal", logfile, jobname=jobname, password=password
             )
-    if observer is None:
-        logger.info("Not transmiting to remote logger.")
 
     if len(mslist) == 0:
         logger.crititcal("Please provide a valid measurement set list.")
@@ -418,7 +416,8 @@ def main(
         )
     finally:
         time.sleep(5)
-        clean_shutdown(observer)
+        if observer is not None:
+            clean_shutdown(observer)
         for ms in mslist:
             drop_cache(ms)
         if dask_cluster is not None:

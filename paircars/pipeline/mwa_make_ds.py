@@ -336,7 +336,8 @@ def main(
         msg = 1
     finally:
         time.sleep(5)
-        clean_shutdown(observer)
+        if observer is not None:
+            clean_shutdown(observer)
         for msname in mslist:
             drop_cache(msname)
         if dask_cluster is not None:

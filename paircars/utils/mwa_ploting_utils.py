@@ -7,6 +7,7 @@ import requests
 import os
 import traceback
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
@@ -20,7 +21,7 @@ from aiapy.calibrate import update_pointing, register, correct_degradation
 from astropy.visualization import ImageNormalize, PowerStretch, LogStretch
 from astropy.io import fits
 from astropy.time import Time
-from astropy.coordinates import SkyCoord, get_sun, solar_system_ephemeris
+from astropy.coordinates import SkyCoord, solar_system_ephemeris
 from astropy.wcs import FITSFixedWarning
 from astropy.io.fits.verify import VerifyWarning
 from casatools import msmetadata
@@ -734,33 +735,33 @@ def get_mwamap(fits_image, pol="I", do_sharpen=False):
     mwa_header = mwa_hdu[0].header  # mwa header
     mwa_data = mwa_hdu[0].data
     if mwa_data.ndim == 4:
-        if pol=="I":
+        if pol == "I":
             mwa_data = mwa_data[0, 0, ...]  # mwa data
-        elif pol=="Q":
-            if mwa_data.shape[0]>1:
+        elif pol == "Q":
+            if mwa_data.shape[0] > 1:
                 mwa_data = mwa_data[1, 0, ...]
             else:
                 mwa_data = mwa_data[0, 1, ...]
-        elif pol=="U":
-            if mwa_data.shape[0]>1:
+        elif pol == "U":
+            if mwa_data.shape[0] > 1:
                 mwa_data = mwa_data[2, 0, ...]
             else:
                 mwa_data = mwa_data[0, 2, ...]
-        elif pol=="V":
-            if mwa_data.shape[0]>1:
+        elif pol == "V":
+            if mwa_data.shape[0] > 1:
                 mwa_data = mwa_data[3, 0, ...]
             else:
                 mwa_data = mwa_data[0, 3, ...]
     elif mwa_data.ndim == 3:
-        if pol=="I":
+        if pol == "I":
             mwa_data = mwa_data[0, ...]  # mwa data
-        elif pol=="Q":
+        elif pol == "Q":
             mwa_data = mwa_data[1, ...]
-        elif pol=="U":
+        elif pol == "U":
             mwa_data = mwa_data[2, ...]
-        elif pol=="V":
+        elif pol == "V":
             mwa_data = mwa_data[3, ...]
-            
+
     if mwa_header["CTYPE3"] == "FREQ":
         frequency = mwa_header["CRVAL3"] * u.Hz
     elif mwa_header["CTYPE4"] == "FREQ":
@@ -834,10 +835,10 @@ def save_in_hpc(fits_image, outdir="", xlim=[], ylim=[]):
     org_data = fits.getdata(fits_image)
     data_shape = org_data.shape
     del org_data
-    if fits_header["NAXIS4"]==4 or fits_header["NAXIS3"]==4:
-        stokes="IQUV"
+    if fits_header["NAXIS4"] == 4 or fits_header["NAXIS3"] == 4:
+        stokes = "IQUV"
     else:
-        stokes="I"
+        stokes = "I"
     pol_list = list(stokes)
     if outdir == "":
         outdir = os.path.dirname(os.path.abspath(fits_image))
@@ -855,23 +856,23 @@ def save_in_hpc(fits_image, outdir="", xlim=[], ylim=[]):
                 xlim[0] * u.arcsec, ylim[0] * u.arcsec, frame=mwamap.coordinate_frame
             )
             mwamap = mwamap.submap(bottom_left, top_right=top_right)
-        if p==0:
+        if p == 0:
             mwamap.save(outfile, filetype="fits")
             data = fits.getdata(outfile)
-            data = data[np.newaxis,np.newaxis,...]
-        if data.ndim==4:
-            if data_shape[0]==4:
-                if p==0:
-                    data = np.repeat(data,4,axis=0)
-                data[p,0,...]=mwamap.data
+            data = data[np.newaxis, np.newaxis, ...]
+        if data.ndim == 4:
+            if data_shape[0] == 4:
+                if p == 0:
+                    data = np.repeat(data, 4, axis=0)
+                data[p, 0, ...] = mwamap.data
             else:
-                if p==0:
-                    data = np.repeat(data,4,axis=1)
-                data[0,p,...]=mwamap.data
-        elif data.ndim==3:
-            if p==0:
-                data = np.repeat(data,4,axis=0)
-            data[p,...]=mwamap.data
+                if p == 0:
+                    data = np.repeat(data, 4, axis=1)
+                data[0, p, ...] = mwamap.data
+        elif data.ndim == 3:
+            if p == 0:
+                data = np.repeat(data, 4, axis=0)
+            data[p, ...] = mwamap.data
         else:
             data = mwamap.data
     hpc_header = fits.getheader(outfile)
@@ -2044,6 +2045,7 @@ def rename_mwasolar_image(
     make_plots=True,
     pol_selfcal=True,
     cal_sol=True,
+    paircars_input="",
 ):
     """
     Rename and move image to image directory
@@ -2066,6 +2068,9 @@ def rename_mwasolar_image(
         Whether polarisation self-calibration solutions are applied
     cal_sol : bool, optional
         Whether calibration solutions are applied or not
+    paircars_input : str, optional
+        P-AIRCARS input command line 
+        Note: If provided, it will be written in header
 
     Returns
     -------
@@ -2086,7 +2091,6 @@ def rename_mwasolar_image(
 
     header = fits.getheader(imagename)
     time = header["DATE-OBS"]
-    astro_time = Time(time, scale="utc")
     with fits.open(imagename, mode="update") as hdul:
         hdr = hdul[0].header
         hdr["AUTHOR"] = "DevojyotiKansabanik"
@@ -2108,12 +2112,8 @@ def rename_mwasolar_image(
             hdr["POLSELF"] = "TRUE"
         else:
             hdr["POLSELF"] = "FALSE"
-        try:
-            sun_coords = get_sun(astro_time)
-            hdr["CRVAL1"] = sun_coords.ra.deg
-            hdr["CRVAL2"] = sun_coords.dec.deg
-        except Exception:
-            pass
+        if paircars_input!="":
+            hdr["RUNCMD"]=paircars_input
     freq = round(header["CRVAL3"] / 10**6, 2)
     t_str = "".join(time.split("T")[0].split("-")) + (
         "".join(time.split("T")[-1].split(":"))
@@ -2218,16 +2218,21 @@ def make_ds_plot(dsfiles, plot_file=None, plot_quantity="TB", showgui=False):
     median_bandshape = np.nanmedian(data, axis=-1)
     pos = np.where(~np.isnan(median_bandshape))[0]
     if len(pos) > 0:
-        data = data[min(pos): max(pos), :]
-        freqs = freqs[min(pos): max(pos)]
+        data = data[min(pos) : max(pos), :]
+        freqs = freqs[min(pos) : max(pos)]
     # --------------------------------------------------
     # Convert timestamps → datetime (MASTER AXIS)
     # --------------------------------------------------
-    times_dt = np.array([
-        datetime.strptime(t, "%Y-%m-%dT%H:%M:%S.%f")
-        if "." in t else datetime.strptime(t, "%Y-%m-%dT%H:%M:%S")
-        for t in timestamps
-    ])
+    times_dt = np.array(
+        [
+            (
+                datetime.strptime(t, "%Y-%m-%dT%H:%M:%S.%f")
+                if "." in t
+                else datetime.strptime(t, "%Y-%m-%dT%H:%M:%S")
+            )
+            for t in timestamps
+        ]
+    )
     # --------------------------------------------------
     # Fetch GOES (for overlay only)
     # --------------------------------------------------
@@ -2235,9 +2240,7 @@ def make_ds_plot(dsfiles, plot_file=None, plot_quantity="TB", showgui=False):
     tend = times_dt[-1].strftime("%Y-%m-%d %H:%M")
     try:
         results = Fido.search(
-            a.Time(tstart, tend),
-            a.Instrument("XRS"),
-            a.Resolution("avg1m")
+            a.Time(tstart, tend), a.Instrument("XRS"), a.Resolution("avg1m")
         )
         files = Fido.fetch(results, path=os.path.dirname(dsfiles[0]), overwrite=False)
         goes_tseries = TimeSeries(files, concatenate=True).truncate(tstart, tend)
@@ -2285,7 +2288,7 @@ def make_ds_plot(dsfiles, plot_file=None, plot_quantity="TB", showgui=False):
         freqs_arr = np.array(freqs)
         valid = ~np.isnan(freqs_arr)
         idx = np.where(valid)[0]
-        idx = idx[:: max(1, len(idx)//12)]
+        idx = idx[:: max(1, len(idx) // 12)]
         ax_spec.set_yticks(idx)
         ax_spec.set_yticklabels([f"{freqs_arr[i]:.1f}" for i in idx])
         # --------------------------------------------------
@@ -2337,4 +2340,3 @@ def make_ds_plot(dsfiles, plot_file=None, plot_quantity="TB", showgui=False):
     finally:
         plt.close("all")
     return plot_file
-    

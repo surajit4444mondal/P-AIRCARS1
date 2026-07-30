@@ -211,60 +211,60 @@ def all_sky_beam_interpolator(
         All sky primary beam Jones array
     """
     ncpu = max(1, ncpu)
-    limit_threads(n_threads=ncpu)
-    from scipy.interpolate import RectBivariateSpline
+    with limit_threads(n_threads=ncpu):
+        from scipy.interpolate import RectBivariateSpline
 
-    if MWA_PB_file == "" or os.path.exists(MWA_PB_file) is False:
-        MWA_PB_file = MWA_PB_file_paircars
-    if sweet_spot_file == "" or os.path.exists(sweet_spot_file) is False:
-        sweet_spot_file = sweet_spot_file_paircars
-    beam = mwa_hyperbeam.FEEBeam(MWA_PB_file)
-    az_scale = np.arange(0, 360, resolution)
-    alt_scale = np.arange(0, 90, resolution)
-    az, alt = np.meshgrid(az_scale, alt_scale)
-    za_rad = np.deg2rad(90 - alt.ravel())  # Zenith angle in radian
-    az_rad = np.deg2rad(az.ravel())  # Azimuth in radian
-    sweet_spots = np.load(sweet_spot_file, allow_pickle=True).all()
-    delay = sweet_spots[int(sweet_spot_num)][-1]
-    ##############################################
-    # Calculating Jones array in 1 deg alt-az grid
-    ##############################################
-    jones = beam.calc_jones_array(
-        az_rad,
-        za_rad,
-        freq * 10**6,
-        delay,
-        [1] * 16,
-        True,
-        np.deg2rad(MWALAT),
-        iau_order,
-    )
-    jones = jones.swapaxes(0, 1).reshape(4, alt_scale.shape[0], az_scale.shape[0])
-    j00_r = RectBivariateSpline(
-        x=alt_scale, y=az_scale, z=np.nan_to_num(np.real(jones[0, ...]))
-    )
-    j00_i = RectBivariateSpline(
-        x=alt_scale, y=az_scale, z=np.nan_to_num(np.imag(jones[0, ...]))
-    )
-    j01_r = RectBivariateSpline(
-        x=alt_scale, y=az_scale, z=np.nan_to_num(np.real(jones[1, ...]))
-    )
-    j01_i = RectBivariateSpline(
-        x=alt_scale, y=az_scale, z=np.nan_to_num(np.imag(jones[1, ...]))
-    )
-    j10_r = RectBivariateSpline(
-        x=alt_scale, y=az_scale, z=np.nan_to_num(np.real(jones[2, ...]))
-    )
-    j10_i = RectBivariateSpline(
-        x=alt_scale, y=az_scale, z=np.nan_to_num(np.imag(jones[2, ...]))
-    )
-    j11_r = RectBivariateSpline(
-        x=alt_scale, y=az_scale, z=np.nan_to_num(np.real(jones[3, ...]))
-    )
-    j11_i = RectBivariateSpline(
-        x=alt_scale, y=az_scale, z=np.nan_to_num(np.imag(jones[3, ...]))
-    )
-    return j00_r, j00_i, j01_r, j01_i, j10_r, j10_i, j11_r, j11_i
+        if MWA_PB_file == "" or os.path.exists(MWA_PB_file) is False:
+            MWA_PB_file = MWA_PB_file_paircars
+        if sweet_spot_file == "" or os.path.exists(sweet_spot_file) is False:
+            sweet_spot_file = sweet_spot_file_paircars
+        beam = mwa_hyperbeam.FEEBeam(MWA_PB_file)
+        az_scale = np.arange(0, 360, resolution)
+        alt_scale = np.arange(0, 90, resolution)
+        az, alt = np.meshgrid(az_scale, alt_scale)
+        za_rad = np.deg2rad(90 - alt.ravel())  # Zenith angle in radian
+        az_rad = np.deg2rad(az.ravel())  # Azimuth in radian
+        sweet_spots = np.load(sweet_spot_file, allow_pickle=True).all()
+        delay = sweet_spots[int(sweet_spot_num)][-1]
+        ##############################################
+        # Calculating Jones array in 1 deg alt-az grid
+        ##############################################
+        jones = beam.calc_jones_array(
+            az_rad,
+            za_rad,
+            freq * 10**6,
+            delay,
+            [1] * 16,
+            True,
+            np.deg2rad(MWALAT),
+            iau_order,
+        )
+        jones = jones.swapaxes(0, 1).reshape(4, alt_scale.shape[0], az_scale.shape[0])
+        j00_r = RectBivariateSpline(
+            x=alt_scale, y=az_scale, z=np.nan_to_num(np.real(jones[0, ...]))
+        )
+        j00_i = RectBivariateSpline(
+            x=alt_scale, y=az_scale, z=np.nan_to_num(np.imag(jones[0, ...]))
+        )
+        j01_r = RectBivariateSpline(
+            x=alt_scale, y=az_scale, z=np.nan_to_num(np.real(jones[1, ...]))
+        )
+        j01_i = RectBivariateSpline(
+            x=alt_scale, y=az_scale, z=np.nan_to_num(np.imag(jones[1, ...]))
+        )
+        j10_r = RectBivariateSpline(
+            x=alt_scale, y=az_scale, z=np.nan_to_num(np.real(jones[2, ...]))
+        )
+        j10_i = RectBivariateSpline(
+            x=alt_scale, y=az_scale, z=np.nan_to_num(np.imag(jones[2, ...]))
+        )
+        j11_r = RectBivariateSpline(
+            x=alt_scale, y=az_scale, z=np.nan_to_num(np.real(jones[3, ...]))
+        )
+        j11_i = RectBivariateSpline(
+            x=alt_scale, y=az_scale, z=np.nan_to_num(np.imag(jones[3, ...]))
+        )
+        return j00_r, j00_i, j01_r, j01_i, j10_r, j10_i, j11_r, j11_i
 
 
 def get_coarse_resolution(freq):
@@ -330,77 +330,77 @@ def get_jones_array(
         Jones array (shape : coordinate_arr_shape, 2 ,2)
     """
     ncpu = max(1, ncpu)
-    limit_threads(n_threads=ncpu)
-    from joblib import Parallel, delayed as jobdelayed
+    with limit_threads(n_threads=ncpu):
+        from joblib import Parallel, delayed as jobdelayed
 
-    if MWA_PB_file == "" or os.path.exists(MWA_PB_file) is False:
-        MWA_PB_file = MWA_PB_file_paircars
-    if sweet_spot_file == "" or os.path.exists(sweet_spot_file) is False:
-        sweet_spot_file = sweet_spot_file_paircars
-    # Change resolution based on frequency
-    coarse_resolution = get_coarse_resolution(freq)
-    if interpolated:
-        j00_r, j00_i, j01_r, j01_i, j10_r, j10_i, j11_r, j11_i = (
-            all_sky_beam_interpolator(
-                int(gridpoint),
-                freq,
-                coarse_resolution,
-                ncpu=ncpu,
-                MWA_PB_file=MWA_PB_file,
-                sweet_spot_file=sweet_spot_file,
-                iau_order=iau_order,
+        if MWA_PB_file == "" or os.path.exists(MWA_PB_file) is False:
+            MWA_PB_file = MWA_PB_file_paircars
+        if sweet_spot_file == "" or os.path.exists(sweet_spot_file) is False:
+            sweet_spot_file = sweet_spot_file_paircars
+        # Change resolution based on frequency
+        coarse_resolution = get_coarse_resolution(freq)
+        if interpolated:
+            j00_r, j00_i, j01_r, j01_i, j10_r, j10_i, j11_r, j11_i = (
+                all_sky_beam_interpolator(
+                    int(gridpoint),
+                    freq,
+                    coarse_resolution,
+                    ncpu=ncpu,
+                    MWA_PB_file=MWA_PB_file,
+                    sweet_spot_file=sweet_spot_file,
+                    iau_order=iau_order,
+                )
             )
-        )
-        with Parallel(n_jobs=ncpu, backend="multiprocessing") as parallel:
-            results = parallel(
-                [
-                    jobdelayed(j00_r)(alt_arr, az_arr, grid=False),
-                    jobdelayed(j00_i)(alt_arr, az_arr, grid=False),
-                    jobdelayed(j01_r)(alt_arr, az_arr, grid=False),
-                    jobdelayed(j01_i)(alt_arr, az_arr, grid=False),
-                    jobdelayed(j10_r)(alt_arr, az_arr, grid=False),
-                    jobdelayed(j10_i)(alt_arr, az_arr, grid=False),
-                    jobdelayed(j11_r)(alt_arr, az_arr, grid=False),
-                    jobdelayed(j11_i)(alt_arr, az_arr, grid=False),
-                ]
+            with Parallel(n_jobs=ncpu, backend="multiprocessing") as parallel:
+                results = parallel(
+                    [
+                        jobdelayed(j00_r)(alt_arr, az_arr, grid=False),
+                        jobdelayed(j00_i)(alt_arr, az_arr, grid=False),
+                        jobdelayed(j01_r)(alt_arr, az_arr, grid=False),
+                        jobdelayed(j01_i)(alt_arr, az_arr, grid=False),
+                        jobdelayed(j10_r)(alt_arr, az_arr, grid=False),
+                        jobdelayed(j10_i)(alt_arr, az_arr, grid=False),
+                        jobdelayed(j11_r)(alt_arr, az_arr, grid=False),
+                        jobdelayed(j11_i)(alt_arr, az_arr, grid=False),
+                    ]
+                )
+            del parallel
+            (
+                j00_r_arr,
+                j00_i_arr,
+                j01_r_arr,
+                j01_i_arr,
+                j10_r_arr,
+                j10_i_arr,
+                j11_r_arr,
+                j11_i_arr,
+            ) = results
+            j00 = j00_r_arr + 1j * j00_i_arr
+            j01 = j01_r_arr + 1j * j01_i_arr
+            j10 = j10_r_arr + 1j * j10_i_arr
+            j11 = j11_r_arr + 1j * j11_i_arr
+            j00 = j00.reshape(az_arr.shape)
+            j01 = j01.reshape(az_arr.shape)
+            j10 = j10.reshape(az_arr.shape)
+            j11 = j11.reshape(az_arr.shape)
+            jones_array = np.array([j00, j01, j10, j11]).T
+        else:
+            beam = mwa_hyperbeam.FEEBeam(MWA_PB_file)
+            sweet_spots = np.load(sweet_spot_file, allow_pickle=True).all()
+            delay = sweet_spots[int(gridpoint)][-1]
+            za_arr = 90 - alt_arr
+            jones_array = beam.calc_jones_array(
+                np.deg2rad(az_arr),
+                np.deg2rad(za_arr),
+                freq * 10**6,
+                delay,
+                [1] * 16,
+                True,
+                np.deg2rad(MWALAT),
+                iau_order,
             )
-        del parallel
-        (
-            j00_r_arr,
-            j00_i_arr,
-            j01_r_arr,
-            j01_i_arr,
-            j10_r_arr,
-            j10_i_arr,
-            j11_r_arr,
-            j11_i_arr,
-        ) = results
-        j00 = j00_r_arr + 1j * j00_i_arr
-        j01 = j01_r_arr + 1j * j01_i_arr
-        j10 = j10_r_arr + 1j * j10_i_arr
-        j11 = j11_r_arr + 1j * j11_i_arr
-        j00 = j00.reshape(az_arr.shape)
-        j01 = j01.reshape(az_arr.shape)
-        j10 = j10.reshape(az_arr.shape)
-        j11 = j11.reshape(az_arr.shape)
-        jones_array = np.array([j00, j01, j10, j11]).T
-    else:
-        beam = mwa_hyperbeam.FEEBeam(MWA_PB_file)
-        sweet_spots = np.load(sweet_spot_file, allow_pickle=True).all()
-        delay = sweet_spots[int(gridpoint)][-1]
-        za_arr = 90 - alt_arr
-        jones_array = beam.calc_jones_array(
-            np.deg2rad(az_arr),
-            np.deg2rad(za_arr),
-            freq * 10**6,
-            delay,
-            [1] * 16,
-            True,
-            np.deg2rad(MWALAT),
-            iau_order,
-        )
-    jones_array = jones_array.reshape(jones_array.shape[0], 2, 2)
-    return jones_array
+        jones_array = jones_array.reshape(jones_array.shape[0], 2, 2)
+        return jones_array
 
 
 def get_pb_radec(
@@ -449,76 +449,76 @@ def get_pb_radec(
         YY power beam value
     """
     ncpu = max(1, ncpu)
-    limit_threads(n_threads=ncpu)
-    if MWA_PB_file == "" or os.path.exists(MWA_PB_file) is False:
-        MWA_PB_file = MWA_PB_file_paircars
-    if sweet_spot_file == "" or os.path.exists(sweet_spot_file) is False:
-        sweet_spot_file = sweet_spot_file_paircars
-    beam = mwa_hyperbeam.FEEBeam(MWA_PB_file)
-    metadata = fits.getheader(metafits)
-    obstime = metadata["DATE-OBS"]
-    gridpoint = metadata["GRIDNUM"]
-    sweet_spots = np.load(sweet_spot_file, allow_pickle=True).all()
-    delay = sweet_spots[int(gridpoint)][-1]
-    observing_time = Time(obstime)
-    aa = AltAz(location=MWAPOS, obstime=observing_time)
-    try:
-        ra = float(ra)
-        dec = float(dec)
-        coord = SkyCoord(ra, dec, frame="icrs", unit="deg")
-    except Exception:
+    with limit_threads(n_threads=ncpu):
+        if MWA_PB_file == "" or os.path.exists(MWA_PB_file) is False:
+            MWA_PB_file = MWA_PB_file_paircars
+        if sweet_spot_file == "" or os.path.exists(sweet_spot_file) is False:
+            sweet_spot_file = sweet_spot_file_paircars
+        beam = mwa_hyperbeam.FEEBeam(MWA_PB_file)
+        metadata = fits.getheader(metafits)
+        obstime = metadata["DATE-OBS"]
+        gridpoint = metadata["GRIDNUM"]
+        sweet_spots = np.load(sweet_spot_file, allow_pickle=True).all()
+        delay = sweet_spots[int(gridpoint)][-1]
+        observing_time = Time(obstime)
+        aa = AltAz(location=MWAPOS, obstime=observing_time)
         try:
-            coord = SkyCoord(ra, dec)
+            ra = float(ra)
+            dec = float(dec)
+            coord = SkyCoord(ra, dec, frame="icrs", unit="deg")
         except Exception:
-            coord = SkyCoord(ra, dec, unit=(u.hourangle, u.deg))
-    altaz_object = coord.transform_to(aa)
-    alt = altaz_object.alt.degree
-    az = altaz_object.az.degree
+            try:
+                coord = SkyCoord(ra, dec)
+            except Exception:
+                coord = SkyCoord(ra, dec, unit=(u.hourangle, u.deg))
+        altaz_object = coord.transform_to(aa)
+        alt = altaz_object.alt.degree
+        az = altaz_object.az.degree
 
-    # Decide whether we have arrays or scalars
-    is_array = isinstance(ra, np.ndarray) and isinstance(dec, np.ndarray)
+        # Decide whether we have arrays or scalars
+        is_array = isinstance(ra, np.ndarray) and isinstance(dec, np.ndarray)
 
-    # Compute Jones matrices
-    if is_array:
-        jones = beam.calc_jones_array(
-            np.deg2rad(az),
-            np.deg2rad(90 - alt),
-            freq * 1e6,
-            delay,
-            [1] * 16,
-            True,
-            np.deg2rad(MWALAT),
-            iau_order,
-        )
-    else:
-        jones = beam.calc_jones(
-            np.deg2rad(az),
-            np.deg2rad(90 - alt),
-            freq * 1e6,
-            delay,
-            [1] * 16,
-            True,
-            np.deg2rad(MWALAT),
-            iau_order,
-        )
-        # Promote scalar → (1,4) for uniform handling
-        jones = np.asarray(jones)[None, :]
+        # Compute Jones matrices
+        if is_array:
+            jones = beam.calc_jones_array(
+                np.deg2rad(az),
+                np.deg2rad(90 - alt),
+                freq * 1e6,
+                delay,
+                [1] * 16,
+                True,
+                np.deg2rad(MWALAT),
+                iau_order,
+            )
+        else:
+            jones = beam.calc_jones(
+                np.deg2rad(az),
+                np.deg2rad(90 - alt),
+                freq * 1e6,
+                delay,
+                [1] * 16,
+                True,
+                np.deg2rad(MWALAT),
+                iau_order,
+            )
+            # Promote scalar → (1,4) for uniform handling
+            jones = np.asarray(jones)[None, :]
 
-    # Jones shape: (N, 4)
-    J = np.abs(jones) ** 2
+        # Jones shape: (N, 4)
+        J = np.abs(jones) ** 2
 
-    stokesI_beam = (J[:, 0] + J[:, 1] + J[:, 2] + J[:, 3]) / 2
-    power_beam_array_XX = J[:, 0] + J[:, 1]
-    power_beam_array_YY = J[:, 2] + J[:, 3]
+        stokesI_beam = (J[:, 0] + J[:, 1] + J[:, 2] + J[:, 3]) / 2
+        power_beam_array_XX = J[:, 0] + J[:, 1]
+        power_beam_array_YY = J[:, 2] + J[:, 3]
 
-    # If scalar input, return scalars
-    if not is_array:
-        stokesI_beam = stokesI_beam[0]
-        power_beam_array_XX = power_beam_array_XX[0]
-        power_beam_array_YY = power_beam_array_YY[0]
-        jones = jones[0]
+        # If scalar input, return scalars
+        if not is_array:
+            stokesI_beam = stokesI_beam[0]
+            power_beam_array_XX = power_beam_array_XX[0]
+            power_beam_array_YY = power_beam_array_YY[0]
+            jones = jones[0]
 
-    return 0, jones, stokesI_beam, power_beam_array_XX, power_beam_array_YY
+        return 0, jones, stokesI_beam, power_beam_array_XX, power_beam_array_YY
 
 
 def get_haslam(freq, scaling=-2.55):
@@ -902,142 +902,142 @@ def make_primarybeammap(
         Total beam area (YY)
     """
     n_threads = max(1, n_threads)
-    limit_threads(n_threads=n_threads)
-    warnings.filterwarnings("ignore")
-    if MWA_PB_file == "" or os.path.exists(MWA_PB_file) is False:
-        MWA_PB_file = MWA_PB_file_paircars
-    if sweet_spot_file == "" or os.path.exists(sweet_spot_file) is False:
-        sweet_spot_file = sweet_spot_file_paircars
-    beam = mwa_hyperbeam.FEEBeam(MWA_PB_file)
+    with limit_threads(n_threads=n_threads):
+        warnings.filterwarnings("ignore")
+        if MWA_PB_file == "" or os.path.exists(MWA_PB_file) is False:
+            MWA_PB_file = MWA_PB_file_paircars
+        if sweet_spot_file == "" or os.path.exists(sweet_spot_file) is False:
+            sweet_spot_file = sweet_spot_file_paircars
+        beam = mwa_hyperbeam.FEEBeam(MWA_PB_file)
 
-    ############################
-    # Creating sky grid
-    ############################
-    n_pix = int(360 / resolution)
-    az_grid, za_grid, n_total, dOMEGA = makeAZZA_dOMEGA(n_pix, "ZEA")
-    az_grid = az_grid * 180 / np.pi
-    za_grid = za_grid * 180 / np.pi
-    alt_grid = 90 - (za_grid)
-    # first go from altitude to zenith angle
-    theta = (90 - alt_grid) * np.pi / 180
-    phi = az_grid * np.pi / 180
+        ############################
+        # Creating sky grid
+        ############################
+        n_pix = int(360 / resolution)
+        az_grid, za_grid, n_total, dOMEGA = makeAZZA_dOMEGA(n_pix, "ZEA")
+        az_grid = az_grid * 180 / np.pi
+        za_grid = za_grid * 180 / np.pi
+        alt_grid = 90 - (za_grid)
+        # first go from altitude to zenith angle
+        theta = (90 - alt_grid) * np.pi / 180
+        phi = az_grid * np.pi / 180
 
-    ###############################
-    # Determining beamformer delays
-    ###############################
-    metadata = fits.getheader(metafits)
-    gridpoint = metadata["GRIDNUM"]
-    sweet_spots = np.load(sweet_spot_file, allow_pickle=True).all()
-    delay = sweet_spots[int(gridpoint)][-1]
-    obstime = metadata["DATE-OBS"]
+        ###############################
+        # Determining beamformer delays
+        ###############################
+        metadata = fits.getheader(metafits)
+        gridpoint = metadata["GRIDNUM"]
+        sweet_spots = np.load(sweet_spot_file, allow_pickle=True).all()
+        delay = sweet_spots[int(gridpoint)][-1]
+        obstime = metadata["DATE-OBS"]
 
-    #################################
-    # Calculating beam array
-    #################################
-    jones_array = beam.calc_jones_array(
-        phi.flatten(),
-        theta.flatten(),
-        freq * 10**6,
-        delay,
-        [1] * 16,
-        True,
-        np.deg2rad(MWALAT),
-        iau_order,
-    )
-    power_beam_array = {}
-    power_beam_array["XX"] = np.abs(
-        jones_array[:, 0] * jones_array[:, 0].conjugate()
-        + jones_array[:, 1] * jones_array[:, 1].conjugate()
-    ).reshape(az_grid.shape)
-    power_beam_array["YY"] = np.abs(
-        jones_array[:, 2] * jones_array[:, 2].conjugate()
-        + jones_array[:, 3] * jones_array[:, 3].conjugate()
-    ).reshape(az_grid.shape)
+        #################################
+        # Calculating beam array
+        #################################
+        jones_array = beam.calc_jones_array(
+            phi.flatten(),
+            theta.flatten(),
+            freq * 10**6,
+            delay,
+            [1] * 16,
+            True,
+            np.deg2rad(MWALAT),
+            iau_order,
+        )
+        power_beam_array = {}
+        power_beam_array["XX"] = np.abs(
+            jones_array[:, 0] * jones_array[:, 0].conjugate()
+            + jones_array[:, 1] * jones_array[:, 1].conjugate()
+        ).reshape(az_grid.shape)
+        power_beam_array["YY"] = np.abs(
+            jones_array[:, 2] * jones_array[:, 2].conjugate()
+            + jones_array[:, 3] * jones_array[:, 3].conjugate()
+        ).reshape(az_grid.shape)
 
-    #######################################
-    # Get Haslam and interpolate onto grid
-    #######################################
-    haslam_map = get_haslam(freq)
-    mask = np.isnan(za_grid)
-    za_grid[np.isnan(za_grid)] = 90.0  # Replace nans as they break the interpolation
-    sky_grid = map_sky_haslam(
-        haslam_map["skymap"],
-        haslam_map["RA"],
-        haslam_map["dec"],
-        az_grid,
-        za_grid,
-        obstime=obstime,
-    )
-    sky_grid[mask] = np.nan  # Remask beyond the horizon
+        #######################################
+        # Get Haslam and interpolate onto grid
+        #######################################
+        haslam_map = get_haslam(freq)
+        mask = np.isnan(za_grid)
+        za_grid[np.isnan(za_grid)] = 90.0  # Replace nans as they break the interpolation
+        sky_grid = map_sky_haslam(
+            haslam_map["skymap"],
+            haslam_map["RA"],
+            haslam_map["dec"],
+            az_grid,
+            za_grid,
+            obstime=obstime,
+        )
+        sky_grid[mask] = np.nan  # Remask beyond the horizon
 
-    #######################################
-    # Calculate sky fringe
-    #######################################
-    beamsky_sum_XX = 0
-    beam_sum_XX = 0
-    Tant_XX = 0
-    beam_dOMEGA_sum_XX = 0
-    beamsky_sum_YY = 0
-    beam_sum_YY = 0
-    Tant_YY = 0
-    beam_dOMEGA_sum_YY = 0
-    pols = ["XX", "YY"]
-    fringe_list = []
-    if calc_fringe_temp and len(baselines) > 0:
-        for bs in baselines:
-            fringe = get_fringe(
-                msname,
-                freq,
-                metafits,
-                resolution=resolution,
-                n_threads=n_threads,
-                baseline=bs,
-            )
-            time.sleep(0.5)
-            if len(fringe) > 0:
-                fringe_list.append(fringe)
+        #######################################
+        # Calculate sky fringe
+        #######################################
+        beamsky_sum_XX = 0
+        beam_sum_XX = 0
+        Tant_XX = 0
+        beam_dOMEGA_sum_XX = 0
+        beamsky_sum_YY = 0
+        beam_sum_YY = 0
+        Tant_YY = 0
+        beam_dOMEGA_sum_YY = 0
+        pols = ["XX", "YY"]
+        fringe_list = []
+        if calc_fringe_temp and len(baselines) > 0:
+            for bs in baselines:
+                fringe = get_fringe(
+                    msname,
+                    freq,
+                    metafits,
+                    resolution=resolution,
+                    n_threads=n_threads,
+                    baseline=bs,
+                )
+                time.sleep(0.5)
+                if len(fringe) > 0:
+                    fringe_list.append(fringe)
 
-    ###############################
-    # Calculate sky beam
-    ###############################
-    for pol in pols:
-        # Get gridded sky
-        beam = power_beam_array[pol]
-        beamsky = beam * sky_grid
-        beam_dOMEGA = beam * dOMEGA
-        beamsky_sum = np.nansum(beamsky)
-        beam_sum = np.nansum(beam)
-        beam_dOMEGA_sum = np.nansum(beam_dOMEGA)
-        Tant = np.nansum(beamsky) / np.nansum(beam)
-        if pol == "XX":
-            beamsky_sum_XX = beamsky_sum
-            beam_sum_XX = beam_sum
-            Tant_XX = Tant
-            beam_dOMEGA_sum_XX = beam_dOMEGA_sum
-            T_fringe_XX = 0
-            if len(fringe_list) > 0:
-                for i in range(len(fringe_list)):
-                    fringe = fringe_list[i]
-                    T_fringe_XX += np.abs(np.nansum(fringe * beamsky) / np.nansum(beam))
-        if pol == "YY":
-            beamsky_sum_YY = beamsky_sum
-            beam_sum_YY = beam_sum
-            Tant_YY = Tant
-            beam_dOMEGA_sum_YY = beam_dOMEGA_sum
-            T_fringe_YY = 0
-            if len(fringe_list) > 0:
-                for i in range(len(fringe_list)):
-                    fringe = fringe_list[i]
-                    T_fringe_YY += np.abs(np.nansum(fringe * beamsky) / np.nansum(beam))
-    return (
-        beamsky_sum_XX,
-        beam_sum_XX,
-        Tant_XX,
-        beam_dOMEGA_sum_XX,
-        beamsky_sum_YY,
-        beam_sum_YY,
-        Tant_YY,
-        beam_dOMEGA_sum_YY,
-        T_fringe_XX,
-        T_fringe_YY,
-    )
+        ###############################
+        # Calculate sky beam
+        ###############################
+        for pol in pols:
+            # Get gridded sky
+            beam = power_beam_array[pol]
+            beamsky = beam * sky_grid
+            beam_dOMEGA = beam * dOMEGA
+            beamsky_sum = np.nansum(beamsky)
+            beam_sum = np.nansum(beam)
+            beam_dOMEGA_sum = np.nansum(beam_dOMEGA)
+            Tant = np.nansum(beamsky) / np.nansum(beam)
+            if pol == "XX":
+                beamsky_sum_XX = beamsky_sum
+                beam_sum_XX = beam_sum
+                Tant_XX = Tant
+                beam_dOMEGA_sum_XX = beam_dOMEGA_sum
+                T_fringe_XX = 0
+                if len(fringe_list) > 0:
+                    for i in range(len(fringe_list)):
+                        fringe = fringe_list[i]
+                        T_fringe_XX += np.abs(np.nansum(fringe * beamsky) / np.nansum(beam))
+            if pol == "YY":
+                beamsky_sum_YY = beamsky_sum
+                beam_sum_YY = beam_sum
+                Tant_YY = Tant
+                beam_dOMEGA_sum_YY = beam_dOMEGA_sum
+                T_fringe_YY = 0
+                if len(fringe_list) > 0:
+                    for i in range(len(fringe_list)):
+                        fringe = fringe_list[i]
+                        T_fringe_YY += np.abs(np.nansum(fringe * beamsky) / np.nansum(beam))
+        return (
+            beamsky_sum_XX,
+            beam_sum_XX,
+            Tant_XX,
+            beam_dOMEGA_sum_XX,
+            beamsky_sum_YY,
+            beam_sum_YY,
+            Tant_YY,
+            beam_dOMEGA_sum_YY,
+            T_fringe_XX,
+            T_fringe_YY,
+        )

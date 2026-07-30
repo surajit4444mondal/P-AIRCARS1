@@ -68,7 +68,6 @@ def filtered_final_caltables(caltables, workdir):
         Crossphase list
     """
     groups = {}
-    print(f"Filtering calibration tables: {caltables}")
     for f in caltables:
         name = os.path.basename(f)
         if name.endswith(".bcal"):
@@ -125,8 +124,8 @@ def run_bandpass(
     Perform bandpass calibration
     """
     n_threads = max(1, n_threads)
-    limit_threads(n_threads=n_threads)
-    from casatasks import bandpass
+    with limit_threads(n_threads=n_threads):
+        from casatasks import bandpass
 
     caltable_prefix = f"{workdir}/{os.path.basename(msname).split('.ms')[0]}"
     bpass_cmd = (
@@ -174,7 +173,6 @@ def run_crossphasecal(
     Perform crosshand phase calibration
     """
     n_threads = max(1, n_threads)
-    limit_threads(n_threads=n_threads)
     caltable_prefix = f"{workdir}/{os.path.basename(msname).split('.ms')[0]}"
     kcross_cmd = (
         f"crossphasecal("
@@ -220,8 +218,8 @@ def run_applycal(
     Perform apply calibration
     """
     n_threads = max(1, n_threads)
-    limit_threads(n_threads=n_threads)
-    from casatasks import applycal
+    with limit_threads(n_threads=n_threads):
+        from casatasks import applycal
 
     applycal_cmd = (
         f"applycal("
@@ -259,7 +257,6 @@ def run_postcal_flag(
     """
     n_threads = max(1, n_threads)
     mem_limit = abs(mem_limit)
-    limit_threads(n_threads=n_threads)
     flag_cmd = (
         f"single_ms_flag("
         f"msname='{msname}',"
@@ -343,8 +340,8 @@ def single_ms_cal_and_flag(
     """
     n_threads = max(1, n_threads)
     mem_limit = abs(mem_limit)
-    limit_threads(n_threads=n_threads)
-    from casatasks import flagmanager
+    with limit_threads(n_threads=n_threads):
+        from casatasks import flagmanager
 
     succeed_postcal_flag = True
     try:
@@ -888,8 +885,6 @@ def main(
             observer = init_logger(
                 "basic_cal", logfile, jobname=jobname, password=password
             )
-    if observer is None:
-        logger.info("Not transmiting to remote logger.")
 
     if len(mslist) == 0:
         logger.critical("Please provide a valid measurement set list.")
@@ -1001,7 +996,8 @@ def main(
         msg = 1
     finally:
         time.sleep(5)
-        clean_shutdown(observer)
+        if observer is not None:
+            clean_shutdown(observer)
         for msname in mslist:
             drop_cache(msname)
         if dask_cluster is not None:

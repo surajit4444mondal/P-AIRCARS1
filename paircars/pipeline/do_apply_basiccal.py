@@ -97,8 +97,8 @@ def applysol(
     n_threads = max(1, n_threads)
     mem_limit = abs(mem_limit)
 
-    limit_threads(n_threads=n_threads)
-    from casatasks import applycal, flagdata, split, clearcal
+    with limit_threads(n_threads=n_threads):
+        from casatasks import applycal, flagdata, split, clearcal
 
     if soltype == "basic":
         check_file = "/.applied_sol"
@@ -341,7 +341,7 @@ def run_all_applysol(
     try:
         os.chdir(workdir)
         logger.debug(f"Current working directory: {os.getcwd()}")
-        if isinstance(mslist,list):
+        if isinstance(mslist, list):
             mslist = np.array(mslist)
         mslist = np.unique(mslist).tolist()
         target_header = fits.getheader(target_metafits)
@@ -558,8 +558,6 @@ def main(
             observer = init_logger(
                 "apply_basiccal", logfile, jobname=jobname, password=password
             )
-    if observer is None:
-        logger.info("Not transmiting to remote logger.")
 
     if len(mslist) == 0:
         logger.critical("Please provide a valid measurement set list.")
@@ -598,7 +596,7 @@ def main(
         worker_mem_list = []
         for addr, w in client_info.items():
             worker_mem_list.append(w["memory_limit"] / 1024**3)
-        if len(worker_mem_list)>0:
+        if len(worker_mem_list) > 0:
             mem_limit = round(min(worker_mem_list), 3)
         else:
             mem_limit = 1
@@ -636,7 +634,8 @@ def main(
         msg = 1
     finally:
         time.sleep(5)
-        clean_shutdown(observer)
+        if observer is not None:
+            clean_shutdown(observer)
         for msname in mslist:
             drop_cache(msname)
         if dask_cluster is not None:

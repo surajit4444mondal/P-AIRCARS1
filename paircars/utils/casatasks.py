@@ -55,8 +55,8 @@ def reset_weights_and_flags(
         Force reset
     """
     n_threads = max(1, n_threads)
-    limit_threads(n_threads=n_threads)
-    from casatasks import flagdata
+    with limit_threads(n_threads=n_threads):
+        from casatasks import flagdata
 
     msname = msname.rstrip("/")
     if not os.path.exists(f"{msname}/.reset") or force_reset:
@@ -139,8 +139,8 @@ def single_mstransform(
     """
     n_threads = max(1, n_threads)
 
-    limit_threads(n_threads=n_threads)
-    from casatasks import mstransform, initweights, flagdata
+    with limit_threads(n_threads=n_threads):
+        from casatasks import mstransform, initweights, flagdata
 
     if timebin == "" or timebin is None:
         timeaverage = False

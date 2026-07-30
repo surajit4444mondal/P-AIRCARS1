@@ -17,7 +17,7 @@ from paircars.utils.mwapb_utils import (
     B2IQUV,
     get_jones_array,
 )
-from paircars.utils.selfcal_utils import correct_image_leakage
+from paircars.utils.selfcal_utils import correct_leakage
 
 warnings.filterwarnings("ignore")
 
@@ -130,7 +130,7 @@ def get_pbcor_image(
                 return
             else:
                 sweet_spots = np.load(sweet_spot_file, allow_pickle=True).all()
-                sweet_spots[int(gridpoint)][-1]
+                gridpoint = sweet_spots[int(gridpoint)][-1]
         else:
             metadata = fits.getheader(metafits)
             gridpoint = metadata["GRIDNUM"]
@@ -165,6 +165,9 @@ def get_pbcor_image(
             stokesaxis = 4
             stokes = "IQUV"
         else:
+            stokesaxis = 1
+            stokes = "I"
+        if imagedata.shape[0] == 1 and imagedata.shape[1] == 1:
             stokesaxis = 1
             stokes = "I"
 
@@ -266,6 +269,8 @@ def get_pbcor_image(
         if fullpol:
             if leakage_file != "" and os.path.exists(leakage_file):
                 try:
+                    freq, leakage_info = np.load(leakage_file, allow_pickle=True)
+                    max_iter = max(leakage_info.keys())
                     (
                         q_leakage,
                         u_leakage,
@@ -273,14 +278,14 @@ def get_pbcor_image(
                         res_q_leakage,
                         res_u_leakage,
                         res_v_leakage,
-                    ) = np.load(leakage_file, allow_pickle=True)
+                    ) = leakage_info[max_iter]
                     ########################################################################################
                     # Image based leakage correction if polarisation selfcal solutions could not be applied, but leakage information available
                     ########################################################################################
                     header = fits.getheader(outfile)
                     if "POLSELF" in header.keys():
                         if header["POLSELF"] == "FALSE":
-                            leakagecor_image, _ = correct_image_leakage(
+                            leakagecor_image, _ = correct_leakage(
                                 outfile,
                                 modelname="",
                                 q_leakage=q_leakage,
@@ -294,7 +299,7 @@ def get_pbcor_image(
                                     hdr = hdul[0].header
                                     hdr["IMGLEAKCOR"] = "TRUE"
                     #####################################################
-                    # Writing leakage information
+                    # Writing residual leakage information
                     ######################################################
                     with fits.open(outfile, mode="update") as hdul:
                         hdr = hdul[0].header

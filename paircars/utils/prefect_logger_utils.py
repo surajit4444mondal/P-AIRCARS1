@@ -28,7 +28,7 @@ async def save_logs_by_task_id(
     stop_event : threading.Event
         Optional external signal to stop logging
     """
-    poll_interval=int(poll_interval)
+    poll_interval = int(poll_interval)
     logdir = os.path.dirname(os.path.abspath(logfile))
     os.makedirs(logdir, exist_ok=True)
     seen_ids = set()
@@ -59,9 +59,7 @@ async def save_logs_by_task_id(
                                 if hasattr(log.level, "name")
                                 else str(log.level)
                             )
-                            f.write(
-                                f"{level} | {ts} | {task_name} | {log.message}\n"
-                            )
+                            f.write(f"{level} | {ts} | {task_name} | {log.message}\n")
                         if log.timestamp > last_timestamp:
                             last_timestamp = log.timestamp
             except Exception as e:
@@ -102,9 +100,7 @@ async def save_logs_by_task_id(
                                 if hasattr(log.level, "name")
                                 else str(log.level)
                             )
-                            f.write(
-                                f"{level} | {ts} | {task_name} | {log.message}\n"
-                            )
+                            f.write(f"{level} | {ts} | {task_name} | {log.message}\n")
                         if log.timestamp > last_timestamp:
                             last_timestamp = log.timestamp
                 await asyncio.sleep(1)
@@ -112,7 +108,6 @@ async def save_logs_by_task_id(
             print("FINAL DRAIN ERROR:", e)
 
 
-        
 async def save_logs_by_flow_id(
     flow_run_id, flow_name, logfile, poll_interval=5, stop_event=None
 ):
@@ -132,7 +127,7 @@ async def save_logs_by_flow_id(
     stop_event : threading.Event
         Optional external signal to stop logging
     """
-    poll_interval=int(poll_interval)
+    poll_interval = int(poll_interval)
     logdir = os.path.dirname(os.path.abspath(logfile))
     os.makedirs(logdir, exist_ok=True)
     seen_ids = set()
@@ -167,9 +162,7 @@ async def save_logs_by_flow_id(
                                 if hasattr(log.level, "name")
                                 else str(log.level)
                             )
-                            f.write(
-                                f"{level} | {ts} | {flow_name} | {log.message}\n"
-                            )
+                            f.write(f"{level} | {ts} | {flow_name} | {log.message}\n")
                         if log.timestamp > last_timestamp:
                             last_timestamp = log.timestamp
             except Exception as e:
@@ -213,9 +206,7 @@ async def save_logs_by_flow_id(
                                 if hasattr(log.level, "name")
                                 else str(log.level)
                             )
-                            f.write(
-                                f"{level} | {ts} | {flow_name} | {log.message}\n"
-                            )
+                            f.write(f"{level} | {ts} | {flow_name} | {log.message}\n")
                         if log.timestamp > last_timestamp:
                             last_timestamp = log.timestamp
                 await asyncio.sleep(1)

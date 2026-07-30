@@ -115,7 +115,8 @@ def master_control(
     do_ap_selfcal=True,
     solar_selfcal=True,
     use_solar_mask=True,
-    solint="60s",
+    int_solint="60s",
+    pol_solint="240s",
     redo_selfcal=False,
     # Sidereal correction
     do_sidereal_cor=False,
@@ -204,8 +205,10 @@ def master_control(
         Apply self-calibration solutions
     do_ap_selfcal : bool, optional
         Perform amplitude-phase self-cal or not
-    solint : str, optional
-        Solution intervals in self-cal
+    int_solint : str, optional
+        Solution intervals in gain self-cal
+    pol_solint : str, optional
+        Solution intervals in polarisation self-cal
     solar_selfcal : bool, optional
         Solar selfcal
     use_solar_mask : bool, optional
@@ -274,7 +277,7 @@ def master_control(
     int
         Success message
     """
-    start_time=time.time()
+    start_time = time.time()
     masterlogger = get_logger_safe()
     if verbose:
         masterlogger.setLevel(logging.DEBUG)
@@ -366,7 +369,9 @@ def master_control(
         for ch in coarse_chans:
             if ch not in target_ms_coarse_chans:
                 target_ms_coarse_chans.append(ch)
-    masterlogger.debug(f"Target measurement set coarse channels: {target_ms_coarse_chans}")
+    masterlogger.debug(
+        f"Target measurement set coarse channels: {target_ms_coarse_chans}"
+    )
 
     ##############################################
     # Downloading target metafits if not exist
@@ -488,7 +493,9 @@ def master_control(
         # Downloading calibrator metafits if not match with ms
         ######################################################
         if has_cal and cal_metafits is None:
-            masterlogger.debug(f"Downloading metafits for calibrator OBSID: {cal_obsid}")
+            masterlogger.debug(
+                f"Downloading metafits for calibrator OBSID: {cal_obsid}"
+            )
             try:
                 cal_metafits = download_MWA_metafits(cal_obsid, outdir=cal_datadir)
             except Exception:
@@ -503,8 +510,8 @@ def master_control(
             cal_header = fits.getheader(cal_metafits)
             cal_obsid = int(cal_header["GPSTIME"])
             if (
-                abs(cal_obsid - target_obsid) < 12 * 3600
-            ):  # Only if calibrator is 12 hours apart
+                abs(cal_obsid - target_obsid) < 24 * 3600
+            ):  # Only if calibrator is 24 hours apart
                 cal_mslist = sorted(glob.glob(f"{cal_datadir}/*.ms"))
                 cal_ms_coarse_chans = []
                 for cal_ms in cal_mslist:
@@ -593,7 +600,7 @@ def master_control(
         basic_caldir = f"{cal_outdir}/caltables"
         os.makedirs(basic_caldir, exist_ok=True)
     else:
-        basic_caldir=""
+        basic_caldir = ""
 
     #######################################
     # Preparing target working directories
@@ -699,7 +706,9 @@ def master_control(
         remote_link = ""
         internet_on = internet_available()
         if not internet_on:
-            masterlogger.warning("Internet connection is not available for remote logging.")
+            masterlogger.warning(
+                "Internet connection is not available for remote logging."
+            )
         else:
             if remote_logger:
                 try:
@@ -713,11 +722,11 @@ def master_control(
         if not remote_logger:
             timestamp = dt.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
             internet_on = internet_available()
+            hostname = socket.gethostname()
             if internet_on and emails != "":
                 email_subject = (
-                    f"P-AIRCARS Logger Details: {timestamp}, OBSID: {target_obsid}"
+                    f"P-AIRCARS Log: {timestamp}, OBSID: {target_obsid}, Hostname: {hostname}"
                 )
-
                 email_msg = f"P-AIRCARS Job ID: {jobid}"
                 success_msg, error_msg = send_notification(
                     emails, email_subject, email_msg
@@ -764,11 +773,11 @@ def master_control(
             # Notify over email
             #####################
             internet_on = internet_available()
+            hostname = socket.gethostname()
             if emails != "" and internet_on:
                 email_subject = (
-                    f"P-AIRCARS Logger Details: {timestamp}, OBSID: {target_obsid}"
+                    f"P-AIRCARS Log: {timestamp}, OBSID: {target_obsid}, Hostname: {hostname}"
                 )
-
                 email_msg = (
                     f"P-AIRCARS Job ID: {jobid}\n"
                     f"Remote logger Job ID: {jobname}\n"
@@ -906,9 +915,12 @@ def master_control(
             if coarse_chan > init_coarse_chan:
                 init_coarse_chan = coarse_chan
                 highest_freq_ms = msname
-        
-        masterlogger.info(f"Estimating optimal frequency averaging using highest frequency measurement set: {highest_freq_ms}.")
+
+        masterlogger.info(
+            f"Estimating optimal frequency averaging using highest frequency measurement set: {highest_freq_ms}."
+        )
         max_freqres = calc_bw_smearing_freqwidth(highest_freq_ms, full_FoV=full_FoV)
+        msmd = msmetadata()
         msmd.open(msname)
         freqres = msmd.chanres(0, unit="MHz")[0]
         msmd.close()
@@ -929,12 +941,16 @@ def master_control(
             ncoarse = get_ncoarse(msname)
             total_ncoarse += ncoarse
         total_ncoarse = max(1, total_ncoarse)
-        masterlogger.debug(f"Total number of coarse channels in target: {total_ncoarse}.")
+        masterlogger.debug(
+            f"Total number of coarse channels in target: {total_ncoarse}."
+        )
 
         ################################################
         # Determining maximum allowed temporal averaging
         ################################################
-        masterlogger.debug(f"Estimating optimal temporal averaging using highest frequency measurement set: {highest_freq_ms}.")
+        masterlogger.debug(
+            f"Estimating optimal temporal averaging using highest frequency measurement set: {highest_freq_ms}."
+        )
         if solar_data:  # For solar data, it is assumed Sun is tracked.
             max_timeres = calc_time_smearing_timewidth(highest_freq_ms)
         else:
@@ -945,7 +961,7 @@ def master_control(
         msmd.open(highest_freq_ms)
         times = msmd.timesforspws(0)
         timeres = np.nanmean(np.diff(times))
-        msmd.close() 
+        msmd.close()
         quack_timestamps = int(4.0 / timeres)
         if image_timeres > (2 * 3660):  # If more than 2 hours
             masterlogger.info(
@@ -958,8 +974,12 @@ def master_control(
             timeavg = timeres
         timeavg = min(2.0, timeavg)
         image_timeres = round(image_timeres, 2)
-        masterlogger.info(f"Frequency resolution: {freqres}MHz, time resolution: {timeres}s.")
-        masterlogger.info(f"Frequency averaging: {freqavg}MHz, time averaging: {timeavg}s.")
+        masterlogger.info(
+            f"Frequency resolution: {freqres}MHz, time resolution: {timeres}s."
+        )
+        masterlogger.info(
+            f"Frequency averaging: {freqavg}MHz, time averaging: {timeavg}s."
+        )
         masterlogger.info(
             f"Imaging frequency resolution: {image_freqres}MHz, time resolution: {image_timeres}s."
         )
@@ -1060,7 +1080,9 @@ def master_control(
             masterlogger.info(f"Total calibrators observations : {len(cal_obsids)}.")
             masterlogger.info(f"Total succeeded: {succeed}.")
             masterlogger.info(f"Total failed: {failed}.")
-            masterlogger.info("Basic calibration subflows for all calibrators are done.")
+            masterlogger.info(
+                "Basic calibration subflows for all calibrators are done."
+            )
             if emails != "":
                 email_msg = f"Basic calibration of all calibrators are done.\nSucceeded: {succeed}, failed: {failed}."
                 send_task_notification(
@@ -1195,7 +1217,8 @@ def master_control(
             do_sidereal_cor=do_sidereal_cor,
             use_solarflagger=use_solarflagger,
             keep_backup=keep_backup,
-            solint=solint,
+            int_solint=int_solint,
+            pol_solint=pol_solint,
             timeavg=timeavg,
             freqavg=freqavg,
             image_timeres=image_timeres,
@@ -1360,7 +1383,9 @@ def master_control(
             ###########################################
             split_cal_mslist = sorted(glob.glob(f"{workdir}/calibrator*_ch_*.ms"))
             if len(split_cal_mslist) == 0:
-                masterlogger.warning("No calibrator measurement set is present for ploting.")
+                masterlogger.warning(
+                    "No calibrator measurement set is present for ploting."
+                )
             else:
                 if adaptive:
                     scale_worker_and_wait(
@@ -1641,10 +1666,16 @@ def cli():
         "###################\nAdvanced calibration parameters\n###################"
     )
     advanced_cal.add_argument(
-        "--solint",
+        "--int_solint",
         type=str,
         default="60s",
-        help="Solution interval for calibration (e.g. 'int', '10s', '5min', 'inf')",
+        help="Solution interval for gain calibration (e.g. 'int', '10s', '5min', 'inf')",
+    )
+    advanced_cal.add_argument(
+        "--pol_solint",
+        type=str,
+        default="240s",
+        help="Solution interval for polarisation calibration (e.g. 'int', '10s', '5min', 'inf')",
     )
     advanced_cal.add_argument(
         "--cal_uvrange",
@@ -2168,7 +2199,8 @@ def cli():
             do_apply_selfcal=args.do_apply_selfcal,
             do_ap_selfcal=args.do_ap_selfcal,
             solar_selfcal=args.solar_selfcal,
-            solint=args.solint,
+            int_solint=args.int_solint,
+            pol_solint=args.pol_solint,
             redo_selfcal=args.redo_selfcal,
             # Sidereal correction
             do_sidereal_cor=args.do_sidereal_cor,
@@ -2220,3 +2252,6 @@ def cli():
             dask_cluster.close()
         os.system(f"rm -rf {dask_dir}")
         print("Cluster closed.")
+        
+        
+        

@@ -165,6 +165,18 @@ def perform_imaging(
                 jobname=jobname,
                 password=password,
             )
+            
+    paircars_input_file = f"{workdir}/inputs.txt"
+    if os.path.exists(paircars_input_file):
+        try:
+            with open(paircars_input_file,"r") as f:
+                paircars_input=f.readline()
+                paircars_input = paircars_input.rstrip("\n")
+        except Exception:
+            paircars_input=""
+    else:
+        paircars_input=""
+        
     try:
         msname = msname.rstrip("/")
         msname = os.path.abspath(msname)
@@ -226,7 +238,8 @@ def perform_imaging(
                 f"Please provide valid channel range between 0 and {len(freqs)}"
             )
             time.sleep(5)
-            clean_shutdown(sub_observer)
+            if sub_observer is not None:
+                clean_shutdown(sub_observer)
             return 1, []
 
         if timerange != "":
@@ -247,7 +260,8 @@ def perform_imaging(
                 f"Please provide valid time range between {mjdsec_to_timestamp(times[0])} and {mjdsec_to_timestamp(times[-1])}"
             )
             time.sleep(5)
-            clean_shutdown(sub_observer)
+            if sub_observer is not None:
+                clean_shutdown(sub_observer)
             return 1, []
 
         if npol < 4 and pol == "IQUV":
@@ -480,6 +494,7 @@ def perform_imaging(
                                 make_plots=make_plots,
                                 pol_selfcal=pol_selfcal,
                                 cal_sol=cal_sol,
+                                paircars_input=paircars_input,
                             )
                             if renamed_image is not None:
                                 final_image_list.append(renamed_image)
@@ -497,6 +512,7 @@ def perform_imaging(
                                     make_plots=False,
                                     pol_selfcal=pol_selfcal,
                                     cal_sol=cal_sol,
+                                    paircars_input=paircars_input,
                                 )
                                 if renamed_model is not None:
                                     final_model_list.append(renamed_model)
@@ -513,6 +529,7 @@ def perform_imaging(
                                     cutout_rsun=cutout_rsun,
                                     make_plots=False,
                                     pol_selfcal=pol_selfcal,
+                                    paircars_input=paircars_input,
                                 )
                                 if renamed_res is not None:
                                     final_res_list.append(renamed_res)
@@ -526,14 +543,16 @@ def perform_imaging(
                     "No image is made.",
                 )
                 time.sleep(5)
-                clean_shutdown(sub_observer)
+                if sub_observer is not None:
+                    clean_shutdown(sub_observer)
                 return 1, final_list_dic
             else:
                 img_logger.info(
                     "Imaging is successfully done.",
                 )
                 time.sleep(5)
-                clean_shutdown(sub_observer)
+                if sub_observer is not None:
+                    clean_shutdown(sub_observer)
                 return 0, final_list_dic
         else:
             if use_solar_mask and os.path.exists(fits_mask):
@@ -542,14 +561,16 @@ def perform_imaging(
                 "No image is made.",
             )
             time.sleep(5)
-            clean_shutdown(sub_observer)
+            if sub_observer is not None:
+                clean_shutdown(sub_observer)
             return 1, {}
     except Exception:
         img_logger.exception(
             "Exception occured in imaging: {os.path.basename(msname)}", exc_info=True
         )
         time.sleep(5)
-        clean_shutdown(sub_observer)
+        if sub_observer is not None:
+            clean_shutdown(sub_observer)
         return 1, {}
     finally:
         time.sleep(5)
@@ -938,10 +959,6 @@ def main(
             observer = init_logger(
                 "all_imaging", logfile, jobname=jobname, password=password
             )
-    if observer is None:
-        logger.info(
-            "Remote link or jobname is blank. Not transmiting to remote logger."
-        )
 
     total_ncoarse = 0
     for msname in mslist:
@@ -1017,7 +1034,8 @@ def main(
         msg = 1
     finally:
         time.sleep(5)
-        clean_shutdown(observer)
+        if observer is not None:
+            clean_shutdown(observer)
         for ms in mslist:
             drop_cache(ms)
         if dask_cluster is not None:

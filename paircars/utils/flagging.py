@@ -8,6 +8,7 @@ from .basic_utils import suppress_output
 from .calibration import get_quartical_soltype
 from .resource_utils import limit_threads
 from .imaging import calc_maxuv
+from casatools import table, msmetadata
 
 
 ###############################
@@ -88,34 +89,81 @@ def do_flag_backup(msname, flagtype="flagdata"):
     af.done()
 
 
-def flag_badchan(msname,spw):
+def flag_badchan(msname, spw=""):
     """
     Flag bad channels
-    
+
     Parameters
     ----------
     msname : str
         Measurement set
     spw : str
        Spectral window
-    """ 
-    from casatools import table 
-    tb=table()
-    tb.open(msname,nomodify=False)
-    flag=tb.getcol("FLAG")
+    """
+    if spw == "":
+        return
+    from casatools import table
+
+    tb = table()
+    tb.open(msname, nomodify=False)
+    flag = tb.getcol("FLAG")
     spw = spw.split("0:")[-1].split(";")
     for s in spw:
         start_chan = int(s.split("~")[0])
         end_chan = int(s.split("~")[-1])
-        if start_chan==end_chan:
-            flag[:,start_chan,:]=True
+        if start_chan == end_chan:
+            flag[:, start_chan, :] = True
         else:
-            for chan in range(start_chan,end_chan+1):
-                flag[:,chan,:]=True
-    tb.putcol("FLAG",flag)
+            for chan in range(start_chan, end_chan + 1):
+                flag[:, chan, :] = True
+    tb.putcol("FLAG", flag)
     tb.flush()
     tb.close()
     return
+
+
+def flag_badants(msname, antlist=[]):
+    """
+    Flag bad antennas
+
+    Parameters
+    ----------
+    msname : str
+        Measurement set name
+    antlist : list
+        Antenna list
+    """
+    if len(antlist) == 0:
+        return
+    msmd = msmetadata()
+    msmd.open(msname)
+    antnames = msmd.antennanames()
+    msmd.close()
+    msmd.done()
+    ant_ids = []
+    for ant in antlist:
+        if type(ant) is int:
+            ant_ids.append(ant)
+        else:
+            try:
+                pos = antnames.index(ant)
+                ant_ids.append(pos)
+            except Exception:
+                pass
+    tb = table()
+    tb.open(msname)
+    ant1 = tb.getcol("ANTENNA1")
+    flag = tb.getcol("FLAG")
+    tb.close()
+    for ant in ant_ids:
+        pos = np.where(ant1 == ant)
+        flag[..., pos] = True
+    tb.open(msname, nomodify=False)
+    tb.putcol("FLAG", flag)
+    tb.flush()
+    tb.close()
+    return
+
 
 def uvbin_flag(
     msname,
@@ -249,8 +297,8 @@ def get_unflagged_antennas(
         Flag fraction list
     """
     n_threads = max(1, n_threads)
-    limit_threads(n_threads=n_threads)
-    from casatasks import flagdata
+    with limit_threads(n_threads=n_threads):
+        from casatasks import flagdata
 
     msname = msname.rstrip("/")
     mspath = os.path.dirname(os.path.abspath(msname))
@@ -294,8 +342,8 @@ def get_chans_flag(
     """
     n_threads = max(1, n_threads)
 
-    limit_threads(n_threads=n_threads)
-    from casatasks import flagdata
+    with limit_threads(n_threads=n_threads):
+        from casatasks import flagdata
 
     msname = msname.rstrip("/")
     mspath = os.path.dirname(os.path.abspath(msname))
@@ -339,8 +387,8 @@ def calc_flag_fraction(
         Fraction of the total data flagged
     """
     n_threads = max(1, n_threads)
-    limit_threads(n_threads=n_threads)
-    from casatasks import flagdata
+    with limit_threads(n_threads=n_threads):
+        from casatasks import flagdata
 
     msname = msname.rstrip("/")
     mspath = os.path.dirname(os.path.abspath(msname))
@@ -371,8 +419,8 @@ def flag_outside_uvrange(
     """
     n_threads = max(1, n_threads)
 
-    limit_threads(n_threads=n_threads)
-    from casatasks import flagdata
+    with limit_threads(n_threads=n_threads):
+        from casatasks import flagdata
 
     try:
         if "lambda" in uvrange:

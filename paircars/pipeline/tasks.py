@@ -232,7 +232,7 @@ def run_target_split_jobs(
     time_interval=-1,
     quack_timestamps=-1,
     force_split=False,
-    only_disk=False,
+    single_chan_split=False,
     jobid=0,
     cpu_frac=0.8,
     mem_frac=0.8,
@@ -269,8 +269,8 @@ def run_target_split_jobs(
         Number of timestamps to flag at the beginning and end of each scan ("quack").
     force_split : bool, optional
         Force to split
-    only_disk : bool, optional
-        Split only disk times
+    single_chan_split : bool, optional
+        Split only a single good channel
     cpu_frac : float, optional
         CPU fraction to use
     mem_frac : float, optional
@@ -323,7 +323,7 @@ def run_target_split_jobs(
                 timeres=timeres,
                 quack_timestamps=quack_timestamps,
                 force_split=force_split,
-                only_disk=only_disk,
+                single_chan_split=single_chan_split,
                 prefix=prefix,
                 cpu_frac=float(cpu_frac),
                 mem_frac=float(mem_frac),
@@ -354,9 +354,9 @@ def run_flag(
     workdir,
     outdir,
     datacolumn="DATA",
-    flag_calibrators=True,
+    flag_calibrators=False,
     flag_bad_spw=False,
-    flag_quack=True,
+    flag_quack=False,
     use_rflag=False,
     use_tfcrop=False,
     flagdimension="freqtime",
@@ -459,7 +459,7 @@ def run_flag(
                 flag_bad_ants=True,
                 flag_bad_spw=flag_bad_spw,
                 use_tfcrop=use_tfcrop,
-                flag_autocorr=True,
+                flag_autocorr=False,
                 flag_quack=flag_quack,
                 flagdimension=flagdimension,
                 restore_flag=restore_flag,
@@ -886,7 +886,8 @@ def run_selfcal_jobs(
     intselfcal_min_iter=3,
     polselfcal_min_iter=5,
     conv_frac=0.3,
-    solint="60s",
+    int_solint="60s",
+    pol_solint="240s",
     do_apcal=True,
     do_polcal=True,
     solar_selfcal=True,
@@ -946,8 +947,10 @@ def run_selfcal_jobs(
         Image weighitng scheme
     robust : float, optional
         Robustness parameter for briggs weighting
-    solint : str, optional
-        Solutions interval
+    int_solint : str, optional
+        Solutions interval for gain calibration
+    pol_solint : str, optional
+        Solutions interval for polarisation calibration
     do_apcal : bool, optional
         Perform ap-selfcal or not
     do_polcal : bool, optional
@@ -987,6 +990,10 @@ def run_selfcal_jobs(
         Maximum intensity self-calibration dynamic range
     float
         Maximum polarisation self-calibration dynamic range
+    int
+        Total disk detected measurement sets
+    int
+        Total non-disk detected measurement sets
     """
     os.makedirs(workdir, exist_ok=True)
     os.chdir(workdir)
@@ -1018,6 +1025,8 @@ def run_selfcal_jobs(
                 pol_DR,
                 max_int_DR,
                 max_pol_DR,
+                total_disk_detected_ms,
+                total_non_disk_detected_ms,
             ) = do_selfcal.main(
                 mslist,
                 metafits,
@@ -1031,7 +1040,8 @@ def run_selfcal_jobs(
                 intselfcal_min_iter=int(intselfcal_min_iter),
                 polselfcal_min_iter=int(polselfcal_min_iter),
                 conv_frac=float(conv_frac),
-                solint=solint,
+                int_solint=int_solint,
+                pol_solint=pol_solint,
                 uvrange=uvrange,
                 minuv=float(minuv),
                 weight=weight,
@@ -1067,6 +1077,8 @@ def run_selfcal_jobs(
             pol_DR,
             max_int_DR,
             max_pol_DR,
+            total_disk_detected_ms,
+            total_non_disk_detected_ms,
         )
 
 
@@ -1616,9 +1628,7 @@ def send_task_notification(
     hostname = socket.gethostname()
     if internet_on:
         try:
-            email_subject = (
-                f"P-AIRCARS Log: {logger_timestamp}, OBSID: {obsid}, Hostname: {hostname}"
-            )
+            email_subject = f"P-AIRCARS Log: {logger_timestamp}, OBSID: {obsid}, Hostname: {hostname}"
             if flow_name == "":
                 email_msg = f"{msg}"
             else:

@@ -115,11 +115,6 @@ def main(
                 "do_overlay", logfile, jobname=jobname, password=password
             )
 
-    if observer is None:
-        logger.info(
-            "Remote link or jobname is blank. Not transmiting to remote logger."
-        )
-
     imagelist = glob.glob(f"{imagedir}/*.fits")
 
     if len(imagelist) == 0:
@@ -200,7 +195,7 @@ def main(
             futures = []
             for img, euv_fits in zip(batch_imgs, batch_euv):
                 name_prefix = os.path.basename(img).replace(".fits", "")
-                name_prefix = name_prefix.replace("IQUV","I")
+                name_prefix = name_prefix.replace("IQUV", "I")
                 futures.append(
                     dask_client.submit(
                         make_mwa_overlay,
@@ -258,7 +253,8 @@ def main(
         os.system(f"rm -rf {workdir}/aiamaps")
         time.sleep(5)
         drop_cache(imagedir)
-        clean_shutdown(observer)
+        if observer is not None:
+            clean_shutdown(observer)
         if dask_cluster is not None:
             with contextlib.suppress(Exception):
                 dask_client.cancel(dask_client.futures)

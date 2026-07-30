@@ -4,6 +4,7 @@ import os
 import zarr
 import dask
 import warnings
+import xarray as xr
 from casatools import msmetadata, table
 from daskms.experimental.zarr import xds_from_zarr, xds_to_zarr
 from numpy.linalg import inv
@@ -20,42 +21,51 @@ from .imaging import calc_sun_dia, calc_maxuv, calc_field_of_view
 #####################################
 
 
-def fill_nan_gains(x, data):
+def fill_nan_gains(x, data, x_new=None):
     """
-    Interpolate nan gains across frequency
+    Interpolate gain values across frequency.
 
     Parameters
     ----------
-    x : numpy.array
-        1D array of freqs
-    data : numpy.array
-        1D array of complex gains
+    x : numpy.ndarray
+        1D array of input frequencies.
+    data : numpy.ndarray
+        1D array of gain values (real or imaginary part).
+    x_new : numpy.ndarray, optional
+        Frequencies at which to evaluate the interpolation.
+        If None, interpolation is evaluated at the input frequencies.
 
     Returns
     -------
-    numpy.array
-        1D array of nan filled interpolated gains
+    numpy.ndarray
+        Interpolated gain values.
     """
+    import numpy as np
     from scipy.interpolate import interp1d
-
     x = np.asarray(x)
-    data = np.asarray(data, dtype=float)  # ensure NaNs work
-    nans = np.isnan(data)
-    if np.sum(~nans) < 3:
-        return data
-    sort_idx = np.argsort(x)
-    x = x[sort_idx]
-    data = data[sort_idx]
-    nans = np.isnan(data)
+    data = np.asarray(data, dtype=float)
+    if x_new is None:
+        x_new = x
+    else:
+        x_new = np.asarray(x_new)
+    # Remove NaNs
+    valid = np.isfinite(data)
+    # Need at least two points for linear interpolation
+    if np.sum(valid) < 2:
+        return np.full_like(x_new, np.nan, dtype=float)
+    # Sort by frequency
+    order = np.argsort(x[valid])
+    x_valid = x[valid][order]
+    data_valid = data[valid][order]
     interp_func = interp1d(
-        x[~nans],
-        data[~nans],
+        x_valid,
+        data_valid,
         kind="linear",
         bounds_error=False,
         fill_value="extrapolate",
+        assume_sorted=True,
     )
-    interpolated_data = interp_func(x)
-    return interpolated_data
+    return interp_func(x_new)
 
 
 def fluxcal_caltable(caltable, attn=10):
@@ -341,6 +351,159 @@ def interpolate_quartical(caltables, overwrite=False):
             dask.compute(write_xds_list)
             outlist.append(output_name)
     return outlist
+
+
+def make_interpolated_quartical_table(caltables, target_freqs, output_name):
+    """
+    Interpolate one or more QuartiCal calibration tables onto a new frequency grid.
+
+    Parameters
+    ----------
+    caltables : list
+        List of QuartiCal Jones tables.
+    target_freqs : ndarray
+        Desired frequency grid (Hz).
+    output_name : str
+        Name of output QuartiCal table.
+
+    Returns
+    -------
+    str
+        Output table name.
+    """
+    if os.path.exists(output_name):
+        os.system(f"rm -rf {output_name}")
+    all_freqs = []
+    all_gains = []
+    template_ds = None
+    soltype = None
+    target_freqs = target_freqs.astype("float64")
+    # ---------------------------------------------------------
+    # Read all tables
+    # ---------------------------------------------------------
+    if type(caltables) is str:
+        caltables = [caltables]
+    for caltable in caltables:
+        caltable = caltable.rstrip("/")
+        soltypes = get_quartical_soltype(caltable)
+        if len(soltypes) == 0:
+            continue
+        soltype = soltypes[0]
+        gains = xds_from_zarr(f"{caltable}::{soltype}")
+        if template_ds is None:
+            template_ds = gains[0]
+        freqs = gains[0].gain_freq.values
+        gain_data = gains[0].gains.values.copy()
+        gain_flag = gains[0].gain_flags.values.astype(bool)
+        gain_data[gain_flag] = np.nan
+        all_freqs.append(freqs)
+        all_gains.append(gain_data)
+    all_freqs = np.concatenate(all_freqs)
+    all_gains = np.concatenate(all_gains, axis=1)
+    order = np.argsort(all_freqs)
+    all_freqs = all_freqs[order]
+    all_gains = all_gains[:, order, ...]
+    # ---------------------------------------------------------
+    # Allocate output array
+    # ---------------------------------------------------------
+    shape = (
+        all_gains.shape[0],
+        len(target_freqs),
+        all_gains.shape[2],
+        all_gains.shape[3],
+        all_gains.shape[4],
+    )
+    out_gains = np.ones(shape, dtype=np.complex64)
+    out_gains[..., 1] = 0
+    out_gains[..., 2] = 0
+    ntime = shape[0]
+    nant = shape[2]
+    ndir = shape[3]
+    npol = shape[4]
+    # ---------------------------------------------------------
+    # Interpolate
+    # ---------------------------------------------------------
+    for t in range(ntime):
+        for a in range(nant):
+            for d in range(ndir):
+                for p in range(npol):
+                    re = fill_nan_gains(
+                        all_freqs,
+                        np.real(all_gains[t, :, a, d, p]),
+                        x_new=target_freqs,
+                    )
+                    im = fill_nan_gains(
+                        all_freqs,
+                        np.imag(all_gains[t, :, a, d, p]),
+                        x_new=target_freqs,
+                    )
+                    g = re + 1j * im
+                    bad = np.isnan(g)
+                    if p in (0, 3):
+                        g[bad] = 1 + 0j
+                    else:
+                        g[bad] = 0 + 0j
+                    out_gains[t, :, a, d, p] = g
+    # ---------------------------------------------------------
+    # Build output dataset
+    # ---------------------------------------------------------
+    new_ds = xr.Dataset(attrs=template_ds.attrs)
+    # Copy coordinates
+    for coord in template_ds.coords:
+        if coord == "gain_freq":
+            new_ds = new_ds.assign_coords(gain_freq=("gain_freq", target_freqs))
+        else:
+            new_ds = new_ds.assign_coords({coord: template_ds.coords[coord]})
+    # Copy all variables
+    for name, var in template_ds.data_vars.items():
+        dims = list(var.dims)
+        if "gain_freq" in dims:
+            shape = [
+                len(target_freqs) if d == "gain_freq" else template_ds.sizes[d]
+                for d in dims
+            ]
+            data = np.zeros(shape, dtype=var.dtype)
+            new_ds[name] = (dims, data)
+        else:
+            new_ds[name] = var.copy(deep=True)
+    gain_flags = np.zeros(
+        out_gains.shape[:-1],
+        dtype=bool,
+    )
+    new_ds = new_ds.assign_coords(gain_freq=("gain_freq", target_freqs))
+    new_ds.update(
+        {
+            "gain_freq": (
+                ["gain_freq"],
+                target_freqs,
+            )
+        }
+    )
+    new_ds.update(
+        {
+            "gain_flags": (
+                ["gain_time", "gain_freq", "antenna", "direction"],
+                gain_flags,
+            )
+        }
+    )
+    new_ds.update(
+        {
+            "gains": (
+                [
+                    "gain_time",
+                    "gain_freq",
+                    "antenna",
+                    "direction",
+                    "correlation",
+                ],
+                out_gains,
+            )
+        }
+    )
+    write = xds_to_zarr([new_ds], f"{output_name}::{soltype}")
+    dask.compute(write)
+    return output_name
 
 
 def get_cal_flag_info(caltable):

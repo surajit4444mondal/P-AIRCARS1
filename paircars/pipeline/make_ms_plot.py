@@ -111,10 +111,6 @@ def main(
             observer = init_logger(
                 "do_msplot", logfile, jobname=jobname, password=password
             )
-    if observer is None:
-        logger.info(
-            "Remote link or jobname is blank. Not transmiting to remote logger."
-        )
 
     if len(mslist) == 0:
         logger.critical("Please provide a valid measurement set list.")
@@ -204,7 +200,8 @@ def main(
         msg = 1
     finally:
         time.sleep(5)
-        clean_shutdown(observer)
+        if observer is not None:
+            clean_shutdown(observer)
         for ms in mslist:
             drop_cache(ms)
         if dask_cluster is not None:

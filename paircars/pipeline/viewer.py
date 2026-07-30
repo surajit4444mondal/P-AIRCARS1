@@ -554,5 +554,3 @@ def cli():
         if LOG_DIR is not None and os.path.exists(LOG_DIR):
             drop_cache(LOG_DIR)
         os.system(f"rm -rf {LOG_DIR}/xdgtmp")
-
-

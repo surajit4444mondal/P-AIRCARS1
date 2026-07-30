@@ -370,64 +370,67 @@ def init_logger(logname, logfile, log_type="task", jobname="", password=""):
     observer
         Observer object
     """
-    timeout = 30
-    waited = 0
-    while True:
-        if not os.path.exists(logfile):
-            time.sleep(1)
-            waited += 1
-        elif waited >= timeout:
-            return
-        else:
-            break
-    logger = logging.getLogger(logname)
-    logger.propagate = False
-    if logger.hasHandlers():
-        logger.handlers.clear()
-    formatter = logging.Formatter("%(message)s")
-    remote_link = get_remote_logger_link()
-    if log_type not in ["master", "subflow", "task"]:
-        log_type = "task"
-    if remote_link != "":
-        if jobname:
-            job_id = jobname
-            log_id = get_logid(logfile)
-            remote_handler = RemoteLogger(
-                job_id=job_id,
-                log_id=log_id,
-                log_type=log_type,
-                remote_link=remote_link,
-                password=password,
-            )
-            logger.setLevel(logging.DEBUG)
-            remote_handler.setFormatter(formatter)
-            logger.addHandler(remote_handler)
-            try:
-                requests.post(
-                    f"{remote_link}/api/log",
-                    json={
-                        "job_id": job_id,
-                        "log_id": log_id,
-                        "log_type": log_type,
-                        "message": "",
-                        "password": password,
-                        "first": True,
-                    },
-                    timeout=2,
+    try:
+        timeout = 30
+        waited = 0
+        while True:
+            if not os.path.exists(logfile):
+                time.sleep(1)
+                waited += 1
+            elif waited >= timeout:
+                return
+            else:
+                break
+        logger = logging.getLogger(logname)
+        logger.propagate = False
+        if logger.hasHandlers():
+            logger.handlers.clear()
+        formatter = logging.Formatter("%(message)s")
+        remote_link = get_remote_logger_link()
+        if log_type not in ["master", "subflow", "task"]:
+            log_type = "task"
+        if remote_link != "":
+            if jobname:
+                job_id = jobname
+                log_id = get_logid(logfile)
+                remote_handler = RemoteLogger(
+                    job_id=job_id,
+                    log_id=log_id,
+                    log_type=log_type,
+                    remote_link=remote_link,
+                    password=password,
                 )
-            except Exception:
-                pass
-        if os.path.exists(logfile):
-            if os.path.islink(logfile):
-                logfile = os.readlink(logfile)
-            event_handler = LogTailHandler(logfile, logger)
-            observer = Observer()
-            observer.schedule(
-                event_handler, path=os.path.dirname(logfile), recursive=False
-            )
-            observer.start()
-            return observer
+                logger.setLevel(logging.DEBUG)
+                remote_handler.setFormatter(formatter)
+                logger.addHandler(remote_handler)
+                try:
+                    requests.post(
+                        f"{remote_link}/api/log",
+                        json={
+                            "job_id": job_id,
+                            "log_id": log_id,
+                            "log_type": log_type,
+                            "message": "",
+                            "password": password,
+                            "first": True,
+                        },
+                        timeout=2,
+                    )
+                except Exception:
+                    pass
+            if os.path.exists(logfile):
+                if os.path.islink(logfile):
+                    logfile = os.readlink(logfile)
+                event_handler = LogTailHandler(logfile, logger)
+                observer = Observer()
+                observer.schedule(
+                    event_handler, path=os.path.dirname(logfile), recursive=False
+                )
+                observer.start()
+                return observer
+            else:
+                return
         else:
             return
-    else:
-        return
+    except Exception:
+        return 

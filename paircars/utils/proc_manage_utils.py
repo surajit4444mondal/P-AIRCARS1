@@ -324,10 +324,12 @@ def submit_local_master_flow(args, jobid):
         print(
             f"Job scheduler is not local. Available job scheduler is : {scheduler_name}"
         )
-        cont=input("Do you want to continue to run P-AIRCARS in current node only? Y/N")
-        if cont.lower()=="n":
+        cont = input(
+            "Do you want to continue to run P-AIRCARS in current node only? Y/N"
+        )
+        if cont.lower() == "n":
             return 1
-            
+
     args_list = [shlex.quote(arg) for arg in sys.argv[1:]]
     if "--log2term" in args_list:
         args_list.remove("--log2term")

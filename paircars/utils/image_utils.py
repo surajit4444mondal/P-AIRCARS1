@@ -166,7 +166,8 @@ def calc_solar_image_stat(imagename, disc_size=50):
         data = data[0, ...]
     else:
         data = data
-    mask = create_circular_mask_array(data, radius)
+    center_y, center_x = np.where(data==np.nanmax(data))
+    mask = create_circular_mask_array(data, radius, center_x = center_x[0], center_y = center_y[0])
     masked_data = copy.deepcopy(data)
     masked_data[mask] = np.nan
     unmasked_data = copy.deepcopy(data)

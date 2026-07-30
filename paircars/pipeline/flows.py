@@ -23,10 +23,7 @@ from paircars.utils.mwa_ploting_utils import (
     plot_quartical_tables,
     plot_hpc_collage,
 )
-from paircars.utils.mwa_utils import (
-    freq_to_MWA_coarse,
-    get_selfcal_ntimes,
-)
+from paircars.utils.mwa_utils import freq_to_MWA_coarse
 from paircars.utils.ms_metadata import check_datacolumn_valid
 from paircars.utils.image_utils import filter_images
 from paircars.pipeline.tasks import (
@@ -107,7 +104,7 @@ def pre_process_subflow(
     )
     observer = None
     if os.path.exists(f"{workdir}/.jobname_password.npy"):
-        time.sleep(5)
+        time.sleep(0.5)
         jobname, password = np.load(
             f"{workdir}/.jobname_password.npy", allow_pickle=True
         )
@@ -123,91 +120,6 @@ def pre_process_subflow(
     if observer is None:
         print("Remote link or jobname is blank. Not transmiting to remote logger.")
     try:
-        ########################################
-        # Flagging coarse channel edges
-        ########################################
-        if emails != "":
-            email_msg = f"[{target_obsid}] Started flagging of targets."
-            send_task_notification(
-                emails,
-                email_msg,
-                jobid,
-                target_obsid,
-                timestamp,
-                flow_name=f"subflow {flow_name}",
-            )
-        print_banner("Starting task: Flagging targets.")
-        target_freqres_metafits = float(fits.getheader(target_metafits)["FINECHAN"])
-        msmd = msmetadata()
-        msmd.open(target_mslist[0])
-        target_freqres_ms = float(round(msmd.chanres(0,unit="kHz")[0],0))
-        print(f"Metafits frequency resolution: {target_freqres_metafits}kHz.")
-        print(f"Measurement set frequency resolution: {target_freqres_ms}kHz.")
-        if target_freqres_ms!=target_freqres_metafits:
-            print("Measurement set is already frequency averaged. Not flagging coarse channel edges.")
-            flag_bad_spw=False
-        else:
-            flag_bad_spw=True
-        try:
-            future_flag = run_flag.with_options(
-                task_run_name=f"flag_target_initial_{target_obsid}"
-            ).submit(
-                ",".join(target_mslist),
-                target_metafits,
-                workdir,
-                target_outdir,
-                datacolumn="data",
-                flag_calibrators=False,
-                flag_bad_spw=flag_bad_spw,
-                flag_quack=False,
-                use_rflag=False,
-                use_tfcrop=False,
-                flagdimension="freqtime",
-                flagdata_type="target",
-                run_solarflagger=False,
-                normalize=False,
-                restore_flag=False,
-                cpu_frac=round(cpu_frac, 2),
-                mem_frac=round(mem_frac, 2),
-                remote_log=remote_logger,
-                obsid=target_obsid,
-                verbose=verbose,
-            )
-            wait([future_flag])
-            msg, succeed, failed = future_flag.result()
-            if emails != "":
-                email_msg = f"[{target_obsid}] Initial flagging of targets is done.\nSucceeded: {succeed}, failed: {failed}."
-                send_task_notification(
-                    emails,
-                    email_msg,
-                    jobid,
-                    target_obsid,
-                    timestamp,
-                    flow_name=f"subflow {flow_name}",
-                )
-            filtered_ms = []
-            for c_ms in target_mslist:
-                c_ms = c_ms.rstrip("/")
-                if os.path.exists(f"{c_ms}/.flag_succeed"):
-                    filtered_ms.append(c_ms)
-                else:
-                    print(f"Issue in flagging of measurement set: {c_ms}")
-            target_mslist = filtered_ms  # Filtered target mslist
-            print_banner("Finished task: Initial flagging of target is done.")
-        except Exception:
-            print_banner("!!!! WARNING: Initial flagging error for targets. !!!!")
-            traceback.print_exc()
-            if emails != "":
-                email_msg = f"[{target_obsid}] Error in initial flagging of targets."
-                send_task_notification(
-                    emails,
-                    email_msg,
-                    jobid,
-                    target_obsid,
-                    timestamp,
-                    flow_name=f"subflow {flow_name}",
-                )
-    
         ########################################
         # Moving phasecenter to the solar center
         ########################################
@@ -348,7 +260,7 @@ def pre_process_subflow(
         run_time = end_time - start_time
         print(f"Total run time: {run_time}")
         stop_event.set()
-        time.sleep(60)
+        time.sleep(0.5)
         log_thread_flow.join()
         if observer is not None:
             clean_shutdown(observer)
@@ -409,7 +321,7 @@ def basic_cal_subflow(
     )
     observer = None
     if os.path.exists(f"{workdir}/.jobname_password.npy"):
-        time.sleep(5)
+        time.sleep(0.5)
         jobname, password = np.load(
             f"{workdir}/.jobname_password.npy", allow_pickle=True
         )
@@ -621,14 +533,17 @@ def basic_cal_subflow(
             cal_freqres_metafits = float(fits.getheader(cal_metafits)["FINECHAN"])
             msmd = msmetadata()
             msmd.open(split_cal_mslist[0])
-            cal_freqres_ms = float(round(msmd.chanres(0,unit="kHz")[0],0))
+            cal_freqres_ms = float(round(msmd.chanres(0, unit="kHz")[0], 0))
+            msmd.close()
             print(f"Metafits frequency resolution: {cal_freqres_metafits}kHz.")
             print(f"Measurement set frequency resolution: {cal_freqres_ms}kHz.")
-            if cal_freqres_ms!=cal_freqres_metafits:
-                print("Measurement set is already frequency averaged. Not flagging coarse channel edges.")
-                flag_bad_spw=False
+            if cal_freqres_ms != cal_freqres_metafits:
+                print(
+                    "Measurement set is already frequency averaged. Not flagging coarse channel edges."
+                )
+                flag_bad_spw = False
             else:
-                flag_bad_spw=True
+                flag_bad_spw = True
             try:
                 future_flag = run_flag.with_options(
                     task_run_name=f"flag_cal_data_{cal_obsid}"
@@ -917,7 +832,7 @@ def basic_cal_subflow(
         run_time = end_time - start_time
         print(f"Total run time: {run_time}")
         stop_event.set()
-        time.sleep(60)
+        time.sleep(0.5)
         log_thread_flow.join()
         if observer is not None:
             clean_shutdown(observer)
@@ -950,7 +865,8 @@ def selfcal_subflow(
     use_solarflagger,
     keep_backup,
     # Selfcal parameters
-    solint,
+    int_solint,
+    pol_solint,
     timeavg,
     freqavg,
     image_timeres,
@@ -1001,7 +917,7 @@ def selfcal_subflow(
     )
     observer = None
     if os.path.exists(f"{workdir}/.jobname_password.npy"):
-        time.sleep(5)
+        time.sleep(0.5)
         jobname, password = np.load(
             f"{workdir}/.jobname_password.npy", allow_pickle=True
         )
@@ -1092,22 +1008,27 @@ def selfcal_subflow(
             ###############################################
             # Removing previous self-calibration artificats
             ###############################################
+            msmd = msmetadata()
+            msmd.open(target_mslist[0])
+            times = msmd.timesforspws(0)
+            timeres = np.nanmean(np.diff(times))
+            msmd.close()
             print("Removing all previous self-calibration artificats.")
             os.system(
                 f"rm -rf {workdir}/selfcal* {workdir}/.intselfcal* {workdir}/.polselfcal*"
             )
             prefix = "selfcal"
             try:
-                time_interval = float(solint)
+                time_interval = float(int_solint)
             except BaseException:
-                if solint.endswith("s"):
-                    time_interval = float(solint.split("s")[0])
-                elif solint.endswith("min"):
-                    time_interval = float(solint.split("min")[0]) * 60
-                elif solint == "int":
-                    time_interval = image_timeres
+                if int_solint.endswith("s"):
+                    time_interval = float(int_solint.split("s")[0])
+                elif int_solint.endswith("min"):
+                    time_interval = float(int_solint.split("min")[0]) * 60
+                elif int_solint == "int":
+                    time_interval = timeres
                 else:
-                    time_interval = 60.0
+                    time_interval = 30.0
 
             ######################
             # Spliting
@@ -1123,15 +1044,8 @@ def selfcal_subflow(
                     flow_name=f"subflow {flow_name}",
                 )
             print_banner(f"Starting task: Spliting {prefix}.")
-            ntime = get_selfcal_ntimes(target_mslist[0])
-            msmd = msmetadata()
-            msmd.open(target_mslist[0])
-            times = msmd.timesforspws(0)
-            timeres = np.nanmean(np.diff(times))
-            msmd.close()
-            time_window = min(10, round(ntime * timeres, 1))  # Maximum 10s
-            print(f"Time window: {min(time_window, time_interval)}")
-            print(f"Time interval: {time_interval}")
+            print(f"Time window: {timeres}s")
+            print(f"Time interval: {time_interval}s")
             try:
                 future_selfcal_split = run_target_split_jobs.with_options(
                     task_run_name=f"split_{target_obsid}"
@@ -1144,8 +1058,8 @@ def selfcal_subflow(
                     freqres=freqavg,
                     prefix=prefix,
                     force_split=True,
-                    only_disk=False,
-                    time_window=min(time_window, time_interval),
+                    single_chan_split=False,
+                    time_window=timeres,
                     time_interval=time_interval,
                     quack_timestamps=quack_timestamps,
                     jobid=jobid,
@@ -1413,85 +1327,6 @@ def selfcal_subflow(
                             flow_name=f"subflow {flow_name}",
                         )
 
-            #########################################################
-            # Basic flagging beforr selfcal on corrected data column
-            #########################################################
-            if use_solarflagger:
-                if emails != "":
-                    email_msg = f"[{target_obsid}] Started flagging for self-calibration measurment sets corrected data columns."
-                    send_task_notification(
-                        emails,
-                        email_msg,
-                        jobid,
-                        target_obsid,
-                        timestamp,
-                        flow_name=f"subflow {flow_name}",
-                    )
-                print_banner(
-                    "Starting task: Flagging selfcal targets corrected data columns."
-                )
-                try:
-                    future_flag = run_flag.with_options(
-                        task_run_name=f"flag_selfcal_corrected_{target_obsid}"
-                    ).submit(
-                        ",".join(selfcal_mslist),
-                        target_metafits,
-                        workdir,
-                        target_outdir,
-                        datacolumn="corrected",
-                        flag_calibrators=False,
-                        flag_bad_spw=False,
-                        flag_quack=False,
-                        use_rflag=False,
-                        use_tfcrop=False,
-                        flagdimension="freqtime",
-                        flagdata_type="selfcal",
-                        run_solarflagger=use_solarflagger,
-                        normalize=False,
-                        restore_flag=False,
-                        jobid=jobid,
-                        cpu_frac=round(cpu_frac, 2),
-                        mem_frac=round(mem_frac, 2),
-                        remote_log=remote_logger,
-                        obsid=target_obsid,
-                        verbose=verbose,
-                    )
-                    msg, succeed, failed = future_flag.result()
-                    if emails != "":
-                        email_msg = f"[{target_obsid}] Flagging for self-calibration measurment sets corrected data columns are done.\nSucceeded: {succeed}, failed: {failed}."
-                        send_task_notification(
-                            emails,
-                            email_msg,
-                            jobid,
-                            target_obsid,
-                            timestamp,
-                            flow_name=f"subflow {flow_name}",
-                        )
-                    for s_ms in selfcal_mslist:
-                        s_ms = s_ms.rstrip("/")
-                        if os.path.exists(f"{s_ms}/.flag_failed"):
-                            print(
-                                f"Issue in flagging: {s_ms}. Check calibration solutions carefully."
-                            )
-                    print_banner(
-                        "Finished task: Flagging for self-calibration measurment sets corrected data columns are done."
-                    )
-                except Exception:
-                    print_banner(
-                        "!!!! WARNING: Flagging error. Examine calibration solutions with caution. !!!!"
-                    )
-                    traceback.print_exc()
-                    if emails != "":
-                        email_msg = f"[{target_obsid}] Error occured in flagging self-calibration measurement sets corrected data columns."
-                        send_task_notification(
-                            emails,
-                            email_msg,
-                            jobid,
-                            target_obsid,
-                            timestamp,
-                            flow_name=f"subflow {flow_name}",
-                        )
-
             #############################
             # Self-calibration
             #############################
@@ -1519,7 +1354,8 @@ def selfcal_subflow(
                     selfcaldir,
                     target_metafits,
                     cal_applied,
-                    solint=solint,
+                    int_solint=int_solint,
+                    pol_solint=pol_solint,
                     do_apcal=do_ap_selfcal,
                     do_polcal=do_polcal,
                     solar_selfcal=solar_selfcal,
@@ -1546,6 +1382,8 @@ def selfcal_subflow(
                     pol_DR,
                     max_int_DR,
                     max_pol_DR,
+                    total_disk_detected_ms,
+                    total_non_disk_detected_ms,
                 ) = future_selfcal.result()
                 if emails != "":
                     email_msg = f"[{target_obsid}] Self-calibration is done.\nIntensity self-calibration, Succeeded: {int_succeed}, failed: {int_failed}\n"
@@ -1555,6 +1393,7 @@ def selfcal_subflow(
                     if do_polcal:
                         email_msg = f"{email_msg}\nPolarisation self-calibration, Succeeded: {pol_succeed}, failed: {pol_failed}\n"
                         email_msg = f"{email_msg}Average DR: {pol_DR}, maximum DR: {max_pol_DR}."
+                    email_msg = f"{email_msg}\nTotal disk detected ms: {total_disk_detected_ms}, non-disk detected ms: {total_non_disk_detected_ms}."
                     send_task_notification(
                         emails,
                         email_msg,
@@ -1701,7 +1540,7 @@ def selfcal_subflow(
         run_time = end_time - start_time
         print(f"Total run time: {run_time}")
         stop_event.set()
-        time.sleep(60)
+        time.sleep(0.5)
         log_thread_flow.join()
         if observer is not None:
             clean_shutdown(observer)
@@ -1770,7 +1609,7 @@ def applysol_subflow(
     )
     observer = None
     if os.path.exists(f"{workdir}/.jobname_password.npy"):
-        time.sleep(5)
+        time.sleep(0.5)
         jobname, password = np.load(
             f"{workdir}/.jobname_password.npy", allow_pickle=True
         )
@@ -2160,7 +1999,7 @@ def applysol_subflow(
         run_time = end_time - start_time
         print(f"Total run time: {run_time}")
         stop_event.set()
-        time.sleep(60)
+        time.sleep(0.5)
         log_thread_flow.join()
         if observer is not None:
             clean_shutdown(observer)
@@ -2237,7 +2076,7 @@ def imaging_subflow(
     )
     observer = None
     if os.path.exists(f"{workdir}/.jobname_password.npy"):
-        time.sleep(5)
+        time.sleep(0.5)
         jobname, password = np.load(
             f"{workdir}/.jobname_password.npy", allow_pickle=True
         )
@@ -2443,7 +2282,7 @@ def imaging_subflow(
                         timestamp,
                         flow_name=f"subflow {flow_name}",
                     )
-
+                    
         #################################################################
         # Filtering only coarse channel images for default overlay mode
         #################################################################
@@ -2561,7 +2400,7 @@ def imaging_subflow(
         run_time = end_time - start_time
         print(f"Total run time: {run_time}")
         stop_event.set()
-        time.sleep(60)
+        time.sleep(0.5)
         log_thread_flow.join()
         if observer is not None:
             clean_shutdown(observer)
