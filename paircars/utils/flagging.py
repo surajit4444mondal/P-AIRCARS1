@@ -4,11 +4,11 @@ import os
 import dask
 from datetime import datetime as dt, timezone
 from daskms.experimental.zarr import xds_from_zarr, xds_to_zarr
-from .basic_utils import suppress_output
+from .basic_utils import suppress_output, mjdsec_to_timestamp
 from .calibration import get_quartical_soltype
 from .resource_utils import limit_threads
 from .imaging import calc_maxuv
-from casatools import table, msmetadata
+from casatools import table, msmetadata, ms as casamstool
 
 
 ###############################
@@ -102,8 +102,6 @@ def flag_badchan(msname, spw=""):
     """
     if spw == "":
         return
-    from casatools import table
-
     tb = table()
     tb.open(msname, nomodify=False)
     flag = tb.getcol("FLAG")
@@ -251,8 +249,6 @@ def get_chans_flag_per_time(msname):
     list
         Channel flag fractions
     """
-    from casatools import ms as casamstool, msmetadata
-
     msmd = msmetadata()
     msmd.open(msname)
     times = msmd.timesforspws(0)
@@ -318,11 +314,7 @@ def get_unflagged_antennas(
     return unflagged_antenna_names, flag_frac_list
 
 
-def get_chans_flag(
-    msname="",
-    field="",
-    n_threads=-1,
-):
+def get_chans_flag(msname):
     """
     Get flag/unflag channel list
 
@@ -330,8 +322,6 @@ def get_chans_flag(
     ----------
     msname : str
         Measurement set name
-    field : str, optional
-        Field name or ID
 
     Returns
     -------
@@ -340,27 +330,48 @@ def get_chans_flag(
     list
         Flag channel list
     """
-    n_threads = max(1, n_threads)
+    mstool = casamstool()
+    mstool.open(msname)
+    flag = mstool.getdata("FLAG")["flag"]
+    mstool.close()
+    flagged_channel_indices = np.all(flag, axis=(0, 2))
+    flagged_channels = np.where(flagged_channel_indices)[0].tolist()
+    unflagged_channels = np.where(~flagged_channel_indices)[0].tolist()
+    return sorted(unflagged_channels), sorted(flagged_channels)
 
-    with limit_threads(n_threads=n_threads):
-        from casatasks import flagdata
 
-    msname = msname.rstrip("/")
-    mspath = os.path.dirname(os.path.abspath(msname))
-    os.chdir(mspath)
-    with suppress_output():
-        summary = flagdata(vis=msname, field=field, mode="summary", spwchan=True)
-    unflag_chans = []
-    flag_chans = []
-    for chan in summary["spw:channel"]:
-        r = summary["spw:channel"][chan]
-        chan_number = int(chan.split("0:")[-1])
-        flag_frac = r["flagged"] / r["total"]
-        if flag_frac == 1:
-            flag_chans.append(chan_number)
-        else:
-            unflag_chans.append(chan_number)
-    return unflag_chans, flag_chans
+def get_times_flag(msname):
+    """
+    Get flag/unflag time list
+
+    Parameters
+    ----------
+    msname : str
+        Measurement set name
+
+    Returns
+    -------
+    list
+        Unflag time list
+    list
+        Flag time list
+    """
+    msmd = msmetadata()
+    msmd.open(msname)
+    times = msmd.timesforspws(0)
+    msmd.close()
+    mstool = casamstool()
+    mstool.open(msname)
+    flag = mstool.getdata("FLAG", ifraxis=True)["flag"]
+    mstool.close()
+    flagged_time_indices = np.all(flag, axis=(0, 1, 2))
+    flagged_time_mjds = sorted(times[flagged_time_indices])
+    unflagged_time_mjds = sorted(times[~flagged_time_indices])
+    flagged_times = [mjdsec_to_timestamp(t, str_format=1) for t in flagged_time_mjds]
+    unflagged_times = [
+        mjdsec_to_timestamp(t, str_format=1) for t in unflagged_time_mjds
+    ]
+    return unflagged_times, flagged_times
 
 
 def calc_flag_fraction(
@@ -527,15 +538,11 @@ def flag_quartical_table(caltable, threshold=10.0):
         | (g2_imag > threshold * g2_imag_std)
     )
 
-    gain_data[np.isnan(gain_data)][..., 0] = 1.0
-    gain_data[np.isnan(gain_data)][..., 1] = 0.0
-    gain_data[np.isnan(gain_data)][..., 2] = 0.0
-    gain_data[np.isnan(gain_data)][..., 3] = 1.0
+    mask = np.isnan(gain_data).any(axis=-1)
+    gain_data[mask] = [1.0, 0.0, 0.0, 1.0]
     gain_flag[pos] = True
-    gain_data[gain_flag][..., 0] = 1.0
-    gain_data[gain_flag][..., 1] = 0.0
-    gain_data[gain_flag][..., 2] = 0.0
-    gain_data[gain_flag][..., 3] = 1.0
+    gain_flag |= mask
+    gain_data[gain_flag] = [1.0, 0.0, 0.0, 1.0]
 
     shape = gain_flag.shape
     ntime = shape[0]
@@ -568,5 +575,5 @@ def flag_quartical_table(caltable, threshold=10.0):
     output_path = f"{caltable}::{soltype}"
     os.system(f"rm -rf {caltable}")
     write_xds_list = xds_to_zarr(gains, output_path)
-    dask.compute(write_xds_list)
+    dask.compute(write_xds_list, scheduler="threads")
     return caltable

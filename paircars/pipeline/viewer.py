@@ -7,6 +7,7 @@ import numpy as np
 import logging
 import traceback
 import glob
+import getpass
 from PyQt5.QtWidgets import (
     QApplication,
     QWidget,
@@ -28,6 +29,8 @@ from watchdog.events import FileSystemEventHandler
 LOG_DIR = None
 POSIX_FADV_DONTNEED = 4
 libc = ctypes.CDLL("libc.so.6")
+
+username = getpass.getuser()
 
 
 #####################################
@@ -85,6 +88,16 @@ def get_cachedir():
     cachedir = f"{homedir}/.paircarspipe"
     os.makedirs(cachedir, exist_ok=True)
     return cachedir
+
+
+def get_datadir():
+    cachedir = get_cachedir()
+    if not os.path.exists(f"{cachedir}/paircarspipe_data_dir.txt"):
+        return None
+    with open(f"{cachedir}/paircarspipe_data_dir.txt", "r") as f:
+        datadir = f.read().strip()
+    os.makedirs(datadir, exist_ok=True)
+    return datadir
 
 
 class SmartDefaultsHelpFormatter(argparse.ArgumentDefaultsHelpFormatter):
@@ -221,31 +234,38 @@ def format_log_block(text):
     for line in text.splitlines():
         if not line.strip():
             continue
-
         parts = line.split("|")
         color = "#dddddd"
-
         if len(parts) > 1:
             level = parts[0].strip()
             msg = "|".join(parts[1:]).strip()
-
             if level.isdigit():
                 level = logging.getLevelName(int(level))
-
-            if "ERROR" in level:
+            if "CRITICAL" in level:
+                color = "#ff55ff"
+            elif "ERROR" in level:
                 color = "#ff5555"
             elif "WARNING" in level:
-                color = "#f1fa8c"
+                color = "#ffff55"
             elif "DEBUG" in level:
-                color = "#888888"
-            elif "INFO" in level:
                 color = "#8be9fd"
-
+            elif "INFO" in level:
+                color = "#55ff55"
             line = f"{level} | {msg}"
+        # Color only up to the first " - "
+        pos = line.rfind("|")
+        if pos != -1:
+            colored_part = line[: pos + 1]
+            remaining_part = line[pos + 1 :]
 
-        html_line = f'<span style="color:{color};">{line}</span><br><br>'
+            html_line = (
+                f'<span style="color:{color};">{colored_part}</span>'
+                f"{remaining_part}<br><br>"
+            )
+        else:
+            html_line = f'<span style="color:{color};">{line}</span><br><br>'
+
         formatted.append(html_line)
-
     return "".join(formatted)
 
 
@@ -503,7 +523,8 @@ def cli():
         parser.print_help(sys.stderr)
         return 1
 
-    cachedir = get_cachedir()
+    cachedir = f"{get_datadir()}/{username}"
+    os.makedirs(cachedir, exist_ok=True)
 
     try:
         if args.jobid is None and args.logdir is None:

@@ -2,7 +2,8 @@ import argparse
 import sys
 import os
 import numpy as np
-from paircars.utils.basic_utils import get_cachedir, check_port_status, get_free_port
+import getpass
+from paircars.utils.basic_utils import get_datadir, check_port_status, get_free_port
 from paircars.utils.logger_utils import SmartDefaultsHelpFormatter
 from paircars.utils.proc_manage_utils import get_scheduler_name
 from paircars.utils.prefect_setup_utils import (
@@ -88,7 +89,10 @@ def cli():
     elif args.command == "config":
         show_prefect_config(scheduler_name=scheduler_name)
     else:
-        cachedir = f"{get_cachedir()}/prefect_{scheduler_name}"
+        username = getpass.getuser()
+        datadir = f"{get_datadir()}/{username}"
+        os.makedirs(datadir, exist_ok=True)
+        cachedir = f"{datadir}/prefect_{scheduler_name}"
         os.makedirs(cachedir, exist_ok=True)
         config_file = f"{cachedir}/prefect.config.npy"
         if os.path.exists(config_file) is False:

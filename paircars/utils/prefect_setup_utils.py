@@ -6,13 +6,17 @@ import signal
 import toml
 import traceback
 import numpy as np
+import getpass
 from dotenv import load_dotenv
-from .basic_utils import get_cachedir, get_datadir
+from .basic_utils import get_datadir
 from .killjob_utils import kill_port
 from .udocker_utils import run_postgres, kill_postgres
 
 
 # === CONFIG ===
+username = getpass.getuser()
+
+
 def prefect_config(port, postgres_port, scheduler_name="local"):
     """
     Configure prefect
@@ -36,7 +40,8 @@ def prefect_config(port, postgres_port, scheduler_name="local"):
     ##################################
     # Postgres information
     ##################################
-    datadir = get_datadir()
+    datadir = f"{get_datadir()}/{username}"
+    os.makedirs(datadir, exist_ok=True)
     postgres_url_file = f"{datadir}/postgres.url"
     if os.path.exists(postgres_url_file) is False:
         print("Start postgres server first.")
@@ -45,7 +50,7 @@ def prefect_config(port, postgres_port, scheduler_name="local"):
     ###################################
     # Prefect configuration
     ###################################
-    cachedir = f"{get_cachedir()}/prefect_{scheduler_name}"
+    cachedir = f"{datadir}/prefect_{scheduler_name}"
     os.makedirs(cachedir, exist_ok=True)
 
     config_file = f"{cachedir}/prefect.config.npy"
@@ -120,7 +125,9 @@ def write_prefect_profile(scheduler_name="local"):
     str
         Profile file
     """
-    cachedir = f"{get_cachedir()}/prefect_{scheduler_name}"
+    datadir = f"{get_datadir()}/{username}"
+    os.makedirs(datadir, exist_ok=True)
+    cachedir = f"{datadir}/prefect_{scheduler_name}"
     os.makedirs(cachedir, exist_ok=True)
     config_file = f"{cachedir}/prefect.config.npy"
     if os.path.exists(config_file) is False:
@@ -170,7 +177,9 @@ def save_prefect_env_to_file(scheduler_name="local"):
     str
         Dashboard file
     """
-    cachedir = f"{get_cachedir()}/prefect_{scheduler_name}"
+    datadir = f"{get_datadir()}/{username}"
+    os.makedirs(datadir, exist_ok=True)
+    cachedir = f"{datadir}/prefect_{scheduler_name}"
     os.makedirs(cachedir, exist_ok=True)
     config_file = f"{cachedir}/prefect.config.npy"
     if os.path.exists(config_file) is False:
@@ -335,7 +344,9 @@ def stop_prefect_server(scheduler_name="local"):
     int
         Success message
     """
-    cachedir = f"{get_cachedir()}/prefect_{scheduler_name}"
+    datadir = f"{get_datadir()}/{username}"
+    os.makedirs(datadir, exist_ok=True)
+    cachedir = f"{datadir}/prefect_{scheduler_name}"
     os.makedirs(cachedir, exist_ok=True)
     config_file = f"{cachedir}/prefect.config.npy"
     if os.path.exists(config_file) is False:
@@ -415,7 +426,9 @@ def prefect_server_status(scheduler_name="local"):
     scheduler_name : str, optional
         Scheduler name
     """
-    cachedir = f"{get_cachedir()}/prefect_{scheduler_name}"
+    datadir = f"{get_datadir()}/{username}"
+    os.makedirs(datadir, exist_ok=True)
+    cachedir = f"{datadir}/prefect_{scheduler_name}"
     os.makedirs(cachedir, exist_ok=True)
     config_file = f"{cachedir}/prefect.config.npy"
     if os.path.exists(config_file) is False:
@@ -445,7 +458,9 @@ def get_prefect_env(scheduler_name="local"):
     dict
         Environment dictionary
     """
-    cachedir = f"{get_cachedir()}/prefect_{scheduler_name}"
+    datadir = f"{get_datadir()}/{username}"
+    os.makedirs(datadir, exist_ok=True)
+    cachedir = f"{datadir}/prefect_{scheduler_name}"
     os.makedirs(cachedir, exist_ok=True)
     config_file = f"{cachedir}/prefect.config.npy"
     if os.path.exists(config_file) is False:
@@ -477,7 +492,9 @@ def show_prefect_config(scheduler_name="local"):
     scheduler_name : str, optional
         Scheduler name
     """
-    cachedir = f"{get_cachedir()}/prefect_{scheduler_name}"
+    datadir = f"{get_datadir()}/{username}"
+    os.makedirs(datadir, exist_ok=True)
+    cachedir = f"{datadir}/prefect_{scheduler_name}"
     os.makedirs(cachedir, exist_ok=True)
     config_file = f"{cachedir}/prefect.config.npy"
     if os.path.exists(config_file) is False:

@@ -26,6 +26,7 @@ from paircars.utils.prefect_logger_utils import (
 async def test_save_logs_by_task_id(raise_error, final_logs):
     task_id = str(uuid4())
     ts = datetime.now(timezone.utc)
+
     def make_log(log_id="log1", msg="Test message"):
         log = MagicMock()
         log.id = log_id
@@ -36,6 +37,7 @@ async def test_save_logs_by_task_id(raise_error, final_logs):
         log.level = MagicMock()
         log.level.name = "INFO"
         return log
+
     first_log = make_log("log1", "Test message")
     second_log = make_log("log2", "Final message")
     mock_client = AsyncMock()
@@ -50,16 +52,17 @@ async def test_save_logs_by_task_id(raise_error, final_logs):
             ]
         else:
             mock_client.read_logs.return_value = [first_log]
-    with patch(
-        "paircars.utils.prefect_logger_utils.get_client",
-        return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_client)),
-    ), patch(
-        "paircars.utils.prefect_logger_utils.local_tz",
-        timezone.utc,
-    ), patch(
-        "builtins.open", mock_open()
-    ) as m, patch(
-        "os.makedirs"
+    with (
+        patch(
+            "paircars.utils.prefect_logger_utils.get_client",
+            return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_client)),
+        ),
+        patch(
+            "paircars.utils.prefect_logger_utils.local_tz",
+            timezone.utc,
+        ),
+        patch("builtins.open", mock_open()) as m,
+        patch("os.makedirs"),
     ):
         stop_event = threading.Event()
         task = asyncio.create_task(
@@ -79,9 +82,7 @@ async def test_save_logs_by_task_id(raise_error, final_logs):
         if raise_error:
             assert any("Error fetching task logs" in w for w in writes)
         else:
-            expected_ts = ts.astimezone(timezone.utc).strftime(
-                "%Y-%m-%d %H:%M:%S"
-            )
+            expected_ts = ts.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
             assert any(
                 f"INFO | {expected_ts} | test-task | Test message\n" in w
@@ -106,6 +107,7 @@ async def test_save_logs_by_flow_id(raise_error, final_logs):
     flow_id = str(uuid4())
     other_flow_id = str(uuid4())
     ts = datetime.now(timezone.utc)
+
     def make_log(
         log_id,
         msg,
@@ -122,6 +124,7 @@ async def test_save_logs_by_flow_id(raise_error, final_logs):
         log.level = MagicMock()
         log.level.name = "INFO"
         return log
+
     flow_log = make_log("log1", "Flow message", flow_id, None)
     task_log = make_log("log2", "Task message", flow_id, "task123")
     wrong_flow_log = make_log("log3", "Wrong flow", other_flow_id, None)
@@ -133,7 +136,7 @@ async def test_save_logs_by_flow_id(raise_error, final_logs):
         if final_logs:
             mock_client.read_logs.side_effect = [
                 [flow_log, task_log, wrong_flow_log],  # main loop
-                [final_log],                          # final drain
+                [final_log],  # final drain
                 [],
             ]
         else:
@@ -142,16 +145,17 @@ async def test_save_logs_by_flow_id(raise_error, final_logs):
                 task_log,
                 wrong_flow_log,
             ]
-    with patch(
-        "paircars.utils.prefect_logger_utils.get_client",
-        return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_client)),
-    ), patch(
-        "paircars.utils.prefect_logger_utils.local_tz",
-        timezone.utc,
-    ), patch(
-        "builtins.open", mock_open()
-    ) as m, patch(
-        "os.makedirs"
+    with (
+        patch(
+            "paircars.utils.prefect_logger_utils.get_client",
+            return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_client)),
+        ),
+        patch(
+            "paircars.utils.prefect_logger_utils.local_tz",
+            timezone.utc,
+        ),
+        patch("builtins.open", mock_open()) as m,
+        patch("os.makedirs"),
     ):
         stop_event = threading.Event()
         task = asyncio.create_task(
@@ -170,9 +174,7 @@ async def test_save_logs_by_flow_id(raise_error, final_logs):
         if raise_error:
             assert any("Error fetching flow logs" in w for w in writes)
         else:
-            expected_ts = ts.astimezone(timezone.utc).strftime(
-                "%Y-%m-%d %H:%M:%S"
-            )
+            expected_ts = ts.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
             assert any(
                 f"INFO | {expected_ts} | test-flow | Flow message\n" in w
                 for w in writes
@@ -181,11 +183,9 @@ async def test_save_logs_by_flow_id(raise_error, final_logs):
             assert not any("Wrong flow" in w for w in writes)
             if final_logs:
                 assert any(
-                    f"INFO | {expected_ts} | test-flow | Final flow message\n"
-                    in w
+                    f"INFO | {expected_ts} | test-flow | Final flow message\n" in w
                     for w in writes
                 )
-            
 
 
 def test_start_log_task_saver():

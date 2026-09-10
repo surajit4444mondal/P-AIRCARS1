@@ -3,9 +3,9 @@ import traceback
 import warnings
 import copy
 import os
+import io
 from collections import defaultdict
 from astropy.io import fits
-from astropy.wcs import WCS
 from astropy.wcs import FITSFixedWarning
 from .basic_utils import average_timestamp, timestamp_to_mjdsec
 from .udocker_utils import run_wsclean
@@ -16,7 +16,7 @@ warnings.simplefilter("ignore", category=FITSFixedWarning)
 ##########################
 # Image analysis related
 ##########################
-def create_circular_mask(msname, cellsize, imsize, mask_radius=20):
+def create_circular_mask(msname, cellsize, imsize, mask_radius=96):
     """
     Create fits solar mask
 
@@ -29,7 +29,7 @@ def create_circular_mask(msname, cellsize, imsize, mask_radius=20):
     imsize : int
         Imsize in number of pixels
     mask_radius : float
-        Mask radius in arcmin
+        Mask radius in arcmin (default: 4 solr radii)
 
     Returns
     -------
@@ -50,17 +50,11 @@ def create_circular_mask(msname, cellsize, imsize, mask_radius=20):
             "-size " + str(imsize) + " " + str(imsize),
             "-nwlayers 1",
             "-niter 0 -name " + imagename_prefix,
-            "-channel-range 0 1",
-            "-interval 0 1",
         ]
         wsclean_cmd = "wsclean " + " ".join(wsclean_args) + " " + msname
         msg = run_wsclean(wsclean_cmd, "paircarswsclean", verbose=False)
         if msg == 0:
-            center = (int(imsize / 2), int(imsize / 2))
             radius = mask_radius * 60 / cellsize
-            Y, X = np.ogrid[:imsize, :imsize]
-            dist_from_center = np.sqrt((X - center[0]) ** 2 + (Y - center[1]) ** 2)
-            mask = dist_from_center <= radius
             os.system(
                 "cp -r "
                 + imagename_prefix
@@ -72,6 +66,11 @@ def create_circular_mask(msname, cellsize, imsize, mask_radius=20):
             data = fits.getdata("mask-" + os.path.basename(imagename_prefix) + ".fits")
             header = fits.getheader(
                 "mask-" + os.path.basename(imagename_prefix) + ".fits"
+            )
+            maxpos = np.where(data[0, 0, ...] == np.nanmax(data[0, 0, ...]))
+            y_cen, x_cen = maxpos[0][0], maxpos[1][0]
+            mask = create_circular_mask_array(
+                data[0, 0, ...], radius, center_x=x_cen, center_y=y_cen
             )
             data[0, 0, ...][mask] = 1.0
             data[0, 0, ...][~mask] = 0.0
@@ -123,7 +122,52 @@ def create_circular_mask_array(data, radius, center_x=None, center_y=None):
     return mask
 
 
-def calc_solar_image_stat(imagename, disc_size=50):
+def get_image_npol(imagename):
+    """
+    Get image cube number of polarisation
+
+    Parameters
+    ----------
+    imagename : str
+        Imagename
+
+    Returns
+    -------
+    int
+        Number of polarisation planes
+    """
+    header = fits.getheader(imagename)
+    if header["CTYPE4"] == "STOKES":
+        npol = int(header["NAXIS4"])
+    elif header["CTYPE3"] == "STOKES":
+        npol = int(header["NAXIS3"])
+    else:
+        npol = 1
+    return npol
+
+
+def check_valid_image(imagename):
+    """
+    Check whether the image is valid or not
+
+    Parameters
+    ----------
+    imagename : str
+        Image name
+
+    Returns
+    -------
+    bool
+        Whether valid image or not
+    """
+    data = fits.getdata(imagename)
+    if np.nansum(data) == 0:
+        return False
+    else:
+        return True
+        
+        
+def calc_solar_image_stat(imagename, modelname="", disc_radius=50):
     """
     Calculate solar image dynamic range
 
@@ -131,8 +175,10 @@ def calc_solar_image_stat(imagename, disc_size=50):
     ----------
     imagename : str
         Fits image name
-    disc_size : float, optional
-        Solar disc size in arcmin (default : 50)
+    modelname : str, optional
+        Model image name (N.B.: If provided total model flux is also returned)
+    disc_radius : float, optional
+        Disc radius in arcmin (default : 50)
 
     Returns
     -------
@@ -152,12 +198,14 @@ def calc_solar_image_stat(imagename, disc_size=50):
         RMS dynamic range
     float
         Min-max dynamic range
+    float
+        Total model flux
     """
     data = fits.getdata(imagename)
     header = fits.getheader(imagename)
     total_pix = int(header["NAXIS1"])
     pix_size = abs(header["CDELT1"]) * 3600.0  # In arcsec
-    radius = int((disc_size * 60) / pix_size)
+    radius = int((disc_radius * 60) / pix_size)
     if radius > total_pix:
         radius = total_pix / 4.0
     if data.ndim == 4:
@@ -166,8 +214,10 @@ def calc_solar_image_stat(imagename, disc_size=50):
         data = data[0, ...]
     else:
         data = data
-    center_y, center_x = np.where(data==np.nanmax(data))
-    mask = create_circular_mask_array(data, radius, center_x = center_x[0], center_y = center_y[0])
+    center_y, center_x = np.where(data == np.nanmax(data))
+    mask = create_circular_mask_array(
+        data, radius, center_x=center_x[0], center_y=center_y[0]
+    )
     masked_data = copy.deepcopy(data)
     masked_data[mask] = np.nan
     unmasked_data = copy.deepcopy(data)
@@ -187,6 +237,11 @@ def calc_solar_image_stat(imagename, disc_size=50):
     mean_val = float(np.nanmean(unmasked_data))
     median_val = float(np.nanmedian(unmasked_data))
     del data, mask, unmasked_data, masked_data
+    if modelname != "" and os.path.exists(modelname):
+        modeldata = fits.getdata(modelname)
+        total_model_flux = round(np.nansum(modeldata), 2)
+    else:
+        total_model_flux = np.nan
     return (
         round(maxval, 2),
         round(minval, 2),
@@ -196,75 +251,8 @@ def calc_solar_image_stat(imagename, disc_size=50):
         round(median_val, 2),
         round(rms_dyn, 2),
         round(minmax_dyn, 2),
+        total_model_flux,
     )
-
-
-def calc_dyn_range(imagename, modelname, residualname, fits_mask=""):
-    """
-    Calculate dynamic ranges.
-
-
-    Parameters
-    ----------
-    imagename : list or str
-        Image FITS file(s)
-    modelname : list or str
-        Model FITS file(s)
-    residualname : list ot str
-        Residual FITS file(s)
-    fits_mask : str, optional
-        FITS file mask
-
-    Returns
-    -------
-    model_flux : float
-        Total model flux.
-    dyn_range_rms : float
-        Max/RMS dynamic range.
-    rms : float
-        RMS of the image
-    """
-
-    def load_data(name):
-        return fits.getdata(name)
-
-    def to_list(x):
-        return [x] if isinstance(x, str) else x
-
-    imagename = to_list(imagename)
-    modelname = to_list(modelname)
-    residualname = to_list(residualname)
-
-    use_mask = bool(fits_mask and os.path.exists(fits_mask))
-    mask_data = fits.getdata(fits_mask).astype(bool) if use_mask else None
-
-    if mask_data is not None:
-        mask_data = mask_data[0, 0, ...]
-
-    model_flux, dr1, rmsvalue = 0, 0, 0
-
-    for i in range(len(imagename)):
-        img = imagename[i]
-        res = residualname[i]
-        image = load_data(img)
-        residual = load_data(res)
-        rms = np.nanstd(residual)
-        image = image[0, 0, ...]
-        residual = residual[0, 0, ...]
-        if use_mask:
-            maxval = np.nanmax(image[mask_data])
-        else:
-            maxval = np.nanmax(image)
-        dr1 += maxval / rms if rms else 0
-        rmsvalue += rms
-
-    for mod in modelname:
-        model = load_data(mod)
-        model = model[0, 0, ...]
-        model_flux += np.nansum(model[mask_data] if use_mask else model)
-
-    rmsvalue = rmsvalue / np.sqrt(len(residualname))
-    return float(model_flux), round(float(dr1), 2), round(float(rmsvalue), 2)
 
 
 def generate_tb_map(imagename, outfile=""):
@@ -324,7 +312,6 @@ def cutout_image(fits_file, output_file, x_deg=2):
     hdu = fits.open(fits_file)[0]
     data = hdu.data  # shape: (nfreq, nstokes, ny, nx)
     header = hdu.header
-    WCS(header)
     _, _, ny, nx = data.shape
     center_x, center_y = nx // 2, ny // 2
     # Get pixel scale (deg/pixel)
@@ -565,3 +552,184 @@ def filter_images(imagelist, min_time_sep=60.0):
         print("Error in filtering out images.")
         traceback.print_exc()
         return []
+
+
+#############################################
+# Image compression and decompression
+#############################################
+
+
+def compress_fits(
+    input_file,
+    outputdir="",
+    output_file="",
+    quantize_level=4,
+    keep_original=True,
+):
+    """
+    Compress a FITS image using FITS tile compression with compression type RICE_1.
+    N.B.: Quantization noise is saved in header per Stokes plane, assuming either it is only Stokes I or Stokes IQUV image
+
+    Parameters
+    ----------
+    input_file : str
+        Original FITS file.
+    outputdir : str, optional
+        Output directory
+    output_file : str, optional
+        Output file name
+    quantize_level : float or None
+        Lossy floating-point quantization.
+    keep_original : bool, optional
+        Keep original fits or not
+
+    Returns
+    -------
+    int
+        Success message
+    str
+        Compressed file name
+    """
+    quantize_level = max(1, quantize_level)
+    if output_file == "":
+        output_file = f"{input_file.split('.fits')[0]}_compressed.fits"
+    if outputdir != "":
+        os.makedirs(outputdir, exist_ok=True)
+        output_file = f"{outputdir}/{os.path.basename(output_file)}"
+    try:
+        buffer = io.BytesIO()
+        compressed_image = False
+        with fits.open(input_file, memmap=True) as hdul:
+            for i, hdu in enumerate(hdul):
+                if (
+                    type(hdu).__name__ == "CompImageHDU"
+                    or hdu.name == "COMPRESSED_IMAGE"
+                ):
+                    compressed_image = True
+            if compressed_image:
+                print(f"{input_file} is a compressed fits.")
+                return 1, input_file
+            # Preserve original data and header
+            data = hdul[0].data
+            header = hdul[0].header.copy()
+            # Create compressed image
+            kwargs = {
+                "data": data,
+                "header": header,
+                "compression_type": "RICE_1",
+                "quantize_level": quantize_level,
+            }
+            if quantize_level is not None:
+                kwargs["quantize_level"] = quantize_level
+            compressed_hdu = fits.CompImageHDU(**kwargs)
+            compressed_hdu.writeto(buffer)
+            buffer.seek(0)
+            with fits.open(buffer, memmap=False) as hdul:
+                if isinstance(hdul[0], fits.CompImageHDU):
+                    restored = hdul[0].data
+                else:
+                    restored = hdul[1].data
+            data_shape = data.shape
+            header_keys = compressed_hdu.header.keys()
+            if "RUNCMD" in header_keys:
+                run_cmd = compressed_hdu.header["RUNCMD"]
+                del compressed_hdu.header["RUNCMD"]
+            else:
+                run_cmd = ""
+            compressed_hdu.header["COMPRESS"] = "RICE_1"
+            compressed_hdu.header["QUANLEVE"] = quantize_level
+            for i in range(data_shape[0]):
+                qs_noise = np.nanstd(data[i, 0, ...] - restored[i, 0, ...])
+                if i == 1:
+                    key = "QNOISE_Q"
+                elif i == 2:
+                    key = "QNOISE_U"
+                elif i == 3:
+                    key = "QNOISE_V"
+                else:
+                    key = "QNOISE_I"
+                compressed_hdu.header[key] = qs_noise
+            if run_cmd != "":
+                compressed_hdu.header["RUNCMD"] = run_cmd
+            compressed_hdu.writeto(output_file, overwrite=True)
+        if not keep_original and os.path.exists(output_file):
+            os.system(f"rm -rf {input_file}")
+        if os.path.exists(output_file):
+            return 0, output_file
+        else:
+            print(
+                f"Compression did not show error, but compressed file: {output_file} does not exist.\n"
+            )
+            return 1, input_file
+    except Exception:
+        print(f"Error occured in compressing: {input_file}.\n")
+        traceback.print_exc()
+        return 1, input_file
+    finally:
+        buffer.close()
+        del buffer
+
+
+def decompress_fits(
+    compressed_file, outputdir="", output_file="", keep_compressed=True
+):
+    """
+    Restore a compressed FITS image to a normal FITS image.
+
+    Parameters
+    ----------
+    compressed_file : str
+        Compressed FITS file.
+    outputdir : str, optional
+        Output directory
+    output_file : str, optional
+        Restored normal FITS file.
+    keep_compressed : bool, optinal
+        Keep original compressed fits or not
+
+    Returns
+    -------
+    int
+        Success message
+    str
+        Output decompressed file
+    """
+    if output_file == "":
+        output_file = f"{compressed_file.split('.fits')[0].split('_compressed')[0]}_decompressed.fits"
+    if outputdir != "":
+        os.makedirs(outputdir, exist_ok=True)
+        output_file = f"{outputdir}/{os.path.basename(output_file)}"
+    compressed_image = False
+    try:
+        with fits.open(compressed_file, memmap=True) as hdul:
+            for i, hdu in enumerate(hdul):
+                if (
+                    type(hdu).__name__ == "CompImageHDU"
+                    or hdu.name == "COMPRESSED_IMAGE"
+                ):
+                    compressed_image = True
+            if not compressed_image:
+                print(f"{compressed_file} is not a compressed fits.")
+                return 1, compressed_file
+            # CompImageHDU is normally extension 1
+            if isinstance(hdul[0], fits.CompImageHDU):
+                compressed_hdu = hdul[0]
+            else:
+                compressed_hdu = hdul[1]
+            data = compressed_hdu.data
+            header = compressed_hdu.header.copy()
+            # Make normal uncompressed FITS
+            fits.writeto(output_file, data=data, header=header, overwrite=True)
+        if os.path.exists(output_file):
+            if not keep_compressed:
+                os.system(f"rm -rf {compressed_file}")
+            return 0, output_file
+        else:
+            print(
+                f"Decompression did not show any error, but output file: {output_file} does not exist.\n"
+            )
+            return 1, compressed_file
+    except Exception:
+        print(f"Error occured in decompressing: {compressed_file}.\n")
+        traceback.print_exc()
+        return 1, compressed_file

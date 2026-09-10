@@ -40,11 +40,35 @@ def get_phasecenter(msname, fieldID=0):
     return round(radeg, 5), round(decdeg, 5)
 
 
+def get_total_time(msname):
+    """
+    Get total time of the measurement set in seconds
+
+    Parameters
+    ----------
+    msname : str
+        Measurement set name
+
+    Returns
+    -------
+    float
+        Total time in seconds
+    """
+    msmd = msmetadata()
+    msmd.open(msname)
+    all_times = msmd.timesforspws(0)
+    msmd.close()
+    msmd.done()
+    total_time = max(all_times) - min(all_times)
+    return total_time
+
+
 def get_timeranges(
     msname,
     time_interval,
     time_window,
     quack_timestamps=-1,
+    max_time_chunk=-1,
 ):
     """
     Get time ranges for a scan with certain time intervals
@@ -59,64 +83,89 @@ def get_timeranges(
         Time window in seconds of a single time chunk
     quack_timestamps : int, optional
         Number of timestamps ignored at the start and end of each scan
+    max_time_chunk : float, optional
+        Maximum time chunk of each spliting ms in seconds (default: -1, full time chunk)
 
     Returns
     -------
     list
-        List of time ranges
+        List of time ranges [[first set of timeranges], [second set of time ranges], ...]
     """
     msmd = msmetadata()
     msmd.open(msname)
-    times = msmd.timesforspws(0)
+    all_times = msmd.timesforspws(0)
     msmd.close()
     msmd.done()
     time_ranges = []
-    if len(times) == 1:
-        time_ranges.append(mjdsec_to_timestamp(times[0], str_format=1))
+    if len(all_times) == 1:
+        time_ranges.append([mjdsec_to_timestamp(all_times[0], str_format=1)])
         return time_ranges
     if (
-        quack_timestamps > 0 and len(times) > 2 * quack_timestamps + 3
+        quack_timestamps > 0 and len(all_times) > 2 * quack_timestamps + 3
     ):  # At least 3 timestamps remain after quack flagging
         quack_timestamps += 1
-        times = times[quack_timestamps:-quack_timestamps]
+        all_times = all_times[quack_timestamps:-quack_timestamps]
 
-    start_time = min(times)
-    end_time = max(times)
+    start_time = min(all_times)
+    end_time = max(all_times)
     if time_interval < 0 or time_window < 0 or time_interval <= time_window:
-        t = (
-            mjdsec_to_timestamp(start_time, str_format=1)
-            + "~"
-            + mjdsec_to_timestamp(end_time, str_format=1)
-        )
-        time_ranges.append(t)
+        if max_time_chunk <= 0 or (end_time - start_time) <= max_time_chunk:
+            t = (
+                mjdsec_to_timestamp(start_time, str_format=1)
+                + "~"
+                + mjdsec_to_timestamp(end_time, str_format=1)
+            )
+            time_ranges.append([t])
+        else:
+            while True:
+                s = start_time
+                e = s + max_time_chunk
+                t = (
+                    mjdsec_to_timestamp(s, str_format=1)
+                    + "~"
+                    + mjdsec_to_timestamp(min(end_time, e), str_format=1)
+                )
+                time_ranges.append([t])
+                if e > end_time:
+                    break
+                start_time = e
         return time_ranges
-    timeres = times[1] - times[0]
+
+    timeres = all_times[1] - all_times[0]
     ntime_chunk = max(1, int(time_interval / timeres))
     ntime = int(time_window / timeres)
-    for i in range(0, len(times), ntime_chunk):
-        try:
-            start_time = times[i]
-        except Exception:
-            if ntime > 0:
-                start_time = times[-ntime]
+    if max_time_chunk > 0:
+        n_time_chunk = int(max_time_chunk / timeres)
+    else:
+        n_time_chunk = len(all_times)
+    for j in range(0, len(all_times), n_time_chunk):
+        times = all_times[j : j + n_time_chunk]
+        sub_list = []
+        for i in range(0, len(times), ntime_chunk):
+            try:
+                start_time = times[i]
+            except Exception:
+                if ntime > 0:
+                    start_time = times[-ntime]
+                else:
+                    start_time = times[-1]
+            if start_time not in times:
+                nearpos = np.argmin(abs(start_time - times))
+                start_time = times[nearpos]
+            try:
+                end_time = times[i + ntime]
+            except Exception:
+                end_time = times[-1]
+            if end_time not in times:
+                nearpos = np.argmin(abs(end_time - times))
+                end_time = times[nearpos]
+            if end_time > start_time + timeres:
+                sub_list.append(
+                    f"{mjdsec_to_timestamp(start_time, str_format=1)}~{mjdsec_to_timestamp(end_time-timeres, str_format=1)}"
+                )
             else:
-                start_time = times[-1]
-        if start_time not in times:
-            nearpos = np.argmin(abs(start_time - times))
-            start_time = times[nearpos]
-        try:
-            end_time = times[i + ntime]
-        except Exception:
-            end_time = times[-1]
-        if end_time not in times:
-            nearpos = np.argmin(abs(end_time - times))
-            end_time = times[nearpos]
-        if end_time > start_time+timeres:
-            time_ranges.append(
-                f"{mjdsec_to_timestamp(start_time, str_format=1)}~{mjdsec_to_timestamp(end_time-timeres, str_format=1)}"
-            )
-        else:
-            time_ranges.append(f"{mjdsec_to_timestamp(start_time, str_format=1)}")
+                sub_list.append(f"{mjdsec_to_timestamp(start_time, str_format=1)}")
+        time_ranges.append(sub_list)
     return time_ranges
 
 

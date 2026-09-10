@@ -433,4 +433,4 @@ def init_logger(logname, logfile, log_type="task", jobname="", password=""):
         else:
             return
     except Exception:
-        return 
+        return

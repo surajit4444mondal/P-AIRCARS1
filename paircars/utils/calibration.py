@@ -42,6 +42,7 @@ def fill_nan_gains(x, data, x_new=None):
     """
     import numpy as np
     from scipy.interpolate import interp1d
+
     x = np.asarray(x)
     data = np.asarray(data, dtype=float)
     if x_new is None:
@@ -348,7 +349,7 @@ def interpolate_quartical(caltables, overwrite=False):
             if overwrite:
                 os.system(f"rm -rf {caltable}*")
             write_xds_list = xds_to_zarr(gains, f"{output_name}::{soltype}")
-            dask.compute(write_xds_list)
+            dask.compute(write_xds_list, scheduler="threads")
             outlist.append(output_name)
     return outlist
 
@@ -502,7 +503,7 @@ def make_interpolated_quartical_table(caltables, target_freqs, output_name):
         }
     )
     write = xds_to_zarr([new_ds], f"{output_name}::{soltype}")
-    dask.compute(write)
+    dask.compute(write, scheduler="threads")
     return output_name
 
 
@@ -955,7 +956,7 @@ def quartical_matrix_normalize(caltable, overwrite=False):
     if overwrite:
         os.system(f"rm -rf {caltable}*")
     write_xds_list = xds_to_zarr(gains, f"{output_name}::{soltype}")
-    dask.compute(write_xds_list)
+    dask.compute(write_xds_list, scheduler="threads")
     return output_name
 
 

@@ -39,7 +39,8 @@ from paircars.utils.proc_manage_utils import (
 from paircars.utils.resource_utils import drop_cache, limit_threads
 from paircars.pipeline.flagging import single_ms_flag
 
-logging.getLogger("distributed").setLevel(logging.ERROR)
+logging.getLogger("distributed").setLevel(logging.CRITICAL)
+logging.getLogger("distributed.worker").setLevel(logging.CRITICAL)
 logging.getLogger("tornado.application").setLevel(logging.CRITICAL)
 
 
@@ -263,10 +264,11 @@ def run_postcal_flag(
         f"badspw='',"
         f"bad_ants_str='',"
         f"datacolumn='{datacolumn}',"
-        "use_tfcrop=True,"
+        "use_tfcrop=False,"
         "use_rflag=True,"
         "flagdimension='freqtime',"
         "flag_autocorr=False,"
+        "force_flag=True,"
         f"threshold={threshold},"
         f"n_threads={n_threads},"
         f"mem_limit={mem_limit})"
@@ -277,10 +279,11 @@ def run_postcal_flag(
         badspw="",
         bad_ants_str="",
         datacolumn=datacolumn,
-        use_tfcrop=True,
+        use_tfcrop=False,
         use_rflag=True,
         flagdimension="freqtime",
         flag_autocorr=False,
+        force_flag=True,
         threshold=threshold,
         n_threads=n_threads,
         mem_limit=mem_limit,
@@ -445,7 +448,7 @@ def single_ms_cal_and_flag(
                     n_threads=n_threads,
                     mem_limit=mem_limit,
                 )
-                unflag_chans, flag_chans = get_chans_flag(msname, n_threads=n_threads)
+                unflag_chans, flag_chans = get_chans_flag(msname)
                 if len(flag_chans) / (len(unflag_chans) + len(flag_chans)) > 0.5:
                     print(
                         "Restoring flags because of large number of channels flagged."
@@ -670,10 +673,8 @@ def run_basic_cal_rounds(
         msmd.open(trial_ms)
         npol = msmd.ncorrforpol()[0]
         msmd.close()
-        if npol == 4:
-            n_rounds = 3
-        else:
-            n_rounds = 2
+        n_rounds = 2
+        if npol < 4:
             perform_polcal = False
         logger.info(f"Calibration for ms list: {mslist}.")
         logger.info(f"Total calibration rounds: {n_rounds}")
@@ -693,7 +694,10 @@ def run_basic_cal_rounds(
             refant = unflagged_antenna_names[0]
             msmd = msmetadata()
             msmd.open(trial_ms)
-            refant = str(msmd.antennaids(refant)[0])
+            refant_ids = sorted(
+                [msmd.antennaids(antname)[0] for antname in unflagged_antenna_names]
+            )[0]
+            refant = str(refant_ids)
             msmd.close()
         logger.debug(f"Reference antenna: {refant}")
         for msname in mslist:
@@ -727,9 +731,9 @@ def run_basic_cal_rounds(
             if cal_round > 1:
                 if perform_polcal:
                     do_polcal = True
-                    logger.debug("Performing polarisation calibration.")
+                    logger.debug("Performing cross-hand phase calibration.")
                 flag_threshold = 5.0
-            if cal_round == n_rounds + 1:
+            if cal_round == n_rounds:
                 do_postcal_flag = [False] * len(mslist)
             caltable_dic, succeed, failed, postcal_flags = single_round_cal_and_flag(
                 mslist,
@@ -906,12 +910,12 @@ def main(
             workdir,
             cpu_frac=cpu_frac,
             mem_frac=mem_frac,
-            max_worker=len(mslist) + 1,
+            max_worker=len(mslist),
         )
         if dask_client is None:
             logger.critical("Error occured in creating local cluster.")
             return 1, succeed, failed
-        scale_worker_and_wait(dask_cluster, dask_client, nworker)
+        scale_worker_and_wait(dask_cluster, dask_client, nworker+1)
 
     try:
         for banner in print_banner(

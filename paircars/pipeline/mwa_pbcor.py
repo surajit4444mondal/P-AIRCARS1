@@ -19,6 +19,7 @@ from paircars.utils.basic_utils import (
 from paircars.utils.image_utils import (
     generate_tb_map,
     filter_images,
+    get_image_npol,
 )
 from paircars.utils.logger_utils import (
     SmartDefaultsHelpFormatter,
@@ -27,7 +28,12 @@ from paircars.utils.logger_utils import (
     get_logger_safe,
 )
 from paircars.utils.mwa_utils import freq_to_MWA_coarse
-from paircars.utils.mwa_ploting_utils import save_in_hpc, plot_in_hpc
+from paircars.utils.mwa_ploting_utils import (
+    save_in_hpc,
+    plot_in_hpc,
+    plot_in_hpc_full_stokes,
+    make_gif_movie,
+)
 from paircars.utils.proc_manage_utils import (
     scale_worker_and_wait,
     get_local_dask_cluster,
@@ -40,7 +46,8 @@ from paircars.utils.sunpos_utils import (
     interpolate_apparent_solar_center,
 )
 
-logging.getLogger("distributed").setLevel(logging.ERROR)
+logging.getLogger("distributed").setLevel(logging.CRITICAL)
+logging.getLogger("distributed.worker").setLevel(logging.CRITICAL)
 logging.getLogger("tornado.application").setLevel(logging.CRITICAL)
 warnings.simplefilter("ignore", FITSFixedWarning)
 
@@ -139,7 +146,7 @@ def run_pbcor(
             text=True,
             check=False,  # Set to True if you want to raise on error
         )
-        if verbose or result.returncode != 0:
+        if verbose and result.returncode != 0:
             print(result.stdout)
         return result.returncode
     except Exception as e:
@@ -172,9 +179,7 @@ def get_leakage_file(image, leakage_dir):
         image_freq = -1
     if image_freq > 0 and leakage_dir != 0 and os.path.exists(leakage_dir):
         image_coarse = freq_to_MWA_coarse(image_freq)
-        leakage_file_list = glob.glob(
-            f"{leakage_dir}/selfcal_*{image_coarse}_*.leakage"
-        )
+        leakage_file_list = glob.glob(f"{leakage_dir}/selfcal_*{image_coarse}.leakage")
         if len(leakage_file_list) > 0:
             leakage_file = leakage_file_list[0]
         else:
@@ -188,7 +193,7 @@ def shiftcor_all_images(imagedir, solint=30.0, mean_shift=True):
     """
     Correct phase shift of all images in a directory
     Note: This function assumes all images have same phase center in RA DEC, and shift solar center to image phase center
-    
+
     Parameters
     ----------
     imagedir : str
@@ -197,7 +202,7 @@ def shiftcor_all_images(imagedir, solint=30.0, mean_shift=True):
         Solution interval in seconds
     mean_shift : bool, optional
         Use a mean shift or use shift per solution intervals
-    
+
     Returns
     -------
     int
@@ -209,37 +214,45 @@ def shiftcor_all_images(imagedir, solint=30.0, mean_shift=True):
     """
     pbcor_images = glob.glob(f"{imagedir}/*.fits")
     total_images = len(pbcor_images)
-    if total_images==0:
-        print(f"No image is present in image directory: {imagedir} for shift correction.")
+    if total_images == 0:
+        print(
+            f"No image is present in image directory: {imagedir} for shift correction."
+        )
         return 0, 0, 0
-    corrected_image=0
-    uncorrected_image=0
+    corrected_image = 0
+    uncorrected_image = 0
     header = fits.getheader(pbcor_images[0])
     sun_radeg = float(header["CRVAL1"])
     sun_decdeg = float(header["CRVAL2"])
     try:
-        freq_list = np.array([float(os.path.basename(i).split("_")[3]) for i in pbcor_images])
+        freq_list = np.array(
+            [float(os.path.basename(i).split("_")[3]) for i in pbcor_images]
+        )
         freq_list = np.unique(freq_list)
         selected_freqs = [freq_list[0]]
         for f in freq_list[1:]:
-            if round(f-selected_freqs[-1],2)>1.28:
+            if round(f - selected_freqs[-1], 2) >= 1.28:
                 selected_freqs.append(f)
-        selected_freqs=np.array(selected_freqs)
-        temporal_images = sorted(glob.glob(f"*{selected_freqs[0]}*.fits"))                
+        selected_freqs = np.array(selected_freqs)
+        temporal_images = sorted(glob.glob(f"{imagedir}/*{selected_freqs[0]}*.fits"))
         filtered_images = filter_images(temporal_images, min_time_sep=solint)
         selected_times = []
         selected_mjdsec = []
         for fil_image in filtered_images:
             timeobs = os.path.basename(fil_image).split("_")[1]
             selected_times.append(timeobs)
-            mjdsec = timestamp_to_mjdsec(timeobs, date_format=4) 
-            selected_mjdsec.append(mjdsec)  
-        apparent_ra_array = np.zeros((len(selected_freqs),len(selected_times)),dtype="float")*np.nan
-        apparent_dec_array = np.zeros((len(selected_freqs),len(selected_times)),dtype="float")*np.nan
+            mjdsec = timestamp_to_mjdsec(timeobs, date_format=4)
+            selected_mjdsec.append(mjdsec)
+        apparent_ra_array = (
+            np.zeros((len(selected_freqs), len(selected_times)), dtype="float") * np.nan
+        )
+        apparent_dec_array = (
+            np.zeros((len(selected_freqs), len(selected_times)), dtype="float") * np.nan
+        )
         selected_times = np.array(selected_times)
         selected_mjdsec = np.array(selected_mjdsec)
-        selected_freqs = np.array(selected_freqs) 
-        
+        selected_freqs = np.array(selected_freqs)
+
         ################################
         # Creating shift array
         ################################
@@ -247,77 +260,93 @@ def shiftcor_all_images(imagedir, solint=30.0, mean_shift=True):
             for j in range(len(selected_times)):
                 freq = selected_freqs[i]
                 time = selected_times[j]
-                imagename = glob.glob(f"*{time}*{freq}*.fits")
-                if len(imagename)>0:
-                    imagename=imagename[0]
+                imagename = glob.glob(f"{imagedir}/*{time}*{freq}*.fits")
+                if len(imagename) > 0:
+                    imagename = imagename[0]
                     disk_detected, radius = determine_quiet_disk(imagename)
-                    if disk_detected:   
-                        msg, ra, dec, _, _ = cal_apparent_solarcenter(imagename) 
-                        if msg==0:
+                    if disk_detected:
+                        msg, ra, dec, _, _ = cal_apparent_solarcenter(imagename)
+                        if msg == 0:
                             apparent_ra_array[i, j] = ra
                             apparent_dec_array[i, j] = dec
             if mean_shift:
-                apparent_ra = np.nanmedian(apparent_ra_array[i,...])
-                apparent_ra_array[i,...] = apparent_ra
-                apparent_dec = np.nanmedian(apparent_dec_array[i,...])
-                apparent_dec_array[i,...] = apparent_dec
-                    
+                apparent_ra = np.nanmedian(apparent_ra_array[i, ...])
+                apparent_ra_array[i, ...] = apparent_ra
+                apparent_dec = np.nanmedian(apparent_dec_array[i, ...])
+                apparent_dec_array[i, ...] = apparent_dec
+
+        ###################################################
+        # If no disk detected image is present
+        ###################################################
+        if np.nansum(~np.isnan(apparent_ra_array)) == 0:
+            return 1, corrected_image, uncorrected_image
+
         ###################################################
         # Interpolation for non-disk detected time and freq
         ###################################################
-        if np.nansum(np.isnan(apparent_ra_array))>0:
+        if np.nansum(np.isnan(apparent_ra_array)) > 0:
             for j in range(len(selected_times)):
                 temp_ra_array = apparent_ra_array[:, j]
                 temp_dec_array = apparent_dec_array[:, j]
-                if np.nansum(np.isnan(temp_ra_array))>0:
+                if np.nansum(np.isnan(temp_ra_array)) > 0:
                     non_detected_pos = np.where(np.isnan(temp_ra_array))
                     detected_pos = np.where(~np.isnan(temp_ra_array))
                     detected_freqs = selected_freqs[detected_pos]
                     temp_ra_array = temp_ra_array[detected_pos]
-                    temp_dec_array = temp_dec_array[detected_pos] 
+                    temp_dec_array = temp_dec_array[detected_pos]
                     for i in non_detected_pos:
                         target_freq = selected_freqs[i]
-                        ra, dec = interpolate_apparent_solar_center(sun_radeg, sun_decdeg,target_freq,freqlist=detected_freqs,
-                                        apparent_radeg_list=temp_ra_array,apparent_decdeg_list=temp_dec_array)
+                        ra, dec = interpolate_apparent_solar_center(
+                            sun_radeg,
+                            sun_decdeg,
+                            target_freq,
+                            freqlist=detected_freqs,
+                            apparent_radeg_list=temp_ra_array,
+                            apparent_decdeg_list=temp_dec_array,
+                        )
                         apparent_ra_array[i, j] = ra
                         apparent_dec_array[i, j] = dec
-                        
+
         ###################################################
         # Shifting solar center
         ###################################################
         for pbcor_image in pbcor_images:
-            freq = float(os.path.basename(pbcor_image).split("_")[3]) 
+            freq = float(os.path.basename(pbcor_image).split("_")[3])
             timeobs = os.path.basename(pbcor_image).split("_")[1]
-            mjdsec = timestamp_to_mjdsec(timeobs, date_format=4) 
-            pos_freq = np.argmin(np.abs(selected_freqs-freq))
-            pos_time = np.argmin(np.abs(selected_mjdsec-mjdsec))
+            mjdsec = timestamp_to_mjdsec(timeobs, date_format=4)
+            pos_freq = np.argmin(np.abs(selected_freqs - freq))
+            pos_time = np.argmin(np.abs(selected_mjdsec - mjdsec))
             ra = apparent_ra_array[pos_freq, pos_time]
             dec = apparent_dec_array[pos_freq, pos_time]
-            msg, _ = shift_solarcenter_to_imagecenter(pbcor_image,apparent_ra=ra,apparent_dec=dec,overwrite=True)
+            msg, _ = shift_solarcenter_to_imagecenter(
+                pbcor_image, apparent_ra=ra, apparent_dec=dec, overwrite=True
+            )
             with fits.open(pbcor_image, mode="update") as hdul:
                 hdr = hdul[0].header
-                if msg==0 or msg==1:
-                    hdr["SHIFTED"]="TRUE"
-                    corrected_image+=1
+                if msg == 0 or msg == 1:
+                    hdr["SHIFTED"] = "TRUE"
+                    corrected_image += 1
                 else:
-                    hdr["SHIFTED"]="FALSE"
-        uncorrected_image = total_images-corrected_image
+                    hdr["SHIFTED"] = "FALSE"
+        uncorrected_image = total_images - corrected_image
         return 0, corrected_image, uncorrected_image
     except Exception:
         traceback.print_exc()
-        return 1, corrected_image, uncorrected_image
-            
+        return 2, corrected_image, uncorrected_image
+
 
 def pbcor_all_images(
     imagedir,
     metafits,
     dask_client,
     leakage_dir="",
-    make_TB=True,
+    make_TB=False,
+    save_hpc=True,
     make_plots=True,
     restore=False,
-    solint=30.0,
+    phaseshift_solint=30.0,
     mean_shift=True,
+    keep_raw_images=False,
     jobid=0,
     n_threads=1,
     mem_limit=1,
@@ -340,14 +369,18 @@ def pbcor_all_images(
         Leakage file directory
     make_TB : bool, optional
         Make brightness temperature map
+    save_hpc : bool, optional
+        Save in helioprojective coordinates
     make_plots : bool, optional
         Make plots
     restore : bool, optional
         Restore primary beam correction
-    solint : float, optional
+    phaseshift_solint : float, optional
         Solution interval for ionospheric shift corrections
     mean_shift : bool, optional
         Use a mean shift or use shift per solution intervals
+    keep_raw_images : bool, optional
+        Keep raw images before primary beam correction or not
     jobid : int, optional
         Job ID
     n_threads : int, optional
@@ -379,9 +412,6 @@ def pbcor_all_images(
     failed = 0
     try:
         images = glob.glob(f"{imagedir}/*.fits")
-        if make_TB:
-            tb_dir = f"{os.path.dirname(imagedir)}/tb_images"
-            os.makedirs(tb_dir, exist_ok=True)
         if len(images) == 0:
             logger.critical(f"No image is present in image directory: {imagedir}")
             return 1, 0, 0
@@ -475,86 +505,168 @@ def pbcor_all_images(
             for r in results:
                 if r == 0:
                     successful_pbcor += 1
-                    
+
         ############################################
         # Image alignment with solar center
         ############################################
         if successful_pbcor > 0:
-            logger.info("Correcting image phase shift.")
-            msg, corrected_image, uncorrected_image = shiftcor_all_images(pbcor_dir, solint=solint, mean_shift=mean_shift)
-            if msg!=0:
-                logger.warning("Error occured in correcting phase shift of images.")
-            else:
-                logger.info(f"Phase shift correction is successful for: {corrected_image} images")
-                logger.info(f"Phase shift correction is unsuccessful for: {uncorrected_image} images")
-                            
-        ############################################
-        # Saving fits in helioprojective coordinates
-        ############################################
-        if successful_pbcor > 0:
-            hpcdir = f"{pbcor_dir}/hpcs"
             pbcor_images = glob.glob(f"{pbcor_dir}/*.fits")
-            os.makedirs(hpcdir, exist_ok=True)
-            logger.info(
-                "Saving primary beam corrected images helioprojective coordinates."
+            logger.info(f"Correcting image phase shift for: {pbcor_dir}.")
+            msg, corrected_image, uncorrected_image = shiftcor_all_images(
+                pbcor_dir, solint=phaseshift_solint, mean_shift=mean_shift
             )
-            for image in pbcor_images:
-                save_in_hpc(image, outdir=hpcdir)
+            if msg == 0:
+                logger.info(
+                    f"Phase shift correction is successful for: {corrected_image} images"
+                )
+                logger.info(
+                    f"Phase shift correction is unsuccessful for: {uncorrected_image} images"
+                )
+            elif msg == 1:
+                logger.warning(
+                    "No disk detected image is present to estimate phase shift."
+                )
+            else:
+                logger.warning("Error occured in correcting phase shift of images.")
+
+            ############################################
+            # Saving fits in helioprojective coordinates
+            ############################################
+            if save_hpc:
+                hpcdir = f"{os.path.dirname(pbcor_dir)}/pbcor_hpcs"
+                pbcor_images = glob.glob(f"{pbcor_dir}/*.fits")
+                os.makedirs(hpcdir, exist_ok=True)
+                logger.info(
+                    "Saving primary beam corrected images helioprojective coordinates."
+                )
+                for image in pbcor_images:
+                    save_in_hpc(image, outdir=hpcdir)
+
+            ################
+            # Make png plots
+            ################
             if make_plots:
                 logger.info(
                     "Making plots of primary beam corrected images in helioprojective coordinates."
                 )
-                pngdir = f"{pbcor_dir}/pngs"
+                pngdir = f"{os.path.dirname(pbcor_dir)}/pbcor_pngs"
                 os.makedirs(pngdir, exist_ok=True)
                 for image in pbcor_images:
                     try:
-                        plot_in_hpc(
-                            image,
-                            draw_limb=True,
-                            extensions=["png"],
-                            outdirs=[pngdir],
-                        )
+                        npol = get_image_npol(image)
+                        if npol == 4:
+                            plot_in_hpc_full_stokes(
+                                image,
+                                draw_limb=True,
+                                extensions=["png"],
+                                outdirs=[pngdir],
+                            )
+                        else:
+                            plot_in_hpc(
+                                image,
+                                draw_limb=True,
+                                extensions=["png"],
+                                outdirs=[pngdir],
+                            )
                     except BaseException:
                         junkpng = f"{pngdir}/{os.path.basename(image).split('.fits')[0]}.png.junk"
                         os.system(f"touch {junkpng}")
 
-        ####################################
-        # Making brightness temperature maps
-        ####################################
-        if successful_pbcor > 0 and make_TB:
-            logger.info("Making brightness temperature maps.")
-            for pbcor_image in pbcor_images:
-                tb_image = (
-                    tb_dir
-                    + "/"
-                    + os.path.basename(pbcor_image).split(".fits")[0]
-                    + "_TB.fits"
+                #########################
+                # Making GIF
+                #########################
+                all_pngs = glob.glob(f"{pngdir}/*.png")
+                png_freqs = np.unique(
+                    [float(a.split("freq_")[-1].split("_")[0]) for a in all_pngs]
                 )
-                generate_tb_map(pbcor_image, outfile=tb_image)
+                gifdir = f"{os.path.dirname(pbcor_dir)}/pbcor_gifs"
+                os.makedirs(gifdir, exist_ok=True)
+                logger.info(
+                    "Making GIFs per frequencies for rimary beam corrected maps.\n"
+                )
+                for png_freq in png_freqs:
+                    sub_list = sorted(glob.glob(f"{pngdir}/*freq_{png_freq}*.png"))
+                    outfile = f"{gifdir}/freq_{png_freq}.gif"
+                    gif_file = make_gif_movie(sub_list, outfile)
+                    if os.path.exists(gif_file):
+                        logger.debug(f"GIF for frequency: {png_freq} is {gif_file}.\n")
+                    else:
+                        logger.warning(f"GIF for frequency: {png_freq} is failed.\n")
 
-            ############################################
-            # Saving fits in helioprojective coordinates
-            ###########################################
-            hpcdir = f"{tb_dir}/hpcs"
-            tb_images = glob.glob(f"{tb_dir}/*.fits")
-            os.makedirs(hpcdir, exist_ok=True)
-            logger.info(
-                "Saving brightness temperature maps helioprojective coordinates."
-            )
-            for image in tb_images:
-                save_in_hpc(image, outdir=hpcdir)
-
-            if make_plots:
-                logger.info("Making plots of brightness temperature maps.")
-                pngdir = f"{tb_dir}/pngs"
-                os.makedirs(pngdir, exist_ok=True)
-                for image in tb_images:
-                    plot_in_hpc(
-                        image,
-                        draw_limb=True,
-                        extensions=["png"],
-                        outdirs=[pngdir],
+            ####################################
+            # Making brightness temperature maps
+            ####################################
+            if make_TB:
+                tb_dir = f"{os.path.dirname(imagedir)}/tb_images"
+                os.makedirs(tb_dir, exist_ok=True)
+                logger.info("Making brightness temperature maps.")
+                for pbcor_image in pbcor_images:
+                    tb_image = (
+                        tb_dir
+                        + "/"
+                        + os.path.basename(pbcor_image).split(".fits")[0]
+                        + "_TB.fits"
                     )
+                    generate_tb_map(pbcor_image, outfile=tb_image)
+
+                ############################################
+                # Saving fits in helioprojective coordinates
+                ############################################
+                if save_hpc:
+                    hpcdir = f"{os.path.dirname(tb_dir)}/tb_hpcs"
+                    tb_images = glob.glob(f"{tb_dir}/*.fits")
+                    os.makedirs(hpcdir, exist_ok=True)
+                    logger.info(
+                        "Saving brightness temperature maps helioprojective coordinates."
+                    )
+                    for image in tb_images:
+                        save_in_hpc(image, outdir=hpcdir)
+
+                if make_plots:
+                    logger.info("Making plots of brightness temperature maps.")
+                    pngdir = f"{os.path.dirname(tb_dir)}/tb_pngs"
+                    os.makedirs(pngdir, exist_ok=True)
+                    for image in tb_images:
+                        try:
+                            npol = get_image_npol(image)
+                            if npol == 4:
+                                plot_in_hpc_full_stokes(
+                                    image,
+                                    draw_limb=True,
+                                    extensions=["png"],
+                                    outdirs=[pngdir],
+                                )
+                            else:
+                                plot_in_hpc(
+                                    image,
+                                    draw_limb=True,
+                                    extensions=["png"],
+                                    outdirs=[pngdir],
+                                )
+                        except BaseException:
+                            junkpng = f"{pngdir}/{os.path.basename(image).split('.fits')[0]}.png.junk"
+                            os.system(f"touch {junkpng}")
+
+                #########################
+                # Making GIF
+                #########################
+                all_pngs = glob.glob(f"{pngdir}/*.png")
+                png_freqs = np.unique(
+                    [float(a.split("freq_")[-1].split("_")[0]) for a in all_pngs]
+                )
+                gifdir = f"{os.path.dirname(tb_dir)}/tb_gifs"
+                os.makedirs(gifdir, exist_ok=True)
+                logger.info(
+                    "Making GIFs per frequencies for brightness temperature maps.\n"
+                )
+                for png_freq in png_freqs:
+                    sub_list = sorted(glob.glob(f"{pngdir}/*freq_{png_freq}*.png"))
+                    outfile = f"{gifdir}/freq_{png_freq}.gif"
+                    gif_file = make_gif_movie(sub_list, outfile)
+                    if os.path.exists(gif_file):
+                        logger.debug(f"GIF for frequency: {png_freq} is {gif_file}.\n")
+                    else:
+                        logger.warning(f"GIF for frequency: {png_freq} is failed.\n")
 
         #########################################
         # Final calculations
@@ -568,13 +680,14 @@ def pbcor_all_images(
                 logger.info(f"Total brightness temperatures maps: {len(tb_images)}")
         else:
             logger.error("Total primary beam corrected images: 0")
-        msg = 0
+        return 0, succeed, failed
     except Exception:
         logger.exception("Exception occured in primary beam correction.", exc_info=True)
-        msg = 1
+        return 1, succeed, failed
     finally:
         os.system(f"rm -rf {pbdir}")
-        return msg, succeed, failed
+        if not keep_raw_images:
+            os.system(f"rm -rf {imagedir}")
 
 
 def main(
@@ -582,8 +695,12 @@ def main(
     metafits,
     workdir="",
     leakage_dir="",
-    make_TB=True,
+    make_TB=False,
+    save_hpc=True,
     make_plots=True,
+    phaseshift_solint=30.0,
+    mean_shift=True,
+    keep_raw_images=False,
     restore=False,
     cpu_frac=0.8,
     mem_frac=0.8,
@@ -608,8 +725,16 @@ def main(
         Leakage file directory
     make_TB : bool, optional
         Make brightness temperature map or not
+    save_hpc : bool, optional
+        Save in helioprojective coordinates
     make_plots : bool, optional
         Make png plots
+    phaseshift_solint : float, optional
+        Calculate phase shift at this interval in seconds
+    mean_shift : bool, optinal
+        Correct using mean phase shift or not
+    keep_raw_images : bool, optional
+        Keep raw images before primary beam correction or not
     restore : bool, optional
         Restore primary beam correction
     cpu_frac : float,optional
@@ -711,8 +836,12 @@ def main(
                 dask_client,
                 leakage_dir=leakage_dir,
                 make_TB=make_TB,
+                save_hpc=save_hpc,
                 make_plots=make_plots,
                 restore=restore,
+                phaseshift_solint=phaseshift_solint,
+                mean_shift=mean_shift,
+                keep_raw_images=keep_raw_images,
                 jobid=jobid,
                 n_threads=n_threads,
                 mem_limit=mem_limit,
@@ -765,10 +894,15 @@ def cli():
         help="Leakage file directory",
     )
     adv_args.add_argument(
-        "--no_make_TB",
+        "--make_TB",
+        action="store_true",
+        help="Generate brightness temperature map",
+    )
+    adv_args.add_argument(
+        "--no_save_hpc",
         action="store_false",
-        dest="make_TB",
-        help="Do not generate brightness temperature map",
+        dest="save_hpc",
+        help="Do not save helioprojective maps",
     )
     adv_args.add_argument(
         "--no_make_plots",
@@ -781,6 +915,22 @@ def cli():
         action="store_true",
         dest="restore",
         help="Restore primary beam correction",
+    )
+    adv_args.add_argument(
+        "--phaseshift_solint",
+        type=float,
+        default=30.0,
+        help="Phase alignment estimation interval in seconds",
+    )
+    adv_args.add_argument(
+        "--mean_shift",
+        action="store_true",
+        help="Correct using a mean phase shift",
+    )
+    adv_args.add_argument(
+        "--keep_raw_images",
+        action="store_true",
+        help="Keep raw images or not",
     )
     adv_args.add_argument(
         "--verbose",
@@ -814,8 +964,12 @@ def cli():
         workdir=args.workdir,
         leakage_dir=args.leakage_dir,
         make_TB=args.make_TB,
+        save_hpc=args.save_hpc,
         make_plots=args.make_plots,
         restore=args.restore,
+        phaseshift_solint=args.phaseshift_solint,
+        mean_shift=args.mean_shift,
+        keep_raw_images=args.keep_raw_images,
         cpu_frac=args.cpu_frac,
         mem_frac=args.mem_frac,
         jobid=args.jobid,

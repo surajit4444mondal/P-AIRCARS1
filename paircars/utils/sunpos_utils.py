@@ -252,7 +252,7 @@ def determine_quiet_disk(imagename, sigma=10):
         data2d = gaussian_filter(data2d, sigma=gauss_filter_sigma)
         max_pos = np.where(data2d == np.nanmax(data2d))
         center_x, center_y = max_pos[1][0], max_pos[0][0]
-        sun_rad_pix = 2 * sun_dia * 60 / cellsize  # 2 solar radii
+        sun_rad_pix = 2 * sun_dia * 60 / cellsize  # 4 solar radii
         masked_array = create_circular_mask_array(
             data2d, sun_rad_pix, center_x=center_x, center_y=center_y
         )
@@ -267,7 +267,7 @@ def determine_quiet_disk(imagename, sigma=10):
         data2d[mask_clean] = True
         area = np.nansum(data2d) * cellsize**2
         radius = np.sqrt(area / np.pi) / 60.0
-        if radius >= 16:
+        if radius >= (sun_dia / 2.0):
             disk_detected = True
         else:
             disk_detected = False
@@ -303,12 +303,14 @@ def cal_apparent_solarcenter(imagename, sigma=10, use_gaussian=False):
     int
         Apparent DEC pixel
     """
+
     def gaussian_2d(xy, amplitude, x0, y0, sigma_x, sigma_y, offset):
         x, y = xy
         g = offset + amplitude * np.exp(
             -(((x - x0) ** 2) / (2 * sigma_x**2) + ((y - y0) ** 2) / (2 * sigma_y**2))
         )
         return g.ravel()
+
     try:
         data = fits.getdata(imagename)
         header = fits.getheader(imagename)
@@ -333,6 +335,7 @@ def cal_apparent_solarcenter(imagename, sigma=10, use_gaussian=False):
         if use_gaussian:
             from scipy.optimize import curve_fit
             from scipy.ndimage import gaussian_filter
+
             data2d = gaussian_filter(data2d, sigma=3)
             max_pos = np.where(data2d == np.nanmax(data2d))
             y0, x0 = max_pos[0][0], max_pos[1][0]
@@ -353,6 +356,7 @@ def cal_apparent_solarcenter(imagename, sigma=10, use_gaussian=False):
         else:
             from scipy.ndimage import center_of_mass
             from skimage.morphology import remove_small_objects
+
             max_pos = np.where(data2d == np.nanmax(data2d))
             center_x, center_y = max_pos[1][0], max_pos[0][0]
             sun_rad_pix = 2 * sun_dia * 60 / cellsize  # 2 solar radii
@@ -415,8 +419,10 @@ def shift_solarcenter_to_imagecenter(
         Output image name
     """
     if apparent_ra is None or apparent_dec is None:
-        msg, apparent_ra, apparent_dec, _, _ = cal_apparent_solarcenter(imagename, sigma=sigma, use_gaussian=use_gaussian)
-        if msg!=0:
+        msg, apparent_ra, apparent_dec, _, _ = cal_apparent_solarcenter(
+            imagename, sigma=sigma, use_gaussian=use_gaussian
+        )
+        if msg != 0:
             print("Error in estimating apparent solar center.")
             return 1, ""
     try:
@@ -525,9 +531,8 @@ def interpolate_apparent_solar_center(
         sigma_ra = np.std(dra * freqlist**2)
         sigma_dec = np.std(ddec * freqlist**2)
 
-        good = (
-            (np.abs(dra * freqlist**2 - A_ra) < 3 * sigma_ra)
-            & (np.abs(ddec * freqlist**2 - A_dec) < 3 * sigma_dec)
+        good = (np.abs(dra * freqlist**2 - A_ra) < 3 * sigma_ra) & (
+            np.abs(ddec * freqlist**2 - A_dec) < 3 * sigma_dec
         )
 
         if np.sum(good) >= 2:

@@ -26,7 +26,8 @@ from paircars.utils.proc_manage_utils import (
 )
 from paircars.utils.resource_utils import drop_cache
 
-logging.getLogger("distributed").setLevel(logging.ERROR)
+logging.getLogger("distributed").setLevel(logging.CRITICAL)
+logging.getLogger("distributed.worker").setLevel(logging.CRITICAL)
 logging.getLogger("tornado.application").setLevel(logging.CRITICAL)
 
 

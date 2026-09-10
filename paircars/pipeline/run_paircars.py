@@ -21,6 +21,7 @@ from paircars.utils.prefect_setup_utils import (
 )
 from paircars.clusterutils.slurm_cluster import submit_slurm_master_flow
 
+
 def cli():
     parser = argparse.ArgumentParser(
         description="Run P-AIRCARS for calibration and imaging of solar observations.",
@@ -57,15 +58,15 @@ def cli():
     essential.add_argument(
         "--cal_datadir",
         type=str,
-        default="",
         dest="cal_datadir",
+        default="",
         help="Calibrator measurement set directory",
     )
     essential.add_argument(
         "--cal_metafits",
         type=str,
-        default="",
         dest="cal_metafits",
+        default="",
         help="Calibrator metafits file",
     )
 
@@ -74,10 +75,16 @@ def cli():
         "###################\nAdvanced calibration parameters\n###################"
     )
     advanced_cal.add_argument(
-        "--solint",
+        "--int_solint",
         type=str,
         default="60s",
-        help="Solution interval for calibration (e.g. 'int', '10s', '5min', 'inf')",
+        help="Solution interval for gain calibration (e.g. 'int', '10s', '5min', 'inf')",
+    )
+    advanced_cal.add_argument(
+        "--pol_solint",
+        type=str,
+        default="240s",
+        help="Solution interval for polarisation calibration (e.g. 'int', '10s', '5min', 'inf')",
     )
     advanced_cal.add_argument(
         "--cal_uvrange",
@@ -92,11 +99,6 @@ def cli():
         help="Disable polarization calibration",
     )
     advanced_cal.add_argument(
-        "--only_amplitude",
-        action="store_true",
-        help="Apply only amplitude part of gain solution from calibrator or not",
-    )
-    advanced_cal.add_argument(
         "--redo_basic_cal",
         action="store_true",
         help="Redo basic calibration or not",
@@ -104,12 +106,18 @@ def cli():
     advanced_cal.add_argument(
         "--redo_selfcal",
         action="store_true",
-        help="Redo self-calibration or not",
+        help="Redo self-calibration",
     )
     advanced_cal.add_argument(
-        "--use_solarflagger",
+        "--no_solarflagger",
+        action="store_false",
+        dest="use_solarflagger",
+        help="Use solar flagger on corrected data or not",
+    )
+    advanced_cal.add_argument(
+        "--only_amplitude",
         action="store_true",
-        help="Use solar flagger",
+        help="Apply only amplitude part of gain solution from calibrator or not",
     )
 
     # === Advanced imaging parameters ===
@@ -147,9 +155,9 @@ def cli():
         help="Stokes parameter(s) to image ('I' or 'IQUV')",
     )
     advanced_image.add_argument(
-        "--minuv",
+        "--minuv_l",
         type=float,
-        default=0,
+        default=10,
         help="Minimum baseline length (in wavelengths) to include in imaging",
     )
     advanced_image.add_argument(
@@ -177,28 +185,26 @@ def cli():
         help="Clean threshold in sigma for final deconvolution",
     )
     advanced_image.add_argument(
-        "--no_pbcor",
-        action="store_false",
-        dest="do_pbcor",
-        help="Do not apply primary beam correction after imaging",
-    )
-    advanced_image.add_argument(
         "--cutout_rsun",
         type=float,
         default=10.0,
         help="Field of view cutout radius in solar radii",
     )
     advanced_image.add_argument(
-        "--no_solar_mask",
-        action="store_false",
-        dest="use_solar_mask",
-        help="Disable use solar disk mask during deconvolution",
-    )
-    advanced_image.add_argument(
         "--do_overlay",
         action="store_true",
         dest="make_overlay",
-        help="Make overlay plot on EUV images",
+        help="Make overlay plot on EUV images for all images (default is to make overlays only one image per coarse channels at 10s intervals)",
+    )
+    advanced_image.add_argument(
+        "--compress_image",
+        action="store_true",
+        help="Compress final images",
+    )
+    advanced_image.add_argument(
+        "--keep_original",
+        action="store_true",
+        help="Keep original images in case of compress image is switched on",
     )
 
     # === Advanced options ===
@@ -211,12 +217,6 @@ def cli():
         help="Make diagnostic plots of measurement sets",
     )
     advanced.add_argument(
-        "--non_solar_data",
-        action="store_false",
-        dest="solar_data",
-        help="Disable solar data mode",
-    )
-    advanced.add_argument(
         "--no_ds",
         action="store_false",
         dest="make_ds",
@@ -226,18 +226,6 @@ def cli():
         "--do_forcereset_weightflag",
         action="store_true",
         help="Force reset of weights and flags (disabled by default)",
-    )
-    advanced.add_argument(
-        "--no_cal_flag",
-        action="store_false",
-        dest="do_cal_flag",
-        help="Disable initial flagging of calibrators",
-    )
-    advanced.add_argument(
-        "--no_import_model",
-        action="store_false",
-        dest="do_import_model",
-        help="Disable model import",
     )
     advanced.add_argument(
         "--no_basic_cal",
@@ -252,12 +240,6 @@ def cli():
         help="Sidereal motion correction for Sun (disabled by default)",
     )
     advanced.add_argument(
-        "--no_solarcenter_move",
-        action="store_false",
-        dest="do_move_solarcenter",
-        help="Disable moving phasecenter to solar center",
-    )
-    advanced.add_argument(
         "--no_selfcal",
         action="store_false",
         dest="do_selfcal",
@@ -268,12 +250,6 @@ def cli():
         action="store_false",
         dest="do_ap_selfcal",
         help="Disable amplitude-phase self-calibration",
-    )
-    advanced.add_argument(
-        "--no_solar_selfcal",
-        action="store_false",
-        dest="solar_selfcal",
-        help="Disable solar-specific self-calibration parameters",
     )
     advanced.add_argument(
         "--no_applycal",
@@ -292,6 +268,27 @@ def cli():
         action="store_false",
         dest="do_imaging",
         help="Disable final imaging",
+    )
+    advanced.add_argument(
+        "--keep_backup",
+        action="store_true",
+        help="Keep backup of intermediate steps",
+    )
+    advanced.add_argument(
+        "--keep_calibrated_ms",
+        action="store_true",
+        help="Keep calibrated measurement sets or not",
+    )
+    advanced.add_argument(
+        "--no_remote_logger",
+        action="store_false",
+        dest="remote_logger",
+        help="Disable remote logger",
+    )
+    advanced.add_argument(
+        "--log2term",
+        action="store_true",
+        help="Show logs in terminal",
     )
     advanced.add_argument(
         "--verbose",
@@ -318,30 +315,8 @@ def cli():
     advanced_resource.add_argument(
         "--max_worker",
         type=int,
-        default=-1,
-        help="Maximum number of workers",
-    )
-    advanced_resource.add_argument(
-        "--keep_backup",
-        action="store_true",
-        help="Keep backup of intermediate steps",
-    )
-    advanced_resource.add_argument(
-        "--no_calibrated_ms",
-        action="store_false",
-        dest="keep_calibrated_ms",
-        help="Keep calibrated measurement sets or not",
-    )
-    advanced_resource.add_argument(
-        "--no_remote_logger",
-        action="store_false",
-        dest="remote_logger",
-        help="Disable remote logger",
-    )
-    advanced_resource.add_argument(
-        "--log2term",
-        action="store_true",
-        help="Show logs in terminal",
+        default=1,
+        help="Maximum number of workers or parallel processes (default: number of coarse channels)",
     )
     advanced_resource.add_argument(
         "--job_password",
@@ -402,7 +377,11 @@ def cli():
         return 1
 
     target_datadir_permission = check_permission(args.target_datadir)
-    if args.target_datadir is not None and args.target_datadir!="" and target_datadir_permission is False:
+    if (
+        args.target_datadir is not None
+        and args.target_datadir != ""
+        and target_datadir_permission is False
+    ):
         print(
             f"Do not have permission for target data directory: {args.target_datadir}"
         )
@@ -412,7 +391,11 @@ def cli():
     filtered_cal_datadir_list = []
     for cal_datadir in cal_datadir_list:
         cal_datadir_permission = check_permission(cal_datadir)
-        if cal_datadir is not None and cal_datadir!="" and cal_datadir_permission is False:
+        if (
+            cal_datadir is not None
+            and cal_datadir != ""
+            and cal_datadir_permission is False
+        ):
             print(
                 f"Do not have permission for calibrator data directory: {cal_datadir}"
             )
@@ -468,12 +451,12 @@ def cli():
         ############################################
         args_list = [shlex.quote(arg) for arg in sys.argv[1:]]
         cli_cmd = "run-mwa-paircars " + " ".join(args_list)
-        os.makedirs(f"{args.workdir}",exist_ok=True)
+        os.makedirs(f"{args.workdir}", exist_ok=True)
         if os.path.exists(f"{args.workdir}/inputs.txt"):
             os.system(f"rm -rf {args.workdir}/inputs.txt")
-        with open(f"{args.workdir}/inputs.txt","w") as f:
+        with open(f"{args.workdir}/inputs.txt", "w") as f:
             f.write(cli_cmd)
-        
+
         if not args.cluster or scheduler_name == "local":
             msg = submit_local_master_flow(args, jobid)
             if msg != 0:

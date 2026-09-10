@@ -14,11 +14,10 @@ from paircars.utils.basic_utils import (
     print_banner,
 )
 from paircars.utils.image_utils import (
-    create_circular_mask,
     make_stokes_wsclean_imagecube,
+    check_valid_image,
 )
 from paircars.utils.imaging import (
-    calc_sun_dia,
     calc_field_of_view,
     calc_npix_in_psf,
     calc_cellsize,
@@ -49,7 +48,8 @@ from paircars.utils.udocker_utils import (
     run_wsclean,
 )
 
-logging.getLogger("distributed").setLevel(logging.ERROR)
+logging.getLogger("distributed").setLevel(logging.CRITICAL)
+logging.getLogger("distributed.worker").setLevel(logging.CRITICAL)
 logging.getLogger("tornado.application").setLevel(logging.CRITICAL)
 
 
@@ -67,15 +67,13 @@ def perform_imaging(
     pol="I",
     weight="briggs",
     robust=0.0,
-    minuv=0,
+    minuv_l=0,
     threshold=1.0,
     use_multiscale=True,
-    use_solar_mask=True,
     mask_radius=40,
     savemodel=True,
     saveres=True,
     cutout_rsun=10.0,
-    make_plots=True,
     logfile="imaging.log",
     ncpu=1,
     mem=1,
@@ -111,14 +109,12 @@ def perform_imaging(
         Image weighting scheme
     robust : float, optional
         Briggs weighting robustness parameter
-    minuv : float, optional
+    minuv_l : float, optional
         Minimum UV-lambda to be used in imaging
     threshold : float, optional
         CLEAN threshold
     use_multiscale : bool, optional
         Use multiscale or not
-    use_solar_mask : bool, optional
-        Use solar mask
     mask_radius : float, optional
         Mask radius in arcminute
     savemodel : bool, optional
@@ -127,8 +123,6 @@ def perform_imaging(
         Save residual images or not
     cutout_rsun : float, optional
         Cutout image size in solar radii from center (default: 10.0 solar radii)
-    make_plots : bool, optional
-        Make radio map helioprojective plots
     logfile : str, optional
         Log file name
     ncpu : int, optional
@@ -165,22 +159,22 @@ def perform_imaging(
                 jobname=jobname,
                 password=password,
             )
-            
+
     paircars_input_file = f"{workdir}/inputs.txt"
     if os.path.exists(paircars_input_file):
         try:
-            with open(paircars_input_file,"r") as f:
-                paircars_input=f.readline()
+            with open(paircars_input_file, "r") as f:
+                paircars_input = f.readline()
                 paircars_input = paircars_input.rstrip("\n")
         except Exception:
-            paircars_input=""
+            paircars_input = ""
     else:
-        paircars_input=""
-        
+        paircars_input = ""
+
     try:
         msname = msname.rstrip("/")
         msname = os.path.abspath(msname)
-        img_logger.info(f"Perform imaging for {os.path.basename(msname)}")
+        img_logger.info(f"Perform imaging for {os.path.basename(msname)}.\n")
 
         #########
         # Imaging
@@ -200,19 +194,19 @@ def perform_imaging(
         ###################################################
         if os.path.exists(f"{msname}/.nocal"):
             cal_sol = False
-            img_logger.warning("No calibrator solutions applied.")
+            img_logger.warning("No calibrator solutions applied.\n")
         else:
             cal_sol = True
-            img_logger.debug("Calibration solutions applied")
+            img_logger.debug("Calibration solutions applied.\n")
 
         ####################################
         # Whether pol-selfcal is done or not
         ####################################
         if os.path.exists(f"{msname}/.nopolselfcal"):
             pol_selfcal = False
-            img_logger.warning("Polarisation self-calibration is not done.")
+            img_logger.warning("Polarisation self-calibration is not done.\n")
         else:
-            img_logger.warning("Polarisation self-calibration is done.")
+            img_logger.debug("Polarisation self-calibration is done.\n")
             pol_selfcal = True
 
         ###################################
@@ -235,7 +229,7 @@ def perform_imaging(
             end_chans = [len(freqs)]
         if len(start_chans) == 0:
             img_logger.critical(
-                f"Please provide valid channel range between 0 and {len(freqs)}"
+                f"Please provide valid channel range between 0 and {len(freqs)}.\n"
             )
             time.sleep(5)
             if sub_observer is not None:
@@ -257,7 +251,7 @@ def perform_imaging(
             end_times = [len(times)]
         if len(start_times) == 0:
             img_logger.critical(
-                f"Please provide valid time range between {mjdsec_to_timestamp(times[0])} and {mjdsec_to_timestamp(times[-1])}"
+                f"Please provide valid time range between {mjdsec_to_timestamp(times[0])} and {mjdsec_to_timestamp(times[-1])}.\n"
             )
             time.sleep(5)
             if sub_observer is not None:
@@ -275,9 +269,9 @@ def perform_imaging(
         if threshold <= 1:
             threshold = 1.1
         uvtaper = calc_uvtaper(msname)
-        _, maxuv = calc_maxuv(msname)
-        maxuv = round(maxuv, 1)
-        taper = round(max(0, maxuv - uvtaper), 1)
+        _, maxuv_l = calc_maxuv(msname)
+        maxuv_l = round(maxuv_l, 1)
+        taper = round(max(0, maxuv_l - uvtaper), 1)
 
         wsclean_args = [
             "-quiet",
@@ -292,8 +286,8 @@ def perform_imaging(
             "-mgain 0.85",
             "-nmiter 5",
             "-gain 0.1",
-            f"-minuv-l {minuv}",
-            f"-maxuv-l {maxuv}",
+            f"-minuv-l {minuv_l}",
+            f"-maxuv-l {maxuv_l}",
             f"-j {ncpu}",
             f"-abs-mem {round(mem, 2)}",
             f"-auto-threshold 1 -auto-mask {threshold}",
@@ -311,236 +305,269 @@ def perform_imaging(
         if pol == "I":
             wsclean_args.append("-no-negative")
 
-        ################################################
-        # Creating and using a solar mask
-        ################################################
-        if use_solar_mask:
-            fits_mask = prefix + "_solar-mask.fits"
-            if not os.path.exists(fits_mask):
-                img_logger.debug(
-                    f"Creating solar mask of radius: {mask_radius} arcmin.\n",
-                )
-                fits_mask = create_circular_mask(
-                    msname, cellsize, imsize, mask_radius=mask_radius
-                )
-            if fits_mask is not None and os.path.exists(fits_mask):
-                wsclean_args.append("-fits-mask " + fits_mask)
         final_list_dic = {"image": [], "model": [], "residual": []}
         for i in range(len(start_chans)):
             for j in range(len(start_times)):
-                temp_wsclean_args = copy.deepcopy(wsclean_args)
-                temp_wsclean_args.append(
-                    f"-channel-range {start_chans[i]} {end_chans[i]}"
-                )
-                temp_wsclean_args.append(f"-interval {start_times[j]} {end_times[j]}")
-
-                #####################################
-                # Spectral imaging configuration
-                #####################################
-                if image_freqres > 0:
-                    nchan = max(1, int(image_freqres / freqres))
-                    chan_chunk = int((end_chans[i] - start_chans[i]) / nchan)
-                    if chan_chunk > 1:
-                        temp_wsclean_args.append(f"-channels-out {chan_chunk}")
-                        temp_wsclean_args.append("-no-mf-weighting")
-
-                #####################################
-                # Temporal imaging configuration
-                #####################################
-                if image_timeres > 0:
-                    ntime = max(1, int(image_timeres / timeres))
-                    time_chunk = int((end_times[j] - start_times[j]) / ntime)
-                    if time_chunk > 1:
-                        temp_wsclean_args.append(f"-intervals-out {time_chunk}")
-
-                ######################################
-                # Multiscale configuration
-                ######################################
-                if use_multiscale:
-                    num_pixel_in_psf = calc_npix_in_psf(weight, robust=robust)
-                    chan_number = int((start_chans[i] + end_chans[i]) / 2)
-                    freqMHz = freqs[chan_number]
-                    sun_dia = calc_sun_dia(freqMHz)  # Sun diameter in arcmin
-                    sun_rad = sun_dia / 2
-                    multiscale_scales = calc_multiscale_scales(
-                        msname,
-                        num_pixel_in_psf,
-                        chan_number=chan_number,
-                        max_scale=sun_rad,
+                touch_file = f"{workdir}/.{os.path.basename(msname)}_chunk_ch_{start_chans[i]}_{end_chans[i]}_time_{start_times[j]}_{end_times[j]}"
+                if os.path.exists(touch_file):
+                    img_logger.info(
+                        f"Channel range: {start_chans[i]}~{end_chans[i]}, and time range: {start_times[j]}~{end_times[j]} are already imaged.\n"
                     )
-                    temp_wsclean_args.append("-multiscale")
-                    temp_wsclean_args.append("-multiscale-gain 0.1")
+                else:
+                    temp_wsclean_args = copy.deepcopy(wsclean_args)
                     temp_wsclean_args.append(
-                        "-multiscale-scales "
-                        + ",".join([str(s) for s in multiscale_scales])
+                        f"-channel-range {start_chans[i]} {end_chans[i]}"
                     )
-                    mid_freq = np.nanmean(
-                        freqs[int(start_chans[i]) : int(end_chans[i])]
+                    temp_wsclean_args.append(
+                        f"-interval {start_times[j]} {end_times[j]}"
                     )
-                    scale_bias = get_multiscale_bias(mid_freq)
-                    temp_wsclean_args.append(f"-multiscale-scale-bias {scale_bias}")
-                    if imsize >= 1024 and 4 * max(multiscale_scales) < 512:
+
+                    #####################################
+                    # Spectral imaging configuration
+                    #####################################
+                    if image_freqres > 0:
+                        nchan = max(1, int(image_freqres / freqres))
+                        chan_chunk = int((end_chans[i] - start_chans[i]) / nchan)
+                        if chan_chunk > 1:
+                            temp_wsclean_args.append(f"-channels-out {chan_chunk}")
+                            temp_wsclean_args.append("-no-mf-weighting")
+
+                    #####################################
+                    # Temporal imaging configuration
+                    #####################################
+                    if image_timeres > 0:
+                        ntime = max(1, int(image_timeres / timeres))
+                        time_chunk = int((end_times[j] - start_times[j]) / ntime)
+                        if time_chunk > 1:
+                            temp_wsclean_args.append(f"-intervals-out {time_chunk}")
+
+                    ######################################
+                    # Multiscale configuration
+                    ######################################
+                    if use_multiscale:
+                        num_pixel_in_psf = calc_npix_in_psf(weight, robust=robust)
+                        chan_number = int((start_chans[i] + end_chans[i]) / 2)
+                        multiscale_scales = calc_multiscale_scales(
+                            msname,
+                            num_pixel_in_psf,
+                            chan_number=chan_number,
+                        )
+                        temp_wsclean_args.append("-multiscale")
+                        temp_wsclean_args.append("-multiscale-gain 0.1")
+                        temp_wsclean_args.append(
+                            "-multiscale-scales "
+                            + ",".join([str(s) for s in multiscale_scales])
+                        )
+                        mid_freq = np.nanmean(
+                            freqs[int(start_chans[i]) : int(end_chans[i])]
+                        )
+                        scale_bias = get_multiscale_bias(mid_freq)
+                        temp_wsclean_args.append(f"-multiscale-scale-bias {scale_bias}")
+                        if imsize >= 1024 and 4 * max(multiscale_scales) < 512:
+                            temp_wsclean_args.append("-parallel-deconvolution 512")
+                    elif imsize >= 1024:
                         temp_wsclean_args.append("-parallel-deconvolution 512")
-                elif imsize >= 1024:
-                    temp_wsclean_args.append("-parallel-deconvolution 512")
 
-                ######################################
-                # Running imaging
-                ######################################
-                wsclean_cmd = "wsclean " + " ".join(temp_wsclean_args) + " " + msname
-                img_logger.info(
-                    f"{wsclean_cmd}",
-                )
-                msg = run_wsclean(wsclean_cmd, "paircarswsclean", verbose=False)
-                if msg == 0:
-                    os.system("rm -rf " + prefix + "*psf.fits")
-                    ######################
-                    # Making stokes cubes
-                    ######################
-                    pollist = [i.upper() for i in list(pol)]
-                    if len(pollist) == 1:
-                        imagelist = sorted(glob.glob(prefix + "*image.fits"))
-                        if not savemodel:
-                            os.system("rm -rf " + prefix + "*model.fits")
+                    ######################################
+                    # Running imaging
+                    ######################################
+                    wsclean_cmd = (
+                        "wsclean " + " ".join(temp_wsclean_args) + " " + msname
+                    )
+                    img_logger.info(
+                        f"{wsclean_cmd}\n",
+                    )
+                    msg = run_wsclean(wsclean_cmd, "paircarswsclean", verbose=False)
+                    if msg == 0:
+                        os.system("rm -rf " + prefix + "*psf.fits")
+                        ######################
+                        # Making stokes cubes
+                        ######################
+                        pollist = [i.upper() for i in list(pol)]
+                        if len(pollist) == 1:
+                            imagelist = sorted(glob.glob(prefix + "*image.fits"))
+                            if not savemodel:
+                                os.system("rm -rf " + prefix + "*model.fits")
+                            else:
+                                modellist = sorted(glob.glob(prefix + "*model.fits"))
+                            if not saveres:
+                                os.system("rm -rf " + prefix + "*residual.fits")
+                            else:
+                                reslist = sorted(glob.glob(prefix + "*residual.fits"))
                         else:
-                            modellist = sorted(glob.glob(prefix + "*model.fits"))
-                        if not saveres:
-                            os.system("rm -rf " + prefix + "*residual.fits")
-                        else:
-                            reslist = sorted(glob.glob(prefix + "*residual.fits"))
-                    else:
-                        imagelist = []
-                        stokeslist = []
-                        for p in pollist:
-                            stokeslist.append(
-                                sorted(glob.glob(prefix + "*" + p + "-image.fits"))
-                            )
-                        for i in range(len(stokeslist[0])):
-                            wsclean_images = sorted(
-                                [stokeslist[k][i] for k in range(len(pollist))]
-                            )
-                            image_prefix = os.path.basename(wsclean_images[0]).split(
-                                "-image"
-                            )[0]
-                            image_cube = make_stokes_wsclean_imagecube(
-                                wsclean_images,
-                                image_prefix + f"_{pol}_image.fits",
-                                keep_wsclean_images=False,
-                            )
-                            imagelist.append(image_cube)
-                        del stokeslist
-                        if not savemodel:
-                            os.system("rm -rf " + prefix + "*model.fits")
-                        else:
-                            modellist = []
+                            imagelist = []
                             stokeslist = []
                             for p in pollist:
                                 stokeslist.append(
-                                    sorted(glob.glob(prefix + f"*{p}*model.fits"))
+                                    sorted(glob.glob(prefix + "*" + p + "-image.fits"))
                                 )
                             for i in range(len(stokeslist[0])):
-                                wsclean_models = sorted(
+                                wsclean_images = sorted(
                                     [stokeslist[k][i] for k in range(len(pollist))]
                                 )
-                                model_prefix = os.path.basename(
-                                    wsclean_models[0]
-                                ).split("-model")[0]
-                                model_cube = make_stokes_wsclean_imagecube(
-                                    wsclean_models,
-                                    model_prefix + f"_{pol}_model.fits",
+                                image_prefix = os.path.basename(
+                                    wsclean_images[0]
+                                ).split("-image")[0]
+                                image_cube = make_stokes_wsclean_imagecube(
+                                    wsclean_images,
+                                    image_prefix + f"_{pol}_image.fits",
                                     keep_wsclean_images=False,
                                 )
-                                modellist.append(model_cube)
+                                imagelist.append(image_cube)
                             del stokeslist
-                        if not saveres:
-                            os.system("rm -rf " + prefix + "*residual.fits")
-                        else:
-                            reslist = []
-                            stokeslist = []
-                            for p in pollist:
-                                stokeslist.append(
-                                    sorted(glob.glob(prefix + f"*{p}*residual.fits"))
-                                )
-                            for i in range(len(stokeslist[0])):
-                                wsclean_residuals = sorted(
-                                    [stokeslist[k][i] for k in range(len(pollist))]
-                                )
-                                res_prefix = os.path.basename(
-                                    wsclean_residuals[0]
-                                ).split("-residual")[0]
-                                residual_cube = make_stokes_wsclean_imagecube(
-                                    wsclean_residuals,
-                                    res_prefix + f"_{pol}_residual.fits",
-                                    keep_wsclean_images=False,
-                                )
-                                reslist.append(residual_cube)
-                            del stokeslist
+                            if not savemodel:
+                                os.system("rm -rf " + prefix + "*model.fits")
+                            else:
+                                modellist = []
+                                stokeslist = []
+                                for p in pollist:
+                                    stokeslist.append(
+                                        sorted(glob.glob(prefix + f"*{p}*model.fits"))
+                                    )
+                                for i in range(len(stokeslist[0])):
+                                    wsclean_models = sorted(
+                                        [stokeslist[k][i] for k in range(len(pollist))]
+                                    )
+                                    model_prefix = os.path.basename(
+                                        wsclean_models[0]
+                                    ).split("-model")[0]
+                                    model_cube = make_stokes_wsclean_imagecube(
+                                        wsclean_models,
+                                        model_prefix + f"_{pol}_model.fits",
+                                        keep_wsclean_images=False,
+                                    )
+                                    modellist.append(model_cube)
+                                del stokeslist
+                            if not saveres:
+                                os.system("rm -rf " + prefix + "*residual.fits")
+                            else:
+                                reslist = []
+                                stokeslist = []
+                                for p in pollist:
+                                    stokeslist.append(
+                                        sorted(
+                                            glob.glob(prefix + f"*{p}*residual.fits")
+                                        )
+                                    )
+                                for i in range(len(stokeslist[0])):
+                                    wsclean_residuals = sorted(
+                                        [stokeslist[k][i] for k in range(len(pollist))]
+                                    )
+                                    res_prefix = os.path.basename(
+                                        wsclean_residuals[0]
+                                    ).split("-residual")[0]
+                                    residual_cube = make_stokes_wsclean_imagecube(
+                                        wsclean_residuals,
+                                        res_prefix + f"_{pol}_residual.fits",
+                                        keep_wsclean_images=False,
+                                    )
+                                    reslist.append(residual_cube)
+                                del stokeslist
 
-                    ######################
-                    # Renaming images
-                    ######################
-                    if len(imagelist) > 0:
-                        img_logger.info(f"Total {len(imagelist)} images are made.")
-                        img_logger.info("Renaming and making plots.")
-                        os.makedirs(imagedir + "/images", exist_ok=True)
-                        final_image_list = []
-                        for imagename in imagelist:
-                            renamed_image = rename_mwasolar_image(
-                                imagename,
-                                imagetype="image",
-                                imagedir=imagedir + "/images",
-                                pol=pol,
-                                cutout_rsun=cutout_rsun,
-                                make_plots=make_plots,
-                                pol_selfcal=pol_selfcal,
-                                cal_sol=cal_sol,
-                                paircars_input=paircars_input,
+                        ######################
+                        # Renaming images
+                        ######################
+                        if len(imagelist) > 0:
+                            img_logger.info(
+                                f"Total {len(imagelist)} images are made.\n"
                             )
-                            if renamed_image is not None:
-                                final_image_list.append(renamed_image)
-                        final_list_dic["image"] = final_image_list
-                        if savemodel and len(modellist) > 0:
-                            final_model_list = []
-                            os.makedirs(imagedir + "/models", exist_ok=True)
-                            for modelname in modellist:
-                                renamed_model = rename_mwasolar_image(
-                                    modelname,
-                                    imagetype="model",
-                                    imagedir=imagedir + "/models",
+                            ##################################
+                            # Filtering invalid images
+                            ##################################
+                            imagelist = sorted(imagelist)
+                            valid_images = []
+                            if savemodel:
+                                modellist = sorted(modellist)
+                                valid_models = []
+                            if saveres:
+                                reslist = sorted(reslist)
+                                valid_residuals = []
+                       
+                            for i in range(len(imagelist)):
+                                image = imagelist[i]
+                                if savemodel:
+                                    model = modellist[i]
+                                if saveres:
+                                    res = reslist[i]
+                                if check_valid_image(image):
+                                    valid_images.append(image)
+                                    if savemodel:
+                                        valid_models.append(model)
+                                    if saveres:
+                                        valid_residuals.append(res)
+                                else:
+                                    os.system(f"rm -rf {image}")
+                                    if savemodel:
+                                        os.system(f"rm -rf {model}")
+                                    if saveres:
+                                        os.system(f"rm -rf {res}")
+
+                            imagelist = sorted(valid_images)
+                            if savemodel:
+                                modellist = sorted(valid_models)
+                            if saveres:
+                                reslist = sorted(valid_residuals)
+                            
+                            img_logger.info(
+                                f"Total {len(imagelist)} valid images are made.\n"
+                            )
+                            
+                            img_logger.info("Renaming and making plots.\n")
+                            os.makedirs(imagedir + "/images", exist_ok=True)
+                            final_image_list = []
+                            for imagename in imagelist:
+                                renamed_image = rename_mwasolar_image(
+                                    imagename,
+                                    imagetype="image",
+                                    imagedir=imagedir + "/images",
                                     pol=pol,
                                     cutout_rsun=cutout_rsun,
-                                    make_plots=False,
                                     pol_selfcal=pol_selfcal,
                                     cal_sol=cal_sol,
                                     paircars_input=paircars_input,
                                 )
-                                if renamed_model is not None:
-                                    final_model_list.append(renamed_model)
-                            final_list_dic["model"] = final_model_list
-                        if saveres and len(reslist) > 0:
-                            final_res_list = []
-                            os.makedirs(imagedir + "/residuals", exist_ok=True)
-                            for resname in reslist:
-                                renamed_res = rename_mwasolar_image(
-                                    resname,
-                                    imagetype="residual",
-                                    imagedir=imagedir + "/residuals",
-                                    pol=pol,
-                                    cutout_rsun=cutout_rsun,
-                                    make_plots=False,
-                                    pol_selfcal=pol_selfcal,
-                                    paircars_input=paircars_input,
-                                )
-                                if renamed_res is not None:
-                                    final_res_list.append(renamed_res)
-                            final_list_dic["residual"] = final_res_list
+                                if renamed_image is not None:
+                                    final_image_list.append(renamed_image)
+                            final_list_dic["image"] = final_image_list
+                            if savemodel and len(modellist) > 0:
+                                final_model_list = []
+                                os.makedirs(imagedir + "/models", exist_ok=True)
+                                for modelname in modellist:
+                                    renamed_model = rename_mwasolar_image(
+                                        modelname,
+                                        imagetype="model",
+                                        imagedir=imagedir + "/models",
+                                        pol=pol,
+                                        cutout_rsun=cutout_rsun,
+                                        pol_selfcal=pol_selfcal,
+                                        cal_sol=cal_sol,
+                                        paircars_input=paircars_input,
+                                    )
+                                    if renamed_model is not None:
+                                        final_model_list.append(renamed_model)
+                                final_list_dic["model"] = final_model_list
+                            if saveres and len(reslist) > 0:
+                                final_res_list = []
+                                os.makedirs(imagedir + "/residuals", exist_ok=True)
+                                for resname in reslist:
+                                    renamed_res = rename_mwasolar_image(
+                                        resname,
+                                        imagetype="residual",
+                                        imagedir=imagedir + "/residuals",
+                                        pol=pol,
+                                        cutout_rsun=cutout_rsun,
+                                        pol_selfcal=pol_selfcal,
+                                        paircars_input=paircars_input,
+                                    )
+                                    if renamed_res is not None:
+                                        final_res_list.append(renamed_res)
+                                final_list_dic["residual"] = final_res_list
+                    os.system(f"touch {touch_file}")
             if os.path.exists(f"{imagedir}/images/dask-scratch-space"):
                 os.system(f"rm -rf {imagedir}/images/dask-scratch-space")
-            if use_solar_mask and os.path.exists(fits_mask):
-                os.system("rm -rf " + fits_mask)
             if len(final_list_dic["image"]) == 0:
                 img_logger.error(
-                    "No image is made.",
+                    "No image is made.\n",
                 )
                 time.sleep(5)
                 if sub_observer is not None:
@@ -548,17 +575,15 @@ def perform_imaging(
                 return 1, final_list_dic
             else:
                 img_logger.info(
-                    "Imaging is successfully done.",
+                    "Imaging is successfully done.\n",
                 )
                 time.sleep(5)
                 if sub_observer is not None:
                     clean_shutdown(sub_observer)
                 return 0, final_list_dic
         else:
-            if use_solar_mask and os.path.exists(fits_mask):
-                os.system("rm -rf " + fits_mask)
             img_logger.critical(
-                "No image is made.",
+                "No image is made.\n",
             )
             time.sleep(5)
             if sub_observer is not None:
@@ -566,7 +591,7 @@ def perform_imaging(
             return 1, {}
     except Exception:
         img_logger.exception(
-            "Exception occured in imaging: {os.path.basename(msname)}", exc_info=True
+            f"Exception occured in imaging: {os.path.basename(msname)}", exc_info=True
         )
         time.sleep(5)
         if sub_observer is not None:
@@ -589,16 +614,14 @@ def run_all_imaging(
     timeres=-1,
     weight="briggs",
     robust=0.0,
-    minuv=0,
+    minuv_l=0,
     pol="I",
     threshold=1.0,
     use_multiscale=True,
-    use_solar_mask=True,
     imaging_params={},  # TODO
     savemodel=False,
     saveres=False,
     cutout_rsun=10.0,
-    make_plots=True,
     n_threads=1,
     mem_limit=1,
     logger=None,
@@ -630,7 +653,7 @@ def run_all_imaging(
         Image weighting
     robust : float, optional
         Briggs weighting robust parameter
-    minuv : float, optional
+    minuv_l : float, optional
         Minimum UV-lambda to use in imaging
     pol : str, optional
         Stokes parameters to image
@@ -638,8 +661,6 @@ def run_all_imaging(
         CLEAN threshold
     use_multiscale : bool, optional
         Use multiscale or not
-    use_solar_mask : bool, optional
-        Use solar mask
     savemodel : bool, optional
         Save model images or not
     saveres : bool, optional
@@ -648,8 +669,6 @@ def run_all_imaging(
         Cutout image size (width and height is : 2 times cutout_rsun)
         Default value: 10 solar radii
         Note: default FoV is 20 solar solar radii. If cutout_rsun is chosen larger than 20 solar radii, FoV will be increased accordingly.
-    make_plots : bool, optional
-        Make radio image helioprojective plots
     n_threads : int, optional
         CPU threads to use
     mem_limit : float, optional
@@ -713,6 +732,8 @@ def run_all_imaging(
             logger.critical("No valid measurement set is found.")
             return 1, succeed, failed, total_images
 
+        if cutout_rsun < 5:
+            logger.info("Minimum cutout is 5 solar radii.")
         cutout_rsun = max(
             5, cutout_rsun
         )  # Minimum 5 solar radii cutout, default is 10 solar radii
@@ -723,7 +744,9 @@ def run_all_imaging(
             num_pixel_in_psf = calc_npix_in_psf(weight, robust=robust)
             cellsize = calc_cellsize(ms, num_pixel_in_psf)
             instrument_fov = calc_field_of_view(ms, FWHM=False)
-            cutout_rsun_arcsec = cutout_rsun * 16 * 60
+            cutout_rsun_arcsec = (
+                max(10, cutout_rsun) * 16 * 60
+            )  # Minimum 10 solar radii
             fov = min(instrument_fov, 2 * cutout_rsun_arcsec)
             imsize = int(fov / cellsize)
             imsize = get_fft_size(imsize)
@@ -750,14 +773,12 @@ def run_all_imaging(
                     pol=pol,
                     weight=weight,
                     robust=robust,
-                    minuv=minuv,
+                    minuv_l=minuv_l,
                     threshold=threshold,
                     use_multiscale=use_multiscale,
-                    use_solar_mask=use_solar_mask,
                     savemodel=savemodel,
                     saveres=saveres,
                     cutout_rsun=cutout_rsun,
-                    make_plots=make_plots,
                     ncpu=n_threads,
                     mem=mem_limit,
                     logfile=logfile,
@@ -814,14 +835,12 @@ def main(
     timeres=-1,
     weight="briggs",
     robust=0.0,
-    minuv=0,
+    minuv_l=0,
     threshold=1.0,
     cutout_rsun=10.0,
     use_multiscale=True,
-    use_solar_mask=True,
     savemodel=True,
     saveres=True,
-    make_plots=True,
     start_remote_log=False,
     cpu_frac=0.8,
     mem_frac=0.8,
@@ -857,7 +876,7 @@ def main(
         Weighting scheme for imaging ("natural", "uniform", "briggs"). Default is "briggs".
     robust : float, optional
         Robustness parameter for Briggs weighting. Default is 0.0.
-    minuv : float, optional
+    minuv_l : float, optional
         Minimum uv-distance (in wavelengths) to include in imaging. Default is 0.0.
     threshold : float, optional
         Cleaning threshold in sigma. Default is 1.0.
@@ -865,14 +884,10 @@ def main(
         Radius in solar radii to cut out around solar center. Default is 10.0.
     use_multiscale : bool, optional
         If True, enables multiscale CLEAN deconvolution. Default is True.
-    use_solar_mask : bool, optional
-        If True, applies a solar disk mask during CLEAN to reduce sidelobe artifacts. Default is True.
     savemodel : bool, optional
         If True, saves the CLEAN model images. Default is True.
     saveres : bool, optional
         If True, saves the residual images. Default is True.
-    make_plots : bool, optional
-        If True, generates diagnostic plots for each image. Default is True.
     start_remote_log : bool, optional
         Whether to enable remote logging using credentials in the workdir. Default is False.
     cpu_frac : float, optional
@@ -1016,12 +1031,10 @@ def main(
             timeres=timeres,
             weight=weight,
             robust=robust,
-            minuv=minuv,
+            minuv_l=minuv_l,
             threshold=threshold,
             use_multiscale=use_multiscale,
-            use_solar_mask=use_solar_mask,
             pol=pol,
-            make_plots=make_plots,
             cutout_rsun=cutout_rsun,
             savemodel=savemodel,
             saveres=saveres,
@@ -1130,8 +1143,8 @@ def cli():
         help="Briggs robust parameter",
     )
     adv_args.add_argument(
-        "--minuv_l",
-        dest="minuv",
+        "--minuv_l_l",
+        dest="minuv_l",
         type=float,
         default=0,
         help="Minimum UV distance in wavelengths",
@@ -1155,12 +1168,6 @@ def cli():
         help="Do not use multiscale CLEAN",
     )
     adv_args.add_argument(
-        "--no_solar_mask",
-        action="store_false",
-        dest="use_solar_mask",
-        help="Do not use solar disk mask for CLEANing",
-    )
-    adv_args.add_argument(
         "--no_savemodel",
         action="store_false",
         dest="savemodel",
@@ -1171,12 +1178,6 @@ def cli():
         action="store_false",
         dest="saveres",
         help="Do not save residual images",
-    )
-    adv_args.add_argument(
-        "--no_make_plots",
-        action="store_false",
-        dest="make_plots",
-        help="Do not generate helioprojective plots",
     )
 
     # Resource management parameters
@@ -1220,14 +1221,12 @@ def cli():
         timeres=args.timeres,
         weight=args.weight,
         robust=args.robust,
-        minuv=args.minuv,
+        minuv_l=args.minuv_l,
         threshold=args.threshold,
         cutout_rsun=args.cutout_rsun,
         use_multiscale=args.use_multiscale,
-        use_solar_mask=args.use_solar_mask,
         savemodel=args.savemodel,
         saveres=args.saveres,
-        make_plots=args.make_plots,
         cpu_frac=float(args.cpu_frac),
         mem_frac=float(args.mem_frac),
         jobid=args.jobid,

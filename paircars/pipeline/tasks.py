@@ -1,11 +1,15 @@
 import os
 import socket
+import time
+import logging
+import glob
 from multiprocessing import Event
 from prefect import task
 from prefect.context import get_run_context
 from prefect_dask import get_dask_client
 from prefect.tasks import exponential_backoff
 from paircars.utils.basic_utils import internet_available
+from paircars.utils.proc_manage_utils import get_worker_cpu_time
 from paircars.data.sendmail import (
     send_paircars_notification as send_notification,
 )
@@ -23,97 +27,14 @@ from paircars.pipeline import (
     do_imaging,
     mwa_pbcor,
     make_mwa_overlay,
-    move_solarcenter,
     make_ms_plot,
+    do_compression,
 )
 
 
-@task(
-    name="move_solarcenter",
-    retries=2,
-    retry_delay_seconds=60,
-    log_prints=True,
-)
-def run_solar_phasecenter_jobs(
-    mslist,
-    workdir,
-    prefix="target",
-    jobid=0,
-    cpu_frac=0.8,
-    mem_frac=0.8,
-    remote_log=False,
-    obsid=0,
-    verbose=False,
-):
-    """
-    Move phase center to the Sun
-
-    Parameters
-    ----------
-    mslist: str
-        List of the measurement sets (comma separated)
-    workdir : str
-        Work directory
-    prefix : str, optional
-        Measurement set prefix
-    cpu_frac : float, optional
-        CPU fraction to use
-    mem_frac : float, optional
-        Memory fraction to use
-    remote_log : bool, optional
-        Start remote logger
-    obsid : int, optional
-        Observation ID
-    verbose : bool, optional
-        Verbose logs
-
-    Returns
-    -------
-    int
-        Success message
-    int
-        Succeeded ms number
-    int
-        Failed ms number
-    """
-    os.makedirs(workdir, exist_ok=True)
-    os.chdir(workdir)
-    phasecor_basename = f"cor_phasecenter_{prefix}"
-    logdir = f"{workdir}/logs"
-    os.makedirs(logdir, exist_ok=True)
-    logfile = f"{logdir}/{phasecor_basename}_{obsid}.log"
-    if os.path.exists(logfile):
-        os.remove(logfile)
-    ctx = get_run_context()
-    task_id = str(ctx.task_run.id)
-    task_name = ctx.task_run.name
-    stop_event = Event()
-    log_thread_sidereal = start_log_task_saver(
-        task_id, task_name, logfile, poll_interval=3, stop_event=stop_event
-    )
-    try:
-        #######################
-        # Moving phasecenter motion correction
-        #######################
-        with get_dask_client() as dask_client:
-            msg, succeed, failed = move_solarcenter.main(
-                mslist,
-                workdir=workdir,
-                cpu_frac=float(cpu_frac),
-                mem_frac=float(mem_frac),
-                logfile=logfile,
-                jobid=jobid,
-                start_remote_log=remote_log,
-                dask_client=dask_client,
-                verbose=verbose,
-            )
-    finally:
-        stop_event.set()
-        log_thread_sidereal.join(timeout=5)
-    if msg != 0:
-        raise RuntimeError("Moving phasecenter to solar center is failed.")
-    else:
-        return msg, succeed, failed
+logging.getLogger("distributed").setLevel(logging.CRITICAL)
+logging.getLogger("distributed.worker").setLevel(logging.CRITICAL)
+logging.getLogger("tornado.application").setLevel(logging.CRITICAL)
 
 
 @task(
@@ -190,6 +111,16 @@ def run_ds_jobs(
         # Making dynamic spectrum
         ##########################
         with get_dask_client() as dask_client:
+            client_info = dask_client.scheduler_info()["workers"]
+            njobs = len(client_info)
+            n_threads = os.environ.get("OMP_NUM_THREADS")
+            if n_threads is not None:
+                n_threads = int(n_threads)
+            else:
+                n_threads = 1
+            n_threads = n_threads * max(1, njobs - 1)
+            start_cpu = dask_client.run(get_worker_cpu_time)
+            start_time = time.time()
             msg, succeed, failed = mwa_make_ds.main(
                 mslist,
                 metafits,
@@ -204,6 +135,25 @@ def run_ds_jobs(
                 dask_client=dask_client,
                 verbose=verbose,
             )
+            end_time = time.time()
+            run_time = round(end_time - start_time, 2)
+            end_cpu = dask_client.run(get_worker_cpu_time)
+            actual_cpu_seconds = sum(
+                end_cpu[worker] - start_cpu.get(worker, 0.0) for worker in end_cpu
+            )
+            allocated_cpu_seconds = n_threads * run_time
+            with open(f"{workdir}/benchmarking_task.txt", "a") as b:
+                print("Task: DS", file=b)
+                print(f"Run time: {round(run_time,2)}s", file=b)
+                print(f"Allocated CPU threads: {n_threads}", file=b)
+                print(
+                    f"Allocated CPU seconds: {round(allocated_cpu_seconds,1)}", file=b
+                )
+                print(f"Actual CPU seconds: {round(actual_cpu_seconds,1)}", file=b)
+                print(
+                    f"Utilization: {round((actual_cpu_seconds/allocated_cpu_seconds)*100,2)}%\n",
+                    file=b,
+                )
     finally:
         stop_event.set()
         log_thread_ds.join(timeout=5)
@@ -231,7 +181,9 @@ def run_target_split_jobs(
     time_window=-1,
     time_interval=-1,
     quack_timestamps=-1,
+    max_time_chunk=-1,
     force_split=False,
+    move_solarcenter=False,
     single_chan_split=False,
     jobid=0,
     cpu_frac=0.8,
@@ -267,8 +219,12 @@ def run_target_split_jobs(
         Time interval in seconds
     quack_timestamps: int, optional
         Number of timestamps to flag at the beginning and end of each scan ("quack").
+    max_time_chunk : float, optional
+        Maximum time chunk of each spliting ms in seconds
     force_split : bool, optional
         Force to split
+    move_solarcenter : bool, optional
+        Move phasecenter to solar center
     single_chan_split : bool, optional
         Split only a single good channel
     cpu_frac : float, optional
@@ -311,6 +267,16 @@ def run_target_split_jobs(
         # Spliting ms
         ##################
         with get_dask_client() as dask_client:
+            client_info = dask_client.scheduler_info()["workers"]
+            njobs = len(client_info)
+            n_threads = os.environ.get("OMP_NUM_THREADS")
+            if n_threads is not None:
+                n_threads = int(n_threads)
+            else:
+                n_threads = 1
+            n_threads = n_threads * max(1, njobs - 1)
+            start_cpu = dask_client.run(get_worker_cpu_time)
+            start_time = time.time()
             msg, expected, succeed = do_target_split.main(
                 mslist,
                 metafits,
@@ -322,7 +288,9 @@ def run_target_split_jobs(
                 freqres=freqres,
                 timeres=timeres,
                 quack_timestamps=quack_timestamps,
+                max_time_chunk=max_time_chunk,
                 force_split=force_split,
+                move_solarcenter=move_solarcenter,
                 single_chan_split=single_chan_split,
                 prefix=prefix,
                 cpu_frac=float(cpu_frac),
@@ -333,6 +301,25 @@ def run_target_split_jobs(
                 dask_client=dask_client,
                 verbose=verbose,
             )
+            end_time = time.time()
+            run_time = round(end_time - start_time, 2)
+            end_cpu = dask_client.run(get_worker_cpu_time)
+            actual_cpu_seconds = sum(
+                end_cpu[worker] - start_cpu.get(worker, 0.0) for worker in end_cpu
+            )
+            allocated_cpu_seconds = n_threads * run_time
+            with open(f"{workdir}/benchmarking_task.txt", "a") as b:
+                print("Task: split", file=b)
+                print(f"Run time: {round(run_time,2)}s", file=b)
+                print(f"Allocated CPU threads: {n_threads}", file=b)
+                print(
+                    f"Allocated CPU seconds: {round(allocated_cpu_seconds,1)}", file=b
+                )
+                print(f"Actual CPU seconds: {round(actual_cpu_seconds,1)}", file=b)
+                print(
+                    f"Utilization: {round((actual_cpu_seconds/allocated_cpu_seconds)*100,2)}%\n",
+                    file=b,
+                )
     finally:
         stop_event.set()
         log_thread_split.join(timeout=5)
@@ -361,8 +348,7 @@ def run_flag(
     use_tfcrop=False,
     flagdimension="freqtime",
     flagdata_type="target",
-    run_solarflagger=False,
-    normalize=False,
+    run_uvbinflagger=False,
     restore_flag=True,
     jobid=0,
     cpu_frac=0.8,
@@ -400,10 +386,8 @@ def run_flag(
         Flag dimension (freq, time freqtime)
     flagdata_type : str, optional
         Flag data type (cal, selfcal, target)
-    run_solarflagger : bool, optional
-        Run solar flagger or not
-    normalize : bool, optional
-        Use normalization in solar flagger
+    run_uvbinflagger : bool, optional
+        Run uvbin flagger or not
     restore_flag : bool, optional
         Restore flags or not
     jobid : int, optional
@@ -450,6 +434,16 @@ def run_flag(
         # Calibrator ms flagging
         ########################
         with get_dask_client() as dask_client:
+            client_info = dask_client.scheduler_info()["workers"]
+            njobs = len(client_info)
+            n_threads = os.environ.get("OMP_NUM_THREADS")
+            if n_threads is not None:
+                n_threads = int(n_threads)
+            else:
+                n_threads = 1
+            n_threads = n_threads * max(1, njobs - 1)
+            start_cpu = dask_client.run(get_worker_cpu_time)
+            start_time = time.time()
             msg, succeed, failed = flagging.main(
                 mslist,
                 metafits,
@@ -463,8 +457,7 @@ def run_flag(
                 flag_quack=flag_quack,
                 flagdimension=flagdimension,
                 restore_flag=restore_flag,
-                run_solarflagger=run_solarflagger,
-                normalize=normalize,
+                run_uvbinflagger=run_uvbinflagger,
                 flagbackup=False,
                 cpu_frac=float(cpu_frac),
                 mem_frac=float(mem_frac),
@@ -474,6 +467,25 @@ def run_flag(
                 dask_client=dask_client,
                 verbose=verbose,
             )
+            end_time = time.time()
+            run_time = round(end_time - start_time, 2)
+            end_cpu = dask_client.run(get_worker_cpu_time)
+            actual_cpu_seconds = sum(
+                end_cpu[worker] - start_cpu.get(worker, 0.0) for worker in end_cpu
+            )
+            allocated_cpu_seconds = n_threads * run_time
+            with open(f"{workdir}/benchmarking_task.txt", "a") as b:
+                print("Task: flag", file=b)
+                print(f"Run time: {round(run_time,2)}s", file=b)
+                print(f"Allocated CPU threads: {n_threads}", file=b)
+                print(
+                    f"Allocated CPU seconds: {round(allocated_cpu_seconds,1)}", file=b
+                )
+                print(f"Actual CPU seconds: {round(actual_cpu_seconds,1)}", file=b)
+                print(
+                    f"Utilization: {round((actual_cpu_seconds/allocated_cpu_seconds)*100,2)}%\n",
+                    file=b,
+                )
     finally:
         stop_event.set()
         log_thread_flag.join(timeout=5)
@@ -551,6 +563,16 @@ def run_import_model(
         # Calibrator ms visibility import
         ###################################
         with get_dask_client() as dask_client:
+            client_info = dask_client.scheduler_info()["workers"]
+            njobs = len(client_info)
+            n_threads = os.environ.get("OMP_NUM_THREADS")
+            if n_threads is not None:
+                n_threads = int(n_threads)
+            else:
+                n_threads = 1
+            n_threads = n_threads * max(1, njobs - 1)
+            start_cpu = dask_client.run(get_worker_cpu_time)
+            start_time = time.time()
             msg, succeed, failed = import_model.main(
                 mslist,
                 metafits,
@@ -563,6 +585,25 @@ def run_import_model(
                 dask_client=dask_client,
                 verbose=verbose,
             )
+            end_time = time.time()
+            run_time = round(end_time - start_time, 2)
+            end_cpu = dask_client.run(get_worker_cpu_time)
+            actual_cpu_seconds = sum(
+                end_cpu[worker] - start_cpu.get(worker, 0.0) for worker in end_cpu
+            )
+            allocated_cpu_seconds = n_threads * run_time
+            with open(f"{workdir}/benchmarking_task.txt", "a") as b:
+                print("Task: import model", file=b)
+                print(f"Run time: {round(run_time,2)}s", file=b)
+                print(f"Allocated CPU threads: {n_threads}", file=b)
+                print(
+                    f"Allocated CPU seconds: {round(allocated_cpu_seconds,1)}", file=b
+                )
+                print(f"Actual CPU seconds: {round(actual_cpu_seconds,1)}", file=b)
+                print(
+                    f"Utilization: {round((actual_cpu_seconds/allocated_cpu_seconds)*100,2)}%\n",
+                    file=b,
+                )
     finally:
         stop_event.set()
         log_thread_model.join(timeout=5)
@@ -649,6 +690,16 @@ def run_basic_cal_jobs(
         # Basic calibration
         ########################
         with get_dask_client() as dask_client:
+            client_info = dask_client.scheduler_info()["workers"]
+            njobs = len(client_info)
+            n_threads = os.environ.get("OMP_NUM_THREADS")
+            if n_threads is not None:
+                n_threads = int(n_threads)
+            else:
+                n_threads = 1
+            n_threads = n_threads * max(1, njobs - 1)
+            start_cpu = dask_client.run(get_worker_cpu_time)
+            start_time = time.time()
             msg, succeed, failed = basic_cal.main(
                 mslist,
                 metafits,
@@ -664,6 +715,25 @@ def run_basic_cal_jobs(
                 dask_client=dask_client,
                 verbose=verbose,
             )
+            end_time = time.time()
+            run_time = round(end_time - start_time, 2)
+            end_cpu = dask_client.run(get_worker_cpu_time)
+            actual_cpu_seconds = sum(
+                end_cpu[worker] - start_cpu.get(worker, 0.0) for worker in end_cpu
+            )
+            allocated_cpu_seconds = n_threads * run_time
+            with open(f"{workdir}/benchmarking_task.txt", "a") as b:
+                print("Task: basic cal", file=b)
+                print(f"Run time: {round(run_time,2)}s", file=b)
+                print(f"Allocated CPU threads: {n_threads}", file=b)
+                print(
+                    f"Allocated CPU seconds: {round(allocated_cpu_seconds,1)}", file=b
+                )
+                print(f"Actual CPU seconds: {round(actual_cpu_seconds,1)}", file=b)
+                print(
+                    f"Utilization: {round((actual_cpu_seconds/allocated_cpu_seconds)*100,2)}%\n",
+                    file=b,
+                )
     finally:
         stop_event.set()
         log_thread_cal.join(timeout=5)
@@ -756,6 +826,16 @@ def run_apply_basiccal_sol(
         # Applying basic calibration
         ######################
         with get_dask_client() as dask_client:
+            client_info = dask_client.scheduler_info()["workers"]
+            njobs = len(client_info)
+            n_threads = os.environ.get("OMP_NUM_THREADS")
+            if n_threads is not None:
+                n_threads = int(n_threads)
+            else:
+                n_threads = 1
+            n_threads = n_threads * max(1, njobs - 1)
+            start_cpu = dask_client.run(get_worker_cpu_time)
+            start_time = time.time()
             msg, succeed, failed = do_apply_basiccal.main(
                 mslist,
                 target_metafits,
@@ -772,6 +852,25 @@ def run_apply_basiccal_sol(
                 dask_client=dask_client,
                 verbose=verbose,
             )
+            end_time = time.time()
+            run_time = round(end_time - start_time, 2)
+            end_cpu = dask_client.run(get_worker_cpu_time)
+            actual_cpu_seconds = sum(
+                end_cpu[worker] - start_cpu.get(worker, 0.0) for worker in end_cpu
+            )
+            allocated_cpu_seconds = n_threads * run_time
+            with open(f"{workdir}/benchmarking_task.txt", "a") as b:
+                print("Task: apply basic cal", file=b)
+                print(f"Run time: {round(run_time,2)}s", file=b)
+                print(f"Allocated CPU threads: {n_threads}", file=b)
+                print(
+                    f"Allocated CPU seconds: {round(allocated_cpu_seconds,1)}", file=b
+                )
+                print(f"Actual CPU seconds: {round(actual_cpu_seconds,1)}", file=b)
+                print(
+                    f"Utilization: {round((actual_cpu_seconds/allocated_cpu_seconds)*100,2)}%\n",
+                    file=b,
+                )
     finally:
         stop_event.set()
         log_thread_apply.join(timeout=5)
@@ -849,6 +948,16 @@ def run_solar_siderealcor_jobs(
         # Sidereal motion correction
         #######################
         with get_dask_client() as dask_client:
+            client_info = dask_client.scheduler_info()["workers"]
+            njobs = len(client_info)
+            n_threads = os.environ.get("OMP_NUM_THREADS")
+            if n_threads is not None:
+                n_threads = int(n_threads)
+            else:
+                n_threads = 1
+            n_threads = n_threads * max(1, njobs - 1)
+            start_cpu = dask_client.run(get_worker_cpu_time)
+            start_time = time.time()
             msg, succeed, failed = do_sidereal_cor.main(
                 mslist,
                 workdir=workdir,
@@ -860,6 +969,25 @@ def run_solar_siderealcor_jobs(
                 dask_client=dask_client,
                 verbose=verbose,
             )
+            end_time = time.time()
+            run_time = round(end_time - start_time, 2)
+            end_cpu = dask_client.run(get_worker_cpu_time)
+            actual_cpu_seconds = sum(
+                end_cpu[worker] - start_cpu.get(worker, 0.0) for worker in end_cpu
+            )
+            allocated_cpu_seconds = n_threads * run_time
+            with open(f"{workdir}/benchmarking_task.txt", "a") as b:
+                print("Task: sidereal cor", file=b)
+                print(f"Run time: {round(run_time,2)}s", file=b)
+                print(f"Allocated CPU threads: {n_threads}", file=b)
+                print(
+                    f"Allocated CPU seconds: {round(allocated_cpu_seconds,1)}", file=b
+                )
+                print(f"Actual CPU seconds: {round(actual_cpu_seconds,1)}", file=b)
+                print(
+                    f"Utilization: {round((actual_cpu_seconds/allocated_cpu_seconds)*100,2)}%\n",
+                    file=b,
+                )
     finally:
         stop_event.set()
         log_thread_sidereal.join(timeout=5)
@@ -890,15 +1018,12 @@ def run_selfcal_jobs(
     pol_solint="240s",
     do_apcal=True,
     do_polcal=True,
-    solar_selfcal=True,
     keep_backup=False,
     uvrange="",
-    minuv=0,
+    minuv_l=0,
     weight="briggs",
     robust=0.0,
     applymode="calonly",
-    min_tol_factor=1.0,
-    use_solarflagger=False,
     jobid=0,
     cpu_frac=0.8,
     mem_frac=0.8,
@@ -941,7 +1066,7 @@ def run_selfcal_jobs(
         Dynamic range fractional change to consider as converged
     uvrange : str, optional
         UV-range for calibration
-    minuv : float, optionial
+    minuv_l : float, optionial
         Minimum UV-lambda to use in imaging
     weight : str, optional
         Image weighitng scheme
@@ -955,14 +1080,8 @@ def run_selfcal_jobs(
         Perform ap-selfcal or not
     do_polcal : bool, optional
         Perform polarisation selfcal or not
-    min_tol_factor : float, optional
-        Minimum tolerance in temporal variation in imaging
     applymode : str, optional
         Solution apply mode
-    solar_selfcal : bool, optional
-        Whether is is solar selfcal or not
-    use_solarflagger : bool, optional
-        Use solar flagger or not
     remote_log: bool, optional
         Start remote logger
     obsid : int, optional
@@ -1015,6 +1134,16 @@ def run_selfcal_jobs(
         # Selfcal jobs
         ########################
         with get_dask_client() as dask_client:
+            client_info = dask_client.scheduler_info()["workers"]
+            njobs = len(client_info)
+            n_threads = os.environ.get("OMP_NUM_THREADS")
+            if n_threads is not None:
+                n_threads = int(n_threads)
+            else:
+                n_threads = 1
+            n_threads = n_threads * max(1, njobs - 1)
+            start_cpu = dask_client.run(get_worker_cpu_time)
+            start_time = time.time()
             (
                 msg,
                 int_succeed,
@@ -1043,15 +1172,12 @@ def run_selfcal_jobs(
                 int_solint=int_solint,
                 pol_solint=pol_solint,
                 uvrange=uvrange,
-                minuv=float(minuv),
+                minuv_l=float(minuv_l),
                 weight=weight,
                 robust=float(robust),
                 applymode=applymode,
-                min_tol_factor=float(min_tol_factor),
                 do_apcal=do_apcal,
                 do_polcal=do_polcal,
-                solar_selfcal=solar_selfcal,
-                use_solarflagger=use_solarflagger,
                 keep_backup=keep_backup,
                 cpu_frac=float(cpu_frac),
                 mem_frac=float(mem_frac),
@@ -1061,6 +1187,25 @@ def run_selfcal_jobs(
                 dask_client=dask_client,
                 verbose=verbose,
             )
+            end_time = time.time()
+            run_time = round(end_time - start_time, 2)
+            end_cpu = dask_client.run(get_worker_cpu_time)
+            actual_cpu_seconds = sum(
+                end_cpu[worker] - start_cpu.get(worker, 0.0) for worker in end_cpu
+            )
+            allocated_cpu_seconds = n_threads * run_time
+            with open(f"{workdir}/benchmarking_task.txt", "a") as b:
+                print("Task: selfcal", file=b)
+                print(f"Run time: {round(run_time,2)}s", file=b)
+                print(f"Allocated CPU threads: {n_threads}", file=b)
+                print(
+                    f"Allocated CPU seconds: {round(allocated_cpu_seconds,1)}", file=b
+                )
+                print(f"Actual CPU seconds: {round(actual_cpu_seconds,1)}", file=b)
+                print(
+                    f"Utilization: {round((actual_cpu_seconds/allocated_cpu_seconds)*100,2)}%\n",
+                    file=b,
+                )
     finally:
         stop_event.set()
         log_thread_selfcal.join(timeout=5)
@@ -1163,6 +1308,16 @@ def run_apply_selfcal_sol(
         # Applying self-calibration
         ########################
         with get_dask_client() as dask_client:
+            client_info = dask_client.scheduler_info()["workers"]
+            njobs = len(client_info)
+            n_threads = os.environ.get("OMP_NUM_THREADS")
+            if n_threads is not None:
+                n_threads = int(n_threads)
+            else:
+                n_threads = 1
+            n_threads = n_threads * max(1, njobs - 1)
+            start_cpu = dask_client.run(get_worker_cpu_time)
+            start_time = time.time()
             gain_succeed, gain_failed, pol_succeed, pol_failed = do_apply_selfcal.main(
                 mslist,
                 metafits,
@@ -1178,6 +1333,25 @@ def run_apply_selfcal_sol(
                 dask_client=dask_client,
                 verbose=verbose,
             )
+            end_time = time.time()
+            run_time = round(end_time - start_time, 2)
+            end_cpu = dask_client.run(get_worker_cpu_time)
+            actual_cpu_seconds = sum(
+                end_cpu[worker] - start_cpu.get(worker, 0.0) for worker in end_cpu
+            )
+            allocated_cpu_seconds = n_threads * run_time
+            with open(f"{workdir}/benchmarking_task.txt", "a") as b:
+                print("Task: apply selfcal", file=b)
+                print(f"Run time: {round(run_time,2)}s", file=b)
+                print(f"Allocated CPU threads: {n_threads}", file=b)
+                print(
+                    f"Allocated CPU seconds: {round(allocated_cpu_seconds,1)}", file=b
+                )
+                print(f"Actual CPU seconds: {round(actual_cpu_seconds,1)}", file=b)
+                print(
+                    f"Utilization: {round((actual_cpu_seconds/allocated_cpu_seconds)*100,2)}%\n",
+                    file=b,
+                )
         if gain_failed == 0:
             msg = 0
         else:
@@ -1201,7 +1375,7 @@ def run_imaging_jobs(
     outdir,
     freqrange="",
     timerange="",
-    minuv=0,
+    minuv_l=10,
     weight="briggs",
     robust=0.0,
     pol="IQUV",
@@ -1209,7 +1383,6 @@ def run_imaging_jobs(
     timeres=10.0,
     threshold=1.0,
     use_multiscale=True,
-    use_solar_mask=True,
     cutout_rsun=10.0,
     savemodel=False,
     saveres=False,
@@ -1239,7 +1412,7 @@ def run_imaging_jobs(
         CPU fraction to use
     mem_frac : float, optional
         Memory fraction to use
-    minuv : float, optionial
+    minuv_l : float, optionial
         Minimum UV-lambda to use in imaging
     weight : str, optional
         Imaging weighting
@@ -1255,10 +1428,8 @@ def run_imaging_jobs(
         CLEAN threshold in sigma
     use_multiscale : bool, optional
         Use multiscale or not
-    use_solar_mask : bool, optional
-        Use solar mask or not
     cutout_rsun : float, optional
-        Cutout image size from center in solar radii (default : 10.0 solar radii)
+        Cutout central region in solar radii
     savemodel : bool, optional
         Save model images or not
     saveres : bool, optional
@@ -1301,6 +1472,16 @@ def run_imaging_jobs(
         # Performing imaging
         #######################
         with get_dask_client() as dask_client:
+            client_info = dask_client.scheduler_info()["workers"]
+            njobs = len(client_info)
+            n_threads = os.environ.get("OMP_NUM_THREADS")
+            if n_threads is not None:
+                n_threads = int(n_threads)
+            else:
+                n_threads = 1
+            n_threads = n_threads * max(1, njobs - 1)
+            start_cpu = dask_client.run(get_worker_cpu_time)
+            start_time = time.time()
             msg, succeed, failed, total_images = do_imaging.main(
                 mslist,
                 workdir,
@@ -1312,11 +1493,10 @@ def run_imaging_jobs(
                 timeres=float(timeres),
                 weight=weight,
                 robust=float(robust),
-                minuv=float(minuv),
+                minuv_l=float(minuv_l),
                 threshold=float(threshold),
-                cutout_rsun=float(cutout_rsun),
                 use_multiscale=use_multiscale,
-                use_solar_mask=use_solar_mask,
+                cutout_rsun=float(cutout_rsun),
                 savemodel=savemodel,
                 saveres=saveres,
                 start_remote_log=remote_log,
@@ -1327,6 +1507,25 @@ def run_imaging_jobs(
                 dask_client=dask_client,
                 verbose=verbose,
             )
+            end_time = time.time()
+            run_time = round(end_time - start_time, 2)
+            end_cpu = dask_client.run(get_worker_cpu_time)
+            actual_cpu_seconds = sum(
+                end_cpu[worker] - start_cpu.get(worker, 0.0) for worker in end_cpu
+            )
+            allocated_cpu_seconds = n_threads * run_time
+            with open(f"{workdir}/benchmarking_task.txt", "a") as b:
+                print("Task: imaging", file=b)
+                print(f"Run time: {round(run_time,2)}s", file=b)
+                print(f"Allocated CPU threads: {n_threads}", file=b)
+                print(
+                    f"Allocated CPU seconds: {round(allocated_cpu_seconds,1)}", file=b
+                )
+                print(f"Actual CPU seconds: {round(actual_cpu_seconds,1)}", file=b)
+                print(
+                    f"Utilization: {round((actual_cpu_seconds/allocated_cpu_seconds)*100,2)}%\n",
+                    file=b,
+                )
     finally:
         stop_event.set()
         log_thread_imaging.join(timeout=5)
@@ -1345,6 +1544,10 @@ def run_apply_pbcor(
     metafits,
     workdir,
     leakage_dir="",
+    phaseshift_solint=30.0,
+    keep_raw_images=False,
+    make_TB=False,
+    save_hpc=True,
     jobid=0,
     cpu_frac=0.8,
     mem_frac=0.8,
@@ -1365,6 +1568,14 @@ def run_apply_pbcor(
         Work directory
     leakage_dir : str, optional
         Leakage dile directory
+    phaseshift_solint : float, optional
+        Calculate phase shift at this interval in seconds
+    keep_raw_images : bool, optional
+        Keep raw images or not
+    make_TB : bool, optional
+        Make brightness temperature maps or not
+    save_hpc : bool, optional
+        Save helioprojective images
     cpu_frac : float, optional
         CPU fraction to use
     mem_frac : float, optional
@@ -1405,11 +1616,25 @@ def run_apply_pbcor(
         # Applying primary beam correction
         #####################
         with get_dask_client() as dask_client:
+            client_info = dask_client.scheduler_info()["workers"]
+            njobs = len(client_info)
+            n_threads = os.environ.get("OMP_NUM_THREADS")
+            if n_threads is not None:
+                n_threads = int(n_threads)
+            else:
+                n_threads = 1
+            n_threads = n_threads * max(1, njobs - 1)
+            start_cpu = dask_client.run(get_worker_cpu_time)
+            start_time = time.time()
             msg, succeed, failed = mwa_pbcor.main(
                 imagedir,
                 metafits,
                 leakage_dir=leakage_dir,
                 workdir=workdir,
+                phaseshift_solint=phaseshift_solint,
+                keep_raw_images=keep_raw_images,
+                make_TB=make_TB,
+                save_hpc=save_hpc,
                 cpu_frac=float(cpu_frac),
                 mem_frac=float(mem_frac),
                 logfile=logfile,
@@ -1418,6 +1643,25 @@ def run_apply_pbcor(
                 dask_client=dask_client,
                 verbose=verbose,
             )
+            end_time = time.time()
+            run_time = round(end_time - start_time, 2)
+            end_cpu = dask_client.run(get_worker_cpu_time)
+            actual_cpu_seconds = sum(
+                end_cpu[worker] - start_cpu.get(worker, 0.0) for worker in end_cpu
+            )
+            allocated_cpu_seconds = n_threads * run_time
+            with open(f"{workdir}/benchmarking_task.txt", "a") as b:
+                print("Task: pbcor", file=b)
+                print(f"Run time: {round(run_time,2)}s", file=b)
+                print(f"Allocated CPU threads: {n_threads}", file=b)
+                print(
+                    f"Allocated CPU seconds: {round(allocated_cpu_seconds,1)}", file=b
+                )
+                print(f"Actual CPU seconds: {round(actual_cpu_seconds,1)}", file=b)
+                print(
+                    f"Utilization: {round((actual_cpu_seconds/allocated_cpu_seconds)*100,2)}%\n",
+                    file=b,
+                )
     finally:
         stop_event.set()
         log_thread_pbcor.join(timeout=5)
@@ -1494,6 +1738,16 @@ def run_make_overlay(
         # Making overlays
         #####################
         with get_dask_client() as dask_client:
+            client_info = dask_client.scheduler_info()["workers"]
+            njobs = len(client_info)
+            n_threads = os.environ.get("OMP_NUM_THREADS")
+            if n_threads is not None:
+                n_threads = int(n_threads)
+            else:
+                n_threads = 1
+            n_threads = n_threads * max(1, njobs - 1)
+            start_cpu = dask_client.run(get_worker_cpu_time)
+            start_time = time.time()
             msg, succeed, failed = make_mwa_overlay.main(
                 imagedir,
                 outdir,
@@ -1506,6 +1760,25 @@ def run_make_overlay(
                 dask_client=dask_client,
                 verbose=verbose,
             )
+            end_time = time.time()
+            run_time = round(end_time - start_time, 2)
+            end_cpu = dask_client.run(get_worker_cpu_time)
+            actual_cpu_seconds = sum(
+                end_cpu[worker] - start_cpu.get(worker, 0.0) for worker in end_cpu
+            )
+            allocated_cpu_seconds = n_threads * run_time
+            with open(f"{workdir}/benchmarking_task.txt", "a") as b:
+                print("Task: overlay", file=b)
+                print(f"Run time: {round(run_time,2)}s", file=b)
+                print(f"Allocated CPU threads: {n_threads}", file=b)
+                print(
+                    f"Allocated CPU seconds: {round(allocated_cpu_seconds,1)}", file=b
+                )
+                print(f"Actual CPU seconds: {round(actual_cpu_seconds,1)}", file=b)
+                print(
+                    f"Utilization: {round((actual_cpu_seconds/allocated_cpu_seconds)*100,2)}%\n",
+                    file=b,
+                )
     finally:
         stop_event.set()
         log_thread_overlay.join(timeout=5)
@@ -1580,6 +1853,16 @@ def run_make_msplot(
         # Making plots
         #####################
         with get_dask_client() as dask_client:
+            client_info = dask_client.scheduler_info()["workers"]
+            njobs = len(client_info)
+            n_threads = os.environ.get("OMP_NUM_THREADS")
+            if n_threads is not None:
+                n_threads = int(n_threads)
+            else:
+                n_threads = 1
+            n_threads = n_threads * max(1, njobs - 1)
+            start_cpu = dask_client.run(get_worker_cpu_time)
+            start_time = time.time()
             msg = make_ms_plot.main(
                 mslist,
                 workdir,
@@ -1592,6 +1875,25 @@ def run_make_msplot(
                 dask_client=dask_client,
                 verbose=verbose,
             )
+            end_time = time.time()
+            run_time = round(end_time - start_time, 2)
+            end_cpu = dask_client.run(get_worker_cpu_time)
+            actual_cpu_seconds = sum(
+                end_cpu[worker] - start_cpu.get(worker, 0.0) for worker in end_cpu
+            )
+            allocated_cpu_seconds = n_threads * run_time
+            with open(f"{workdir}/benchmarking_task.txt", "a") as b:
+                print("Task: msplot", file=b)
+                print(f"Run time: {round(run_time,2)}s", file=b)
+                print(f"Allocated CPU threads: {n_threads}", file=b)
+                print(
+                    f"Allocated CPU seconds: {round(allocated_cpu_seconds,1)}", file=b
+                )
+                print(f"Actual CPU seconds: {round(actual_cpu_seconds,1)}", file=b)
+                print(
+                    f"Utilization: {round((actual_cpu_seconds/allocated_cpu_seconds)*100,2)}%\n",
+                    file=b,
+                )
     finally:
         stop_event.set()
         log_thread_overlay.join(timeout=5)
@@ -1599,6 +1901,151 @@ def run_make_msplot(
         raise RuntimeError("Measurement set diagnostic ploting is failed.")
     else:
         return msg
+
+
+@task(
+    name="do_image_compression",
+    log_prints=True,
+)
+def run_image_compression(
+    imagedir,
+    workdir,
+    keep_original=False,
+    jobid=0,
+    cpu_frac=0.8,
+    mem_frac=0.8,
+    remote_log=False,
+    obsid=0,
+    verbose=False,
+):
+    """
+    Perform image compression
+
+    Parameters
+    ----------
+    imagedir : str
+        Image directory name
+    workdir : str, optional
+        Work directory
+    keep_original : bool, optional
+        Keep original images or not
+    cpu_frac : float, optional
+        CPU fraction to use
+    mem_frac : float, optional
+        Memory fraction to use
+    remote_log: bool, optional
+        Start remote logger
+    obsid : int, optional
+        Observation ID
+    verbose : bool, optional
+        Verbose logs
+
+    Returns
+    -------
+    int
+        Success message for compression
+    int
+        Total succeeded image directories
+    int
+        Total failed image directories
+    """
+    os.makedirs(workdir, exist_ok=True)
+    os.chdir(workdir)
+    compression_basename = "do_image_compression"
+    logdir = f"{workdir}/logs"
+    os.makedirs(logdir, exist_ok=True)
+    logfile = f"{logdir}/{compression_basename}_{obsid}.log"
+    if os.path.exists(logfile):
+        os.remove(logfile)
+    ctx = get_run_context()
+    task_id = str(ctx.task_run.id)
+    task_name = ctx.task_run.name
+    stop_event = Event()
+    log_thread_overlay = start_log_task_saver(
+        task_id, task_name, logfile, poll_interval=3, stop_event=stop_event
+    )
+    total_failed = 0
+    total_succeed = 0
+    try:
+        all_image_dirs = glob.glob(f"{imagedir}/*")
+        with get_dask_client() as dask_client:
+            client_info = dask_client.scheduler_info()["workers"]
+            njobs = len(client_info)
+            n_threads = os.environ.get("OMP_NUM_THREADS")
+            if n_threads is not None:
+                n_threads = int(n_threads)
+            else:
+                n_threads = 1
+            n_threads = n_threads * max(1, njobs - 1)
+            start_cpu = dask_client.run(get_worker_cpu_time)
+            start_time = time.time()
+            #################################
+            # For each image directories
+            #################################
+            for image_dir in all_image_dirs:
+                if not os.path.isdir(image_dir):
+                    pass
+                else:
+                    imagelist = glob.glob(f"{image_dir}/*.fits")
+                    if len(imagelist) == 0:
+                        pass
+                    else:
+                        if keep_original:
+                            outdir = f"{image_dir}/compressed"
+                            os.makedirs(outdir, exist_ok=True)
+                        else:
+                            outdir = image_dir
+                        submsg, _, _ = do_compression.main(
+                            image_dir,
+                            workdir,
+                            outputdir=outdir,
+                            compress=True,
+                            keep_original=keep_original,
+                            cpu_frac=float(cpu_frac),
+                            mem_frac=float(mem_frac),
+                            logfile=logfile,
+                            jobid=jobid,
+                            verbose=verbose,
+                            start_remote_log=remote_log,
+                            dask_client=dask_client,
+                        )
+                        if submsg == 0:
+                            total_succeed += 1
+                            print(
+                                f"Image compression is successful for: {image_dir}.\n"
+                            )
+                        else:
+                            total_failed += 1
+                            print(f"Image compression is failed for: {image_dir}.\n")
+            end_time = time.time()
+            run_time = round(end_time - start_time, 2)
+            end_cpu = dask_client.run(get_worker_cpu_time)
+            actual_cpu_seconds = sum(
+                end_cpu[worker] - start_cpu.get(worker, 0.0) for worker in end_cpu
+            )
+            allocated_cpu_seconds = n_threads * run_time
+            with open(f"{workdir}/benchmarking_task.txt", "a") as b:
+                print("Task: image compression", file=b)
+                print(f"Run time: {round(run_time,2)}s", file=b)
+                print(f"Allocated CPU threads: {n_threads}", file=b)
+                print(
+                    f"Allocated CPU seconds: {round(allocated_cpu_seconds,1)}", file=b
+                )
+                print(f"Actual CPU seconds: {round(actual_cpu_seconds,1)}", file=b)
+                print(
+                    f"Utilization: {round((actual_cpu_seconds/allocated_cpu_seconds)*100,2)}%\n",
+                    file=b,
+                )
+        msg = 0
+    except Exception:
+        msg = 1
+    finally:
+        stop_event.set()
+        log_thread_overlay.join(timeout=5)
+    if msg != 0:
+        raise RuntimeError("Image compression is failed.")
+    else:
+        return msg, total_succeed, total_failed
 
 
 def send_task_notification(

@@ -4,6 +4,7 @@ import os
 import subprocess
 import numpy as np
 import socket
+import getpass
 from .basic_utils import get_datadir, wait_for_port
 from .killjob_utils import terminate_process_and_children, kill_port
 from .resource_utils import limit_threads
@@ -939,7 +940,9 @@ def run_hyperdrive(
             if cmd == "-m":
                 metafits_name = cmd_args[i + 1]
                 metapath = os.path.dirname(os.path.abspath(metafits_name))
-                temp_name = "hyperdrive_udocker_" + next(tempfile._get_candidate_names())
+                temp_name = "hyperdrive_udocker_" + next(
+                    tempfile._get_candidate_names()
+                )
                 temp_docker_metapath = os.path.join(metapath, temp_name)
                 cmd_args[i + 1] = (
                     f"{temp_docker_metapath}/{os.path.basename(metafits_name)}"
@@ -947,21 +950,31 @@ def run_hyperdrive(
             if cmd == "--output-model-files":
                 outfile_name = cmd_args[i + 1]
                 outpath = os.path.dirname(os.path.abspath(outfile_name))
-                temp_name = "hyperdrive_udocker_" + next(tempfile._get_candidate_names())
+                temp_name = "hyperdrive_udocker_" + next(
+                    tempfile._get_candidate_names()
+                )
                 temp_docker_outpath = os.path.join(outpath, temp_name)
-                cmd_args[i + 1] = f"{temp_docker_outpath}/{os.path.basename(outfile_name)}"
+                cmd_args[i + 1] = (
+                    f"{temp_docker_outpath}/{os.path.basename(outfile_name)}"
+                )
             if cmd == "--beam-file":
                 beamfile = cmd_args[i + 1]
                 beampath = os.path.dirname(os.path.abspath(beamfile))
-                temp_name = "hyperdrive_udocker_" + next(tempfile._get_candidate_names())
+                temp_name = "hyperdrive_udocker_" + next(
+                    tempfile._get_candidate_names()
+                )
                 temp_docker_beampath = os.path.join(beampath, temp_name)
                 cmd_args[i + 1] = f"{temp_docker_beampath}/{os.path.basename(beamfile)}"
             if cmd == "-s":
                 sourcefile = cmd_args[i + 1]
                 sourcepath = os.path.dirname(os.path.abspath(sourcefile))
-                temp_name = "hyperdrive_udocker_" + next(tempfile._get_candidate_names())
+                temp_name = "hyperdrive_udocker_" + next(
+                    tempfile._get_candidate_names()
+                )
                 temp_docker_sourcepath = os.path.join(sourcepath, temp_name)
-                cmd_args[i + 1] = f"{temp_docker_sourcepath}/{os.path.basename(sourcefile)}"
+                cmd_args[i + 1] = (
+                    f"{temp_docker_sourcepath}/{os.path.basename(sourcefile)}"
+                )
         try:
             full_command = ["udocker", "--quiet", "run", "--nobanner"]
             env_keys = list(env.keys())
@@ -1023,8 +1036,11 @@ def run_postgres(
     """
     init_udocker()
 
-    datadir = get_datadir()
-    pg_credentials = f"{datadir}/postgres_credentials.npy"
+    username = getpass.getuser()
+    datadir = f"{get_datadir()}/{username}"
+    os.makedirs(datadir, exist_ok=True)
+
+    pg_credentials = f"{get_datadir()}/postgres_credentials.npy"
     pgdata_dir = f"{datadir}/pgdata"
 
     postgres_user, postgres_pass, postgres_db = np.load(
@@ -1145,7 +1161,9 @@ def kill_postgres(
 
     """
     init_udocker()
-    datadir = get_datadir()
+    username = getpass.getuser()
+    datadir = f"{get_datadir()}/{username}"
+    os.makedirs(datadir, exist_ok=True)
     pid_file = f"{datadir}/postgres.pid"
     log_file = f"{datadir}/postgres.log"
     if os.path.exists(pid_file):

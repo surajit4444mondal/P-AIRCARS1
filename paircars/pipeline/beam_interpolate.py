@@ -11,7 +11,7 @@ from paircars.utils.logger_utils import SmartDefaultsHelpFormatter
 # This script is originally developed by, Puja Majee (NCRA-TIFR), with Devojyoti Kansabanik.
 
 
-def do_beam_interpolate(original_pb_file, new_freq_res=160):
+def do_beam_interpolate(original_pb_file, new_freq_res=160, expected_file_size=None):
     """
     Interpolate MWA beam coefficient to obtain beam file at finer spectral resolution
 
@@ -21,6 +21,8 @@ def do_beam_interpolate(original_pb_file, new_freq_res=160):
         Original MWA primary beam file
     new_freq_res : int, optional
         Frequency resolution of final beam in kHz
+    expected_file_size : int, optional
+        Expected file size in bytes (if same named file exist with same size)
 
     Returns
     -------
@@ -32,7 +34,11 @@ def do_beam_interpolate(original_pb_file, new_freq_res=160):
         time.time()
         new_freq_res = int(new_freq_res)
         new_pb_file = original_pb_file.split(".h5")[0] + f"_{new_freq_res}.h5"
+
         if os.path.exists(new_pb_file):
+            file_size = os.stat(new_pb_file).st_size
+            if file_size == expected_file_size:
+                return new_pb_file
             os.system("rm -rf " + new_pb_file)
 
         print(

@@ -24,7 +24,8 @@ from paircars.utils.proc_manage_utils import (
 from paircars.utils.resource_utils import drop_cache
 from paircars.pipeline.do_apply_basiccal import applysol_wrapper
 
-logging.getLogger("distributed").setLevel(logging.ERROR)
+logging.getLogger("distributed").setLevel(logging.CRITICAL)
+logging.getLogger("distributed.worker").setLevel(logging.CRITICAL)
 logging.getLogger("tornado.application").setLevel(logging.CRITICAL)
 
 
@@ -344,7 +345,7 @@ def main(
             )
 
     if len(mslist) == 0:
-        logger.crititcal("Please provide a valid measurement set list.")
+        logger.critical("Please provide a valid measurement set list.")
         return 0, 0, 0, 0
     else:
         gain_succeed = 0

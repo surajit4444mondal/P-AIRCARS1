@@ -5,9 +5,12 @@ import glob
 import sys
 import os
 import subprocess
-from paircars.utils.basic_utils import get_cachedir, print_banner
+import getpass
+from paircars.utils.basic_utils import get_datadir, print_banner
 from paircars.utils.logger_utils import SmartDefaultsHelpFormatter
 from paircars.utils.proc_manage_utils import get_scheduler_name
+
+username = getpass.getuser()
 
 
 def is_slurm_job_running(job_id, node_name=None):
@@ -53,7 +56,8 @@ def show_local_job_status(clean_old_jobs=False):
     int
         Number of jobs running
     """
-    cachedir = get_cachedir()
+    cachedir = f"{get_datadir()}/{username}"
+    os.makedirs(cachedir, exist_ok=True)
     msg = 0
     try:
         main_pid_files = glob.glob(f"{cachedir}/main_pids_*.txt")
@@ -102,7 +106,8 @@ def show_slurm_job_status(clean_old_jobs=False, node_name=None, print_status=Tru
     int
         Number of jobs running
     """
-    cachedir = get_cachedir()
+    cachedir = f"{get_datadir()}/{username}"
+    os.makedirs(cachedir, exist_ok=True)
     msg = 0
     try:
         main_pid_files = glob.glob(f"{cachedir}/main_pids_*.txt")

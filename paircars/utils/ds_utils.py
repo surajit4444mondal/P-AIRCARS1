@@ -627,7 +627,11 @@ def calc_dynamic_spectrum(msname, metafits, outdir, n_threads=-1):
     mid_freq = msmd.meanfreq(0, unit="MHz")
     times = msmd.timesforspws(0)
     timeres = times[1] - times[0]
-    quack_timestamp = int(2.0 / timeres)
+    try:
+        quack_time = fits.getheader(metafits)["QUACKTIM"]
+        quack_timestamp = int(quack_time / timeres) + 1
+    except Exception:
+        quack_timestamp = int(2.0 / timeres) + 1
     timestamps = [mjdsec_to_timestamp(mjdsec, str_format=0) for mjdsec in times]
     t_string = "".join(timestamps[0].split("T")[0].split("-")) + "".join(
         timestamps[0].split("T")[-1].split(".")[0].split(":")

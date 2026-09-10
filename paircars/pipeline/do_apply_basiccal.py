@@ -30,7 +30,8 @@ from paircars.utils.proc_manage_utils import (
 from paircars.utils.resource_utils import drop_cache, limit_threads
 from paircars.utils.udocker_utils import run_quartical
 
-logging.getLogger("distributed").setLevel(logging.ERROR)
+logging.getLogger("distributed").setLevel(logging.CRITICAL)
+logging.getLogger("distributed.worker").setLevel(logging.CRITICAL)
 logging.getLogger("tornado.application").setLevel(logging.CRITICAL)
 
 
@@ -238,8 +239,8 @@ def applysol(
                                         f"Quartical solutions applied successfully from: {qc}."
                                     )
                                     qc_success = True
-                                os.system(f"rm -rf {quartical_log}")
-                                os.system(f"rm -rf {temp_pol_caltable}")
+                            os.system(f"rm -rf {quartical_log}")
+                            os.system(f"rm -rf {temp_pol_caltable}")
                 if not qc_success:
                     print("No quartical solutions applied.")
                     os.system(f"touch {msname}/.nopolselfcal")
@@ -360,7 +361,7 @@ def run_all_applysol(
             logger.error(
                 f"No bandpass table is present in calibration directory : {caldir}."
             )
-            return []
+            return 1, 0, 0
         if len(crossphase_table) == 0:
             logger.warning(
                 f"No crosshand phase solution is present in calibration directory : {caldir}. Applying only bandpass solutions."

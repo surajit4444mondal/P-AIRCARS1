@@ -68,7 +68,7 @@ def check_permission(path):
     bool
         Whether hand permission or not
     """
-    if path is None or path=="" or not os.path.exists(path):
+    if path is None or path == "" or not os.path.exists(path):
         return False
     print(f"Checking permission for: {path}")
     ###########################
@@ -154,6 +154,7 @@ def create_datadir(datadir=""):
     else:
         datadir = f"{datadir}/paircarspipe_data"
     os.makedirs(datadir, exist_ok=True)
+    os.chmod(datadir, 0o755)
     with open(f"{cachedir}/paircarspipe_data_dir.txt", "w") as f:
         f.write(str(datadir) + "\n")
     return
@@ -545,7 +546,7 @@ def timestamp_to_mjdsec(timestamp, date_format=0):
             2: 'YYYY-MM-DD hh:mm:ss'
 
             3: 'YYYY_MM_DD_hh_mm_ss'
-            
+
             4: 'YYYYMMDDhhmmss'
 
     Returns
@@ -640,3 +641,28 @@ def mjdsec_to_timestamp(mjdsec, str_format=0):
             hhmmss,
         )
     return utcstring
+
+
+def get_gpstime_to_date(gpstime):
+    """
+    Get date and time in YYYYMMDD and hhmmssff format from GPS time
+
+    Parameters
+    ----------
+    gpstime : int
+        GPS time
+
+    Returns
+    -------
+    str
+        Date
+    str
+        Time
+    """
+    try:
+        t = Time(gpstime, format="gps", scale="utc")
+        date = t.to_datetime().strftime("%Y%m%d")
+        time = t.to_datetime().strftime("%H%M%S%f")[:8]
+        return date, time
+    except Exception:
+        return None, None

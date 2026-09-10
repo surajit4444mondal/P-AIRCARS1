@@ -24,13 +24,15 @@ from paircars.utils.proc_manage_utils import (
     get_local_dask_cluster,
 )
 
-logging.getLogger("distributed").setLevel(logging.ERROR)
+logging.getLogger("distributed").setLevel(logging.CRITICAL)
+logging.getLogger("distributed.worker").setLevel(logging.CRITICAL)
 logging.getLogger("tornado.application").setLevel(logging.CRITICAL)
 
 
 def main(
     imagedir,
     outdir,
+    wavelength=195,
     workdir="",
     all_overlay=False,
     cpu_frac=0.8,
@@ -52,6 +54,8 @@ def main(
         Overlay output directory
     workdir : str, optional
         Work directory
+    wavelength : float, optional
+        EUV wavelength
     all_overlay : bool, optional
         Make overlays of all images in image directory or not
     cpu_frac : float, optional
@@ -118,7 +122,7 @@ def main(
     imagelist = glob.glob(f"{imagedir}/*.fits")
 
     if len(imagelist) == 0:
-        logger.crititcal("No image in the image directory.")
+        logger.critical("No image in the image directory.")
         return 1, 0, 0
 
     succeed = 0
@@ -144,7 +148,7 @@ def main(
         euv_fits_images = get_all_euv_maps(
             imagelist,
             workdir,
-            wavelength=195,
+            wavelength=wavelength,
             ncpu=nthreads,
         )
         if len(euv_fits_images) == 0:
@@ -202,6 +206,7 @@ def main(
                         img,
                         euv_fits,
                         workdir,
+                        plot_mwa_colormap=False,
                         plot_file_prefix=name_prefix,
                         outdirs=[outdir],
                         verbose=True,
@@ -284,6 +289,9 @@ def cli():
         "###################\nAdvanced parameters\n###################"
     )
     adv_args.add_argument(
+        "--wavelength", type=float, default=195, help="EUV image wavelength in angstorm"
+    )
+    adv_args.add_argument(
         "--all_overlay", action="store_true", help="Make overlays of all images"
     )
     adv_args.add_argument("--verbose", action="store_true", help="Verbose logs")
@@ -305,6 +313,7 @@ def cli():
         args.imagedir,
         args.outdir,
         workdir=args.workdir,
+        wavelength=args.wavelength,
         all_overlay=args.all_overlay,
         cpu_frac=args.cpu_frac,
         mem_frac=args.mem_frac,

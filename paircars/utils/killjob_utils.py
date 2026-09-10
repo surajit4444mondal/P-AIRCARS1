@@ -5,9 +5,13 @@ import os
 import signal
 import traceback
 import subprocess
+import getpass
 from distributed import Client
-from .basic_utils import get_cachedir, check_port_status
+from .basic_utils import get_datadir, check_port_status
 from .resource_utils import drop_cache
+
+
+username = getpass.getuser()
 
 
 def kill_port(port):
@@ -63,7 +67,8 @@ def kill_localscheduler(jobid):
         P-AIRCARS job ID
     """
     try:
-        cachedir = get_cachedir()
+        cachedir = f"{get_datadir()}/{username}"
+        os.makedirs(cachedir, exist_ok=True)
         jobfile_name = f"{cachedir}/main_pids_{jobid}.txt"
         if os.path.exists(jobfile_name) is False:
             print(f"No P-AIRCARS job information available for job ID; {jobfile_name}")
@@ -98,6 +103,7 @@ def kill_localscheduler(jobid):
         drop_cache(outdir)
         drop_cache(cachedir)
         print("Cleanup complete.")
+        os.system(f"rm -rf {jobfile_name}")
         return
     except Exception:
         print(f"Error in killing P-AIRCARS job: {jobid}")
@@ -115,7 +121,8 @@ def kill_slurmscheduler(jobid):
         P-AIRCARS job ID
     """
     try:
-        cachedir = get_cachedir()
+        cachedir = f"{get_datadir()}/{username}"
+        os.makedirs(cachedir, exist_ok=True)
         jobfile_name = f"{cachedir}/main_pids_{jobid}.txt"
         if os.path.exists(jobfile_name) is False:
             print(f"No P-AIRCARS job information available for job ID; {jobfile_name}")
@@ -150,6 +157,7 @@ def kill_slurmscheduler(jobid):
         drop_cache(outdir)
         drop_cache(cachedir)
         print("Cleanup complete.")
+        os.system(f"rm -rf {jobfile_name}")
         return
     except Exception:
         print(f"Error in killing P-AIRCARS job: {jobid}")

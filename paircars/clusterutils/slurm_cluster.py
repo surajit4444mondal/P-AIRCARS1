@@ -49,23 +49,36 @@ def get_available_nodes(partition=None):
     Returns
     -------
     list
-        Available node names
+        Available node names in the partition
+    list
+        All available node names
     """
     cmd = ["sinfo", "-h", "-N", "-o", "%N %t"]
-    if partition:
-        cmd.extend(["-p", partition])
     result = subprocess.run(
         cmd,
         capture_output=True,
         text=True,
         check=True,
     )
-    available = []
+    all_available = []
     for line in result.stdout.splitlines():
         name, state = line.split()
         if state.startswith("idl") or state.startswith("mix"):
-            available.append(name)
-    return available
+            all_available.append(name)
+    available = []
+    if partition:
+        cmd.extend(["-p", partition])
+            result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        for line in result.stdout.splitlines():
+            name, state = line.split()
+            if state.startswith("idl") or state.startswith("mix"):
+                available.append(name)
+    return available, all_available
 
 
 def get_slurm_node_resources(partition=None, cpu_frac=0.8, mem_frac=0.8):
@@ -108,16 +121,79 @@ def get_slurm_node_resources(partition=None, cpu_frac=0.8, mem_frac=0.8):
     return ncpu, mem
 
 
+def slurm_time_to_seconds(timestr):
+    """
+    Convert SLURM time format (D-HH:MM:SS or HH:MM:SS) to seconds.
+
+    Parameters
+    ----------
+    timestr : str
+        Time string in SLURM format
+
+    Returns
+    -------
+    float
+        Time in seconds
+    """
+    if timestr.lower() in ["infinite", "unlimited"]:
+        return float("inf")
+    if "-" in timestr:
+        days, hms = timestr.split("-")
+        h, m, s = map(int, hms.split(":"))
+        return int(days) * 86400 + h * 3600 + m * 60 + s
+    else:
+        h, m, s = map(int, timestr.split(":"))
+        return h * 3600 + m * 60 + s
+
+
+def get_max_walltime(partition):
+    """
+    Get maximum wall time for the partition
+
+    Parameters
+    ----------
+    partition : str
+        Partition name
+
+    Returns
+    -------
+    str
+        Maximum wall time
+    """
+    result = subprocess.run(
+        ["scontrol", "show", "partition"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("Failed to query SLURM partitions.")
+    output = result.stdout
+    partitions = {}
+    blocks = output.split("\n\n")
+    for block in blocks:
+        name_match = re.search(r"PartitionName=(\S+)", block)
+        time_match = re.search(r"MaxTime=(\S+)", block)
+        if name_match and time_match:
+            part_name = name_match.group(1)
+            max_time = time_match.group(1)
+            partitions[part_name] = max_time
+    if partition not in partitions:
+        raise ValueError(f"Partition {partition} not found.")
+    max_time = partitions[partition]
+    return max_time, slurm_time_to_seconds(max_time)
+
+
 def get_slurm_dask_cluster(
     dask_dir,
     jobid=None,
     cpu_frac=0.8,
     mem_frac=0.8,
-    min_mem=1,
-    max_worker=-1,
+    min_mem=2,
+    max_worker=1,
     partition=None,
     account=None,
     walltime=None,
+    num_node=-1,
     python_path=None,
     spill_frac=0.7,
     verbose=True,
@@ -132,13 +208,13 @@ def get_slurm_dask_cluster(
     jobid : int
         JobID of P-AIRCARS to avoid mixup of cluster configurration with other P-AIRCARS jobs.
     cpu_frac : float, optional
-        CPU fraction to use
+        CPU fraction to use per node
     mem_frac : float, optional
-        Memory fraction to use
+        Memory fraction to use per node
     min_mem : float, optional
         Minimum per job memory in GB
-    max_worker : float, optional
-        Maximum number of worker
+    max_worker : int, optional
+        Maximum number of parallel processes
     partition : str, optional
         SLURM partition name
         Note: If your cluster requires this, you should provide. Otherwise, error will occur.
@@ -147,6 +223,8 @@ def get_slurm_dask_cluster(
         Note: If your cluster requires this, you should provide. Otherwise, error will occur.
     walltime : str, optional
         Job walltime, maximum time the SLURM job can run (HH:MM:SS)
+    num_node : int, optional
+        Maximum number of nodes to use (default: -1, use all nodes available in the account)
     spill_frac : float
         Fraction of memory to spill to disk
     verbose : bool
@@ -189,27 +267,32 @@ def get_slurm_dask_cluster(
                 "distributed.worker.memory.spill": spill_frac + 0.1,
                 "distributed.worker.memory.pause": spill_frac + 0.2,
                 "distributed.worker.memory.terminate": spill_frac + 0.25,
+                "distributed.worker.daemon": False,
             }
         )
         if python_path is None:
             python_path = sys.executable
         interface = detect_best_interface()
 
-        max_worker = max(2, max_worker)
+        max_worker = max(1, max_worker)
         per_node_cpu, per_node_mem = get_slurm_node_resources(
             partition=partition, cpu_frac=cpu_frac, mem_frac=mem_frac
         )
         total_nodes = get_total_nodes(partition=partition)
+        if num_node < 0:
+            num_node = total_nodes
+        elif num_node > total_nodes:
+            num_node = total_nodes
 
         workers_per_node_mem = int(per_node_mem / min_mem)
         if workers_per_node_mem < 1:
             print(
-                "Minimum available memory per node is not sufficient for at-least one worker per node."
+                "Minimum available memory per node is not sufficient for at-least one worker on a node."
             )
             return
         workers_per_node_cpu = per_node_cpu
         workers_per_node = min(workers_per_node_mem, workers_per_node_cpu)
-        max_workers_cluster = workers_per_node * total_nodes
+        max_workers_cluster = workers_per_node * num_node
         if max_worker > 0:
             max_workers_cluster = min(max_workers_cluster, max_worker)
             max_workers_cluster = max(2, max_workers_cluster)
@@ -308,69 +391,7 @@ def get_slurm_dask_cluster(
         traceback.print_exc()
         os.system(f"rm -rf {log_dir} {dask_dir}")
         return
-
-
-def slurm_time_to_seconds(timestr):
-    """
-    Convert SLURM time format (D-HH:MM:SS or HH:MM:SS) to seconds.
-
-    Parameters
-    ----------
-    timestr : str
-        Time string in SLURM format
-
-    Returns
-    -------
-    float
-        Time in seconds
-    """
-    if timestr.lower() in ["infinite", "unlimited"]:
-        return float("inf")
-    if "-" in timestr:
-        days, hms = timestr.split("-")
-        h, m, s = map(int, hms.split(":"))
-        return int(days) * 86400 + h * 3600 + m * 60 + s
-    else:
-        h, m, s = map(int, timestr.split(":"))
-        return h * 3600 + m * 60 + s
-
-
-def get_max_walltime(partition):
-    """
-    Get maximum wall time for the partition
-
-    Parameters
-    ----------
-    partition : str
-        Partition name
-
-    Returns
-    -------
-    str
-        Maximum wall time
-    """
-    result = subprocess.run(
-        ["scontrol", "show", "partition"],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError("Failed to query SLURM partitions.")
-    output = result.stdout
-    partitions = {}
-    blocks = output.split("\n\n")
-    for block in blocks:
-        name_match = re.search(r"PartitionName=(\S+)", block)
-        time_match = re.search(r"MaxTime=(\S+)", block)
-        if name_match and time_match:
-            part_name = name_match.group(1)
-            max_time = time_match.group(1)
-            partitions[part_name] = max_time
-    if partition not in partitions:
-        raise ValueError(f"Partition {partition} not found.")
-    max_time = partitions[partition]
-    return max_time, slurm_time_to_seconds(max_time)
-
+        
 
 def submit_slurm_master_flow(args, jobid):
     """

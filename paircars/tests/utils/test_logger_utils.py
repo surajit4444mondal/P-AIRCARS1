@@ -129,6 +129,7 @@ def test_remote_logger_emit_success(mock_post):
 
     logger.emit(record)
 
+
 @patch(
     "paircars.utils.logger_utils.requests.post",
     side_effect=Exception("Connection error"),
@@ -228,7 +229,7 @@ def test_init_logger_remote_success(
             "job_id": "JOB123",
             "log_id": "MyLogID",
             "message": "",
-            "log_type":"task",
+            "log_type": "task",
             "password": "pw",
             "first": True,
         },

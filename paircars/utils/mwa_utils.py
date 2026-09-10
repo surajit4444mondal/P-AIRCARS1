@@ -297,6 +297,7 @@ def get_gleam_uvrange(msname):
 def get_selfcal_uvrange(msname):
     """
     Get UV-range for self-calibration
+    (Excluding galactic background and long baselines)
 
     Parameters
     ----------
@@ -305,6 +306,10 @@ def get_selfcal_uvrange(msname):
 
     Returns
     -------
+    float
+        Minimum uv-lambda
+    float
+        Maximum uv-lambda
     str
         UV-range in CASA format
     """
@@ -315,8 +320,9 @@ def get_selfcal_uvrange(msname):
     wavelength = (3 * 10**8) / freq
     maxuv_m = 3000
     maxuv_l = round(maxuv_m / wavelength, 1)
-    uvrange = f"{0}~{maxuv_l}lambda"
-    return uvrange
+    minuv_l = 10.0
+    uvrange = f"{minuv_l}~{maxuv_l}lambda"
+    return minuv_l, maxuv_l, uvrange
 
 
 def get_selfcal_ntimes(msname):

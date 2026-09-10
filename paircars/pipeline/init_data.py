@@ -5,6 +5,7 @@ import requests
 import sys
 import os
 import getpass
+import time
 from datetime import datetime as dt
 from parfive import Downloader
 from paircars.utils.basic_utils import (
@@ -74,6 +75,19 @@ def download_with_parfive(record_id, update=False, output_dir="zenodo_download")
                     os.system(f"rm -rf {output_dir}/{filename}")
                 dl.enqueue_file(file_url, path=output_dir, filename=filename)
     results = dl.download()
+    retry_count = 0
+    while True:
+        if len(results.errors) > 0:
+            dl.retry(results)
+            retry_count += 1
+            time.sleep(10)
+        else:
+            break
+        if retry_count > 10:
+            print(
+                "Maximum 10 times retied to download. Check your internet connection."
+            )
+            break
     for f in results:
         os.chmod(f, 0o755)
 
@@ -131,12 +145,17 @@ def init_paircars_data(
         print(f"P-AIRCARS data are updated in: {datadir} at time: {timestr}")
 
     freqres_list = [40, 80, 160, 320, 640]
+    file_size_list = [6520103392, 3223921432, 1575254952, 750739184, 338476000]
     mwapb_file = f"{datadir}/mwa_full_embedded_element_pattern.h5"
-    for freqres in freqres_list:
+    for i in range(len(freqres_list)):
+        freqres = freqres_list[i]
+        file_size = file_size_list[i]
         outfile = mwapb_file.split(".h5")[0] + f"_{freqres}.h5"
         if os.path.exists(outfile) is False or update:
             print(f"Making interpolated beam at frequency resolution: {freqres} kHz")
-            do_beam_interpolate(mwapb_file, new_freq_res=int(freqres))
+            do_beam_interpolate(
+                mwapb_file, new_freq_res=int(freqres), expected_file_size=file_size
+            )
 
 
 def main(
@@ -207,7 +226,7 @@ def main(
         ######################################
         create_datadir(datadir=datadir)
         datadir = get_datadir()
-        print(f"P-AIRCARS data directory: {datadir}")
+        print(f"P-AIRCARS configuration data directory: {datadir}")
         if has_space(datadir, required_gb) is False:
             print(
                 f"Minimum {required_gb}GB disk space is required in data directory: {datadir}. Please check disk space."
@@ -390,7 +409,10 @@ def cli():
         help="Do not kill occupied port",
     )
     parser.add_argument(
-        "--datadir", type=str, default="", help="User provided data directory"
+        "--configdir",
+        type=str,
+        default="",
+        help="User provided custom configuration data directory",
     )
     parser.add_argument("--update", action="store_true", help="Update existing data")
     parser.add_argument(
@@ -417,7 +439,7 @@ def cli():
 
     msg = main(
         init=args.init,
-        datadir=args.datadir,
+        datadir=args.configdir,
         port=args.port,
         do_kill_port=args.kill_port,
         update=args.update,

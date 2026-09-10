@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "paircars"
-version = "3.0.6"
+version = "3.0.7"
 description = "A package to calibrate and image MWA solar observation"
 readme = { file = "README.md", content-type = "text/markdown" }
 license = "MIT"
@@ -79,6 +79,7 @@ dependencies = [
     "git-filter-repo==2.47.0",
     "idna==3.10",
     "importlib_metadata==8.2.0",
+    "imageio==2.37.3",
     "iniconfig==2.0.0",
     "ipython==8.26.0",
     "isodate==0.7.2",
@@ -232,10 +233,11 @@ run-mwa-makeds = "paircars.pipeline.mwa_make_ds:cli"
 run-mwa-solar-siderealcor = "paircars.pipeline.do_sidereal_cor:cli"
 run-mwa-fill-caltable = "paircars.casacoreutils.fill_caltable:cli"
 run-mwa-beam-interpolate = "paircars.pipeline.beam_interpolate:cli"
+run-mwa-fitscompress = "paircars.pipeline.do_compression:cli"
 run-mwa-masterflow = "paircars.pipeline.master_flow:cli"
 run-mwa-paircars = "paircars.pipeline.run_paircars:cli"
 init-paircars-setup = "paircars.pipeline.init_data:cli"
-init-paircars-prefect="paircars.pipeline.prefect_server:cli"
+setup-paircars-prefect="paircars.pipeline.prefect_server:cli"
 kill-paircars-job = "paircars.pipeline.kill_job:kill_paircarsjob"
 show-paircars-ms="paircars.pipeline.show_msdetails:cli"
 show-paircars-status = "paircars.pipeline.show_status:cli"

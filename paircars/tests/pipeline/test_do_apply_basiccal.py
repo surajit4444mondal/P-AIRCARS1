@@ -187,7 +187,7 @@ def test_run_all_applysol(
                 (ms, patterns[i % len(patterns)], f"out_{ms}", f"err_{ms}")
                 for i, ms in enumerate(mslist)
             ]
-        m_system.return_value=True
+        m_system.return_value = True
         result = run_all_applysol(
             mslist=mslist,
             target_metafits="target.fits",

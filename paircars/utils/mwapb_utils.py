@@ -959,7 +959,9 @@ def make_primarybeammap(
         #######################################
         haslam_map = get_haslam(freq)
         mask = np.isnan(za_grid)
-        za_grid[np.isnan(za_grid)] = 90.0  # Replace nans as they break the interpolation
+        za_grid[np.isnan(za_grid)] = (
+            90.0  # Replace nans as they break the interpolation
+        )
         sky_grid = map_sky_haslam(
             haslam_map["skymap"],
             haslam_map["RA"],
@@ -1018,7 +1020,9 @@ def make_primarybeammap(
                 if len(fringe_list) > 0:
                     for i in range(len(fringe_list)):
                         fringe = fringe_list[i]
-                        T_fringe_XX += np.abs(np.nansum(fringe * beamsky) / np.nansum(beam))
+                        T_fringe_XX += np.abs(
+                            np.nansum(fringe * beamsky) / np.nansum(beam)
+                        )
             if pol == "YY":
                 beamsky_sum_YY = beamsky_sum
                 beam_sum_YY = beam_sum
@@ -1028,7 +1032,9 @@ def make_primarybeammap(
                 if len(fringe_list) > 0:
                     for i in range(len(fringe_list)):
                         fringe = fringe_list[i]
-                        T_fringe_YY += np.abs(np.nansum(fringe * beamsky) / np.nansum(beam))
+                        T_fringe_YY += np.abs(
+                            np.nansum(fringe * beamsky) / np.nansum(beam)
+                        )
         return (
             beamsky_sum_XX,
             beam_sum_XX,

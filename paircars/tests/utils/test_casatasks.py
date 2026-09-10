@@ -52,20 +52,24 @@ def test_single_mstransform(
     # Call the function and check return
     outputms = single_mstransform(msname="mock.ms", outputms="mock_output.ms")
     assert outputms == "mock_output.ms"
-    
-    
-    
+
+
 class DummySuppress:
     def __enter__(self):
         pass
+
     def __exit__(self, *args):
         pass
+
+
 @pytest.fixture
 def mock_suppress(monkeypatch):
     monkeypatch.setattr(
         "paircars.utils.basic_utils.suppress_output",  # 🔁 update this
-        lambda: DummySuppress()
+        lambda: DummySuppress(),
     )
+
+
 @pytest.mark.parametrize(
     "npol, ant1, ant2, time, make_zero_auto, expect_nonzero, expect_flags",
     [

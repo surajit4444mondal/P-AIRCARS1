@@ -15,7 +15,7 @@ from paircars.utils.logger_utils import (
     init_logger,
     get_logger_safe,
 )
-from paircars.utils.ms_metadata import get_timeranges
+from paircars.utils.ms_metadata import get_timeranges, get_total_time
 from paircars.utils.mwa_utils import (
     get_MWA_coarse_bands,
     get_MWA_coarse_chan,
@@ -26,8 +26,14 @@ from paircars.utils.proc_manage_utils import (
     get_local_dask_cluster,
 )
 from paircars.utils.resource_utils import drop_cache
+from paircars.utils.sunpos_utils import move_to_sun
+from paircars.utils.udocker_utils import (
+    check_udocker_container,
+    initialize_wsclean_container,
+)
 
-logging.getLogger("distributed").setLevel(logging.ERROR)
+logging.getLogger("distributed").setLevel(logging.CRITICAL)
+logging.getLogger("distributed.worker").setLevel(logging.CRITICAL)
 logging.getLogger("tornado.application").setLevel(logging.CRITICAL)
 
 
@@ -49,10 +55,29 @@ def chanlist_to_str(lst):
     return ";".join(ranges)
 
 
+def get_timerange_str(timerange):
+    timerange_list = timerange.split(",")
+    s = timerange_list[0].split("~")[0]
+    e = timerange_list[-1].split("~")[-1]
+    s_string = "".join(s.split(".")[0].split("/")[:-1]) + "".join(
+        s.split(".")[0].split("/")[-1].split(":")
+    )
+    e_string = "".join(e.split(".")[0].split("/")[:-1]) + "".join(
+        e.split(".")[0].split("/")[-1].split(":")
+    )
+    return f"{s_string}_{e_string}"
+
+
 def single_mstransform_wrapper(**kwargs):
     with capture_all_output() as (out, err):
         result = single_mstransform(**kwargs)
         return result, out.getvalue(), err.getvalue()
+
+
+def move_to_sun_wrapper(*args, **kwargs):
+    with capture_all_output() as (out, err):
+        result = move_to_sun(*args, **kwargs)
+        return args[0], result, out.getvalue(), err.getvalue()
 
 
 def split_target_scans(
@@ -69,8 +94,10 @@ def split_target_scans(
     time_interval=-1,
     time_window=-1,
     quack_timestamps=-1,
+    max_time_chunk=-1,
     single_chan_split=False,
     force_split=False,
+    move_solarcenter=False,
     n_threads=-1,
     logger=None,
 ):
@@ -105,10 +132,14 @@ def split_target_scans(
         Time window in seconds
     quack_timestamps : int, optional
         Number of timestamps ignored at the start and end of each scan
+    max_time_chunk : float, optional
+        Maximum time chunk of each spliting ms in seconds (default: -1, full time chunk)
     single_chan_split: bool, optional
         Split only a single good channel
     force_split : bool, optional
         Force split
+    move_solarcenter : bool, optional
+        Move phasecenter to solar center after spliting
     n_threads : int, optional
         Number of threads to use
 
@@ -162,7 +193,7 @@ def split_target_scans(
             else:
                 chanwidth = 1
             if timeres > 0:  # Image resolution is in seconds
-                timebin = str(max(ms_timeres,timeres)) + "s"
+                timebin = str(max(ms_timeres, timeres)) + "s"
             else:
                 timebin = ""
 
@@ -177,10 +208,12 @@ def split_target_scans(
                 use_coarse_chans = []
                 for coarse_chan in coarse_chans:
                     if coarse_chan in split_coarse_chans:
-                        use_coarse_chans.append(coarse_chan)    
-            if len(use_coarse_chans)>0:
+                        use_coarse_chans.append(coarse_chan)
+            if len(use_coarse_chans) > 0:
                 logger.debug("##################################")
-                logger.debug(f"Using coarse channels for {msname} are: {use_coarse_chans}")
+                logger.debug(
+                    f"Using coarse channels for {msname} are: {use_coarse_chans}"
+                )
                 logger.debug("##################################")
                 coarse_chlist = []
                 good_spwlist = []
@@ -206,46 +239,60 @@ def split_target_scans(
                                 flag_badchan(msname, spw=f"0:{central_chan}")
                         coarse_chlist.append(f"{coarse_chan}")
 
-                timerange_list = get_timeranges(
+                ##################################
+                # Making temporal chunks
+                ##################################
+                all_timerange_list = get_timeranges(
                     msname,
                     time_interval,
                     time_window,
                     quack_timestamps=quack_timestamps,
+                    max_time_chunk=max_time_chunk,
                 )
-                timerange = ",".join(timerange_list)
-                for i in range(len(coarse_chlist)):
-                    good_spw = good_spwlist[i]
-                    coarse_chan = coarse_chlist[i]
-                    outputvis = f"{workdir}/{prefix}_{obsid}_ch_{coarse_chan}.ms"
-                    if os.path.exists(f"{outputvis}/.splited") and force_split is False:
-                        logger.info(f"{outputvis} is already splited successfully.")
-                        splited_ms_list.append(outputvis)
-                    else:
-                        if os.path.exists(outputvis):
-                            logger.debug(f"Deleteing pre-existing output ms: {outputvis}")
-                            os.system(f"rm -rf {outputvis}")
-                        if os.path.exists(f"{outputvis}.flagversions"):
+                for timerange_list in all_timerange_list:
+                    timerange = ",".join(timerange_list)
+                    for i in range(len(coarse_chlist)):
+                        good_spw = good_spwlist[i]
+                        coarse_chan = coarse_chlist[i]
+                        t_range = get_timerange_str(timerange)
+                        outputvis = f"{workdir}/{prefix}_{obsid}_ch_{coarse_chan}_t_{t_range}.ms"
+                        if (
+                            os.path.exists(f"{outputvis}/.splited")
+                            and force_split is False
+                        ):
+                            logger.info(f"{outputvis} is already splited successfully.")
+                            splited_ms_list.append(outputvis)
+                        else:
+                            if os.path.exists(outputvis):
+                                logger.debug(
+                                    f"Deleteing pre-existing output ms: {outputvis}"
+                                )
+                                os.system(f"rm -rf {outputvis}")
+                            if os.path.exists(f"{outputvis}.flagversions"):
+                                logger.debug(
+                                    f"Deleteing pre-existing output ms flags: {outputvis}.flagversions"
+                                )
+                                os.system(f"rm -rf {outputvis}.flagversions")
+                            logger.debug("Spliting parameters:")
                             logger.debug(
-                                f"Deleteing pre-existing output ms flags: {outputvis}.flagversions"
+                                f"Channel width: {chanwidth}, timebin: {timebin}, datacolumn: {datacolumn}, spectral window: {good_spw}, time range: {timerange}"
                             )
-                            os.system(f"rm -rf {outputvis}.flagversions")
-                        logger.debug("Spliting parameters:")
-                        logger.debug(
-                            f"Channel width: {chanwidth}, timebin: {timebin}, datacolumn: {datacolumn}, spectral window: {good_spw}, time range: {timerange}"
-                        )
-                        tasks.append(
-                            delayed(single_mstransform_wrapper)(
-                                msname=msname,
-                                outputms=outputvis,
-                                width=chanwidth,
-                                timebin=timebin,
-                                datacolumn=datacolumn,
-                                spw=good_spw,
-                                corr="",
-                                timerange=timerange,
-                                n_threads=n_threads,
+                            tasks.append(
+                                delayed(single_mstransform_wrapper)(
+                                    msname=msname,
+                                    outputms=outputvis,
+                                    width=chanwidth,
+                                    timebin=timebin,
+                                    datacolumn=datacolumn,
+                                    spw=good_spw,
+                                    corr="",
+                                    timerange=timerange,
+                                    n_threads=n_threads,
+                                )
                             )
-                        )
+        if len(tasks) == 0:
+            logger.error("No task to split measurement sets.")
+            return 1, []
         future = dask_client.compute(tasks)
         result_wrapper = dask_client.gather(future)
         result = []
@@ -258,15 +305,44 @@ def split_target_scans(
                 logger.debug(line)
             for line in r[2].splitlines():
                 logger.debug(line)
-
         splited_ms_list = splited_ms_list + result
         if len(splited_ms_list) == 0:
             logger.error(f"Spliting of measurement set: {msname} is unsuccessful.")
             return 1, []
         else:
             logger.info(f"Spliting of measurement set: {msname} is done successfully.")
-            for splited_ms in splited_ms_list:
-                drop_cache(splited_ms)
+            if move_solarcenter:
+                try:
+                    tasks = [
+                        delayed(move_to_sun_wrapper)(msname, ncpu=n_threads)
+                        for msname in splited_ms_list
+                    ]
+                    result_wrapper = list(
+                        dask_client.gather(dask_client.compute(tasks))
+                    )
+                    results = []
+                    for r in result_wrapper:
+                        results.append(r[1])
+                        logger.debug("================")
+                        logger.debug(f"Worker log for: {os.path.basename(r[0])}")
+                        logger.debug("================")
+                        for line in r[2].splitlines():
+                            logger.debug(line)
+                        for line in r[3].splitlines():
+                            logger.debug(line)
+
+                    failed = sum(results)
+                    succeed = len(mslist) - failed
+                    logger.info(
+                        "Moving phasecenter to solarcenter has done successfully."
+                    )
+                    logger.info(f"Total success: {succeed}")
+                    logger.info(f"Total failure: {failed}")
+                except Exception:
+                    logger.warning("Moving phasecenter to solarcenter has failed.")
+                finally:
+                    for splited_ms in splited_ms_list:
+                        drop_cache(splited_ms)
             return 0, splited_ms_list
     except Exception:
         logger.exception(
@@ -285,11 +361,13 @@ def main(
     time_window=-1,
     time_interval=-1,
     quack_timestamps=-1,
+    max_time_chunk=-1,
     freqres=-1,
     timeres=-1,
     prefix="targets",
     single_chan_split=False,
     force_split=False,
+    move_solarcenter=False,
     cpu_frac=0.8,
     mem_frac=0.8,
     logfile=None,
@@ -321,6 +399,8 @@ def main(
         Time interval in seconds between two time chunks. Set -1 to disable. Default is -1.
     quack_timestamps : int, optional
        Number of timestamps to flag at the beginning and end of each scan ("quack"). -1 to disable. Default is -1.
+    max_time_chunk : float, optional
+        Maximum time chunk of each spliting ms in seconds (default: -1, full time chunk)
     freqres : float, optional
         Frequency resolution in MHz for spectral averaging. Set -1 to disable. Default is -1.
     timeres : float, optional
@@ -331,6 +411,8 @@ def main(
         Split only a songle good channel.
     force_split : bool, optional
         Force to split
+    move_solarcenter : bool, optional
+        Move phasecenter to solar center after spliting
     cpu_frac : float, optional
         Fraction of available CPUs to allocate per task. Default is 0.8.
     mem_frac : float, optional
@@ -388,6 +470,23 @@ def main(
                 "do_target_split", logfile, jobname=jobname, password=password
             )
 
+    ###########################
+    # WSClean container
+    ###########################
+    if move_solarcenter:
+        container_name = "paircarswsclean"
+        container_present = check_udocker_container(container_name)
+        if not container_present:
+            logger.debug(f"Initializing {container_name}.")
+            container_name = initialize_wsclean_container(
+                name=container_name, verbose=True
+            )
+            if container_name is None:
+                logger.critical(
+                    f"Container {container_name} is not initiated. First initiate container and then run."
+                )
+                return 1, 0, 0
+
     if len(mslist) == 0:
         logger.critical("Please provide a valid measurement set list.")
         return 1, 0, 0
@@ -398,7 +497,12 @@ def main(
             if len(split_coarse_chans) > 0:
                 ms_coarse_chans = list(set(ms_coarse_chans) & set(split_coarse_chans))
             ncoarse = len(ms_coarse_chans)
-            total_ncoarse += ncoarse
+            if max_time_chunk > 0:
+                total_time = get_total_time(msname)
+                t_chunks = int(total_time / max_time_chunk) + 1
+                total_ncoarse += ncoarse * t_chunks
+            else:
+                total_ncoarse += ncoarse
         total_ncoarse = max(1, total_ncoarse)
         logger.debug(f"Total usable coarse channels: {total_ncoarse}")
         expected = total_ncoarse
@@ -458,8 +562,10 @@ def main(
             time_window=float(time_window),
             time_interval=float(time_interval),
             quack_timestamps=int(quack_timestamps),
+            max_time_chunk=max_time_chunk,
             single_chan_split=single_chan_split,
             force_split=force_split,
+            move_solarcenter=move_solarcenter,
             scan=scan,
             prefix=prefix,
             n_threads=n_threads,
@@ -482,12 +588,12 @@ def main(
         msg = 1
         return msg, expected, succeed
     finally:
-        time.sleep(5)
         if observer is not None:
             clean_shutdown(observer)
-        for msname in mslist:
-            if os.path.exists(msname):
-                drop_cache(msname)
+        if len(mslist) > 0:
+            for msname in mslist:
+                if os.path.exists(msname):
+                    drop_cache(msname)
         if dask_cluster is not None:
             dask_client.shutdown()
             dask_client.close()
@@ -558,6 +664,12 @@ def cli():
         help="Time stamps to ignore at the start and end of the each scan",
     )
     adv_args.add_argument(
+        "--max_time_chunk",
+        type=float,
+        default=-1,
+        help="Maximum time chunk of each spliting ms in seconds (default: full time chunk)",
+    )
+    adv_args.add_argument(
         "--freqres",
         type=float,
         default=-1,
@@ -578,6 +690,11 @@ def cli():
         help="Splited ms prefix name",
     )
     adv_args.add_argument("--force_split", action="store_true", help="Force to split")
+    adv_args.add_argument(
+        "--move_solarcenter",
+        action="store_true",
+        help="Move phasecenter to solar center",
+    )
     adv_args.add_argument(
         "--single_chan_split", action="store_true", help="Single channel to split"
     )
@@ -618,8 +735,10 @@ def cli():
         time_window=args.time_window,
         time_interval=args.time_interval,
         quack_timestamps=args.quack_timestamps,
+        max_time_chunk=args.max_time_chunk,
         single_chan_split=args.single_chan_split,
         force_split=args.force_split,
+        move_solarcenter=args.move_solarcenter,
         freqres=args.freqres,
         timeres=args.timeres,
         prefix=args.prefix,

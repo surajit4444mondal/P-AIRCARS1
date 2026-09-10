@@ -93,7 +93,9 @@ def get_pbcor_image(
             freqres = float(image_header["CDELT4"]) / 1000.0
         else:
             freqres = 160.0
-        beam_files = glob.glob(f"{datadir}/mwa_full_embedded_element_pattern*.h5")
+        beam_files = np.array(
+            glob.glob(f"{datadir}/mwa_full_embedded_element_pattern*.h5")
+        )
         beam_files_freqs = []
         for beamfile in beam_files:
             if os.path.basename(beamfile) == "mwa_full_embedded_element_pattern.h5":
@@ -106,6 +108,8 @@ def get_pbcor_image(
                 )
             beam_files_freqs.append(beam_file_freq)
         beam_files_freqs = np.array(beam_files_freqs)
+        beam_files = beam_files[beam_files_freqs > freqres]
+        beam_files_freqs = beam_files_freqs[beam_files_freqs > freqres]
         pos = np.argmin(np.abs(beam_files_freqs - freqres))
         MWA_PB_file = beam_files[pos]
     print(f"Primary beam file: {MWA_PB_file}")
@@ -265,6 +269,8 @@ def get_pbcor_image(
 
         if os.path.exists(outfile):
             os.system(f"rm -rf {outfile}")
+        imageheader["PBFILE"] = os.path.basename(MWA_PB_file)
+        imageheader["HYPEBEAM"] = "0.10.4"
         fits.writeto(outfile, data=imagedata, header=imageheader, overwrite=True)
         if fullpol:
             if leakage_file != "" and os.path.exists(leakage_file):

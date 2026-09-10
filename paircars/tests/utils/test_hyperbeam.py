@@ -3,6 +3,7 @@ import pytest
 import pickle
 from paircars.utils.hyperbeam import FEEBeam
 
+
 @pytest.mark.parametrize(
     "method_name, check_container, container_exists",
     [
@@ -20,25 +21,24 @@ def test_feebeam_all(
     container_exists,
 ):
     # Mock udocker init
-    monkeypatch.setattr(
-        "paircars.utils.hyperbeam.init_udocker",
-        lambda: None
-    )
+    monkeypatch.setattr("paircars.utils.hyperbeam.init_udocker", lambda: None)
     # Mock container check
     monkeypatch.setattr(
         "paircars.utils.hyperbeam.check_udocker_container",
-        lambda name: container_exists
+        lambda name: container_exists,
     )
     # Mock container initialization
     monkeypatch.setattr(
         "paircars.utils.hyperbeam.initialize_hyperbeam_container",
-        lambda name, verbose=True: name
+        lambda name, verbose=True: name,
     )
     # Capture subprocess call
     captured = {}
+
     class DummyProc:
         def __init__(self, stdout):
             self.stdout = stdout
+
     def fake_run(cmd, env=None, input=None, capture_output=None):
         captured["cmd"] = cmd
         captured["env"] = env
@@ -50,10 +50,8 @@ def test_feebeam_all(
         # Return fake result
         fake_output = np.ones((2, 2), dtype=np.float32)
         return DummyProc(stdout=pickle.dumps(fake_output))
-    monkeypatch.setattr(
-        "paircars.utils.hyperbeam.subprocess.run",
-        fake_run
-    )
+
+    monkeypatch.setattr("paircars.utils.hyperbeam.subprocess.run", fake_run)
     pbfile = "/tmp/fake_pb.h5"
     beam = FEEBeam(pbfile, check_container=check_container)
     args = dict(
