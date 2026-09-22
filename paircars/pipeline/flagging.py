@@ -453,7 +453,8 @@ def single_ms_flag(
                     msname,
                     datacolumn,
                     threshold=max(5.0, th),
-                    num_processes=n_threads,
+                    n_threads=n_threads,
+                    absmem=mem_limit,
                     num_bins=num_bins,
                     flagbackup=False,
                 )

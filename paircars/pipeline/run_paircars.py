@@ -109,10 +109,10 @@ def cli():
         help="Redo self-calibration",
     )
     advanced_cal.add_argument(
-        "--no_solarflagger",
+        "--no_uvbinflagger",
         action="store_false",
-        dest="use_solarflagger",
-        help="Use solar flagger on corrected data or not",
+        dest="use_uvbinflagger",
+        help="Use uvbin flagger on corrected data or not",
     )
     advanced_cal.add_argument(
         "--only_amplitude",

@@ -30,6 +30,7 @@ from .image_utils import (
     make_timeavg_image,
     make_stokes_wsclean_imagecube,
     check_valid_image,
+    create_circular_mask,
 )
 from .udocker_utils import run_wsclean, run_quartical
 from .sunpos_utils import determine_quiet_disk, cal_apparent_solarcenter
@@ -340,7 +341,7 @@ def quiet_sun_selfcal(msname, logger, selfcaldir, refant="1", solint="inf"):
         return msg, bpass_caltable
 
 
-def calc_leakage(imagename, threshold=5, disc_size=50):
+def calc_leakage(imagename, threshold=10.0, disc_size=50):
     """
     Calculate Stokes I to Q, U, V leakages
 
@@ -398,43 +399,56 @@ def calc_leakage(imagename, threshold=5, disc_size=50):
     ##############################################
     # Estimating regions for leakage calculation
     ##############################################
-    pos = np.where((i_data < i_thresh) | (tb_data > 1.0))
+    pos = (i_data < i_thresh) | (tb_data > 1.0)
     q_data[pos] = np.nan
     u_data[pos] = np.nan
     v_data[pos] = np.nan
-    q_by_i = q_data / i_data
-    u_by_i = u_data / i_data
-    v_by_i = v_data / i_data
-    q_by_i = q_by_i[~np.isnan(q_by_i)].flatten()
-    u_by_i = u_by_i[~np.isnan(u_by_i)].flatten()
-    v_by_i = v_by_i[~np.isnan(v_by_i)].flatten()
-
-    #########################################
-    # Estimating leakage and leakage errors
-    #########################################
-    q_leakage = round(np.nanmedian(q_by_i), 4)
-    u_leakage = round(np.nanmedian(u_by_i), 4)
-    v_leakage = round(np.nanmedian(v_by_i), 4)
-
-    q_cor = q_data - (q_leakage * i_data)
-    u_cor = u_data - (u_leakage * i_data)
-    v_cor = v_data - (v_leakage * i_data)
-
-    q_leakage_err = round((3 * np.nanstd(q_cor)) / np.nanmax(i_data), 6)
-    u_leakage_err = round((3 * np.nanstd(u_cor)) / np.nanmax(i_data), 6)
-    v_leakage_err = round((3 * np.nanstd(v_cor)) / np.nanmax(i_data), 6)
-    os.system(f"rm -rf {tb_map}")
-
-    if np.isnan(q_leakage):
+    #############################################
+    # Q leakage calculation
+    #############################################
+    if np.sum(~np.isnan(q_data)) > 0:
+        q_by_i = q_data[~np.isnan(q_data)] / i_data[~np.isnan(q_data)]
+        q_leakage = round(np.nanmedian(q_by_i), 4)
+        q_cor = q_data - (q_leakage * i_data)
+        q_leakage_err = round(
+            (threshold * np.nanstd(q_cor[~np.isnan(q_data)]))
+            / np.nanmax(i_data[~np.isnan(q_data)]),
+            6,
+        )
+    else:
         q_leakage = 0.0
         q_leakage_err = 0.0
-    if np.isnan(u_leakage):
+    #############################################
+    # U leakage calculation
+    #############################################
+    if np.sum(~np.isnan(u_data)) > 0:
+        u_by_i = u_data[~np.isnan(u_data)] / i_data[~np.isnan(u_data)]
+        u_leakage = round(np.nanmedian(u_by_i), 4)
+        u_cor = u_data - (u_leakage * i_data)
+        u_leakage_err = round(
+            (threshold * np.nanstd(u_cor[~np.isnan(u_data)]))
+            / np.nanmax(i_data[~np.isnan(u_data)]),
+            6,
+        )
+    else:
         u_leakage = 0.0
         u_leakage_err = 0.0
-    if np.isnan(v_leakage):
+    #############################################
+    # V leakage calculation
+    #############################################
+    if np.sum(~np.isnan(v_data)) > 0:
+        v_by_i = v_data[~np.isnan(v_data)] / i_data[~np.isnan(v_data)]
+        v_leakage = round(np.nanmedian(v_by_i), 4)
+        v_cor = v_data - (v_leakage * i_data)
+        v_leakage_err = round(
+            (threshold * np.nanstd(v_cor[~np.isnan(v_data)]))
+            / np.nanmax(i_data[~np.isnan(v_data)]),
+            6,
+        )
+    else:
         v_leakage = 0.0
         v_leakage_err = 0.0
-
+    os.system(f"rm -rf {tb_map}")
     return q_leakage, u_leakage, v_leakage, q_leakage_err, u_leakage_err, v_leakage_err
 
 
@@ -444,7 +458,10 @@ def correct_leakage(
     q_leakage=0.0,
     u_leakage=0.0,
     v_leakage=0.0,
-    threshold=5,
+    q_err=0.0,
+    u_err=0.0,
+    v_err=0.0,
+    threshold=10.0,
     disc_size=50,
 ):
     """
@@ -462,6 +479,12 @@ def correct_leakage(
         U leakage
     v_leakage : float, optional
         V leakage
+    q_err : float, optional
+        Residual Q error
+    u_err : float, optional
+        Residual U error
+    v_err : float, optional
+        Residual V error
     threshold : float
         Threshold to choose region with Stokes I detection
     disc_size : float
@@ -483,7 +506,7 @@ def correct_leakage(
     image_Q = imagedata[1, 0, ...]
     image_U = imagedata[2, 0, ...]
     image_V = imagedata[3, 0, ...]
-
+    
     if os.path.exists(modelname):
         correct_model = True
     else:
@@ -515,6 +538,7 @@ def correct_leakage(
     ####################################
     # Calculate rms
     ####################################
+    i_rms = np.nanstd(image_I[~mask])
     q_rms = np.nanstd(image_Q[~mask])
     u_rms = np.nanstd(image_U[~mask])
     v_rms = np.nanstd(image_V[~mask])
@@ -525,9 +549,9 @@ def correct_leakage(
     image_Q = image_Q - (q_leakage * image_I)
     image_U = image_U - (u_leakage * image_I)
     image_V = image_V - (v_leakage * image_I)
-    posq = np.where(abs(image_Q) < threshold * q_rms)
-    posu = np.where(abs(image_U) < threshold * u_rms)
-    posv = np.where(abs(image_V) < threshold * v_rms)
+    posq = (abs(image_Q) < threshold*q_rms) | (image_I < threshold*i_rms) | (abs(image_Q/image_I) < abs(q_err))
+    posu = (abs(image_U) < threshold*u_rms) | (image_I < threshold*i_rms) | (abs(image_U/image_I) < abs(q_err))
+    posv = (abs(image_V) < threshold*v_rms) | (image_I < threshold*i_rms) | (abs(image_V/image_I) < abs(q_err))
     imagedata[1, 0, ...] = image_Q
     imagedata[2, 0, ...] = image_U
     imagedata[3, 0, ...] = image_V
@@ -580,6 +604,7 @@ def correct_pbcor_leakage(
     leakagecor=True,
     pbuncor=True,
     leakage_info=[],
+    threshold=10.0,
     ncpu=1,
 ):
     """
@@ -601,6 +626,8 @@ def correct_pbcor_leakage(
         Undo primary beam correction
     leakage_info : list, optional
         User provided leakages (no leakage calculation will be done)
+    threshold : float, optional
+        Threshold to account for reliable detection
     ncpu : int, optional
         Number of CPU threads
 
@@ -684,7 +711,7 @@ def correct_pbcor_leakage(
                 q_leakage_err,
                 u_leakage_err,
                 v_leakage_err,
-            ) = calc_leakage(pbcor_image)
+            ) = calc_leakage(pbcor_image, threshold=threshold)
             if np.isnan(q_leakage):
                 q_leakage = 0.0
                 q_leakage_err = 0.0
@@ -715,6 +742,10 @@ def correct_pbcor_leakage(
             q_leakage=q_leakage,
             u_leakage=u_leakage,
             v_leakage=v_leakage,
+            q_err=q_leakage_err,
+            u_err=u_leakage_err,
+            v_err=v_leakage_err,
+            threshold=threshold,
         )
 
     if pbuncor is False:
@@ -786,6 +817,7 @@ def update_leakage(
     leakagecor=True,
     leakage_info=[],
     pbuncor=True,
+    threshold=10.0,
     ncpu=-1,
 ):
     """
@@ -811,6 +843,8 @@ def update_leakage(
         Use provided leakage info
     pbuncor : bool, optional
         Undo primary beam correction or not
+    threshold : float, optional
+        Threshold for accounting reliable detection
     ncpu : int, optional
         NUmber of CPU threads to use
 
@@ -830,6 +864,7 @@ def update_leakage(
             leakagecor=leakagecor,
             pbuncor=pbuncor,
             leakage_info=leakage_info,
+            threshold=threshold,
             ncpu=ncpu,
         )
         image_data = fits.getdata(cor_imagename)
@@ -871,6 +906,7 @@ def correct_spectrosnap_pbleak(
     leakagecor=True,
     pbuncor=True,
     leakage_info_polynomial=[],
+    threshold=10.0,
     ncpu=-1,
 ):
     """
@@ -894,6 +930,8 @@ def correct_spectrosnap_pbleak(
         Undo primary beam correction
     leakage_info_polynomial : list, optional
         Leakage info polynomial provided by user [[q_leakage poly, u_leakage poly, v_leakage poly]]
+    threshold : float, optional
+        Threshold for accounting reliable detection
     ncpu : int, optional
         Number of CPU threads to use
 
@@ -941,6 +979,7 @@ def correct_spectrosnap_pbleak(
                         leakagecor=leakagecor,
                         pbuncor=pbuncor,
                         leakage_info=[q_leakage, u_leakage, v_leakage, 0, 0, 0],
+                        threshold=threshold,
                         ncpu=ncpu,
                     )
                     leakage_info_list.append(leakage_info)
@@ -978,6 +1017,7 @@ def correct_spectrosnap_pbleak(
                             pbcor=pbcor,
                             leakagecor=leakagecor,
                             pbuncor=pbuncor,
+                            threshold=threshold,
                             ncpu=ncpu,
                         )
                         if leakage_info is None:
@@ -1050,6 +1090,7 @@ def correct_spectrosnap_pbleak(
                     leakagecor=leakagecor,
                     leakage_info=old_leakage_info,
                     pbuncor=pbuncor,
+                    threshold=threshold,
                     ncpu=ncpu,
                 )
                 leakage_info_list.append(leakage_info)
@@ -1083,13 +1124,15 @@ def selfcal_round(
     nintervals=1,
     fluxscale_mwa=False,
     solar_attn=10,
+    mask_radius=50,
     pbcor=True,
     leakagecor=True,
     pbuncor=True,
     do_intensity_cal=False,
     do_polcal=False,
-    solve_array_leakage=False,
+    solve_over_array=False,
     leakage_info_polynomial=[],
+    leakage_threshold=10.0,
     polcal_datacolumn="DATA",
     pol_solnorm=False,
     do_flag=False,
@@ -1152,6 +1195,8 @@ def selfcal_round(
         Fluxscale caltable using reference bandpass
     solar_attn : float, optional
         Solar attenuation in dB (only used if fluxscale_mwa is True)
+    mask_radius : float, optional
+        Mask radius in arcmin (default : 50)
     pbcor : bool, optional
         Primary beam correction
     leakagecor : bool, optional
@@ -1162,10 +1207,12 @@ def selfcal_round(
         Perform intensity self-calibration
     do_polcal : bool, optional
         Perform polarisation calibration or not
-    solve_array_leakage : bool, optional
+    solve_over_array : bool, optional
         Perform a single leakage correction over the entire array
     leakage_info_polynomial : list, optional
         User provided leaakage info polynomial [q_leakage poly, u_leakage poly, v_leakage poly]
+    leakage_threshold : float, optional
+        Threshold to account reliable detection during leakage estimation and correction
     polcal_datacolumn : str, optional
         Polarisation calibration data column
     pol_solnorm : bool, optional
@@ -1241,19 +1288,33 @@ def selfcal_round(
             f"-minuv-l {minuv_l}",
             f"-j {ncpu}",
             f"-abs-mem {mem}",
-            f"-auto-mask {threshold + 0.1}",
+            f"-auto-mask {max(5,threshold+0.1)}",
             f"-auto-threshold {threshold}",
         ]
         if do_polcal:
             wsclean_args.append("-pol IQUV")
             pol = "IQUV"
-        else:
-            wsclean_args.append("-pol IQ")
-            pol = "IQ"
+        else: # Do not choose IQ during intensity self-cal, it can produce artificial direction dependent Stokes Q due to wrong modeling and differential phase shift 
+            wsclean_args.append("-pol I")
+            pol = "I"
+            if calmode=="p":
+                wsclean_args.append("-no-negative")
 
         ngrid = max(1, int(ncpu / 2))
         if ngrid > 1:
             wsclean_args.append(f"-parallel-gridding {ngrid}")
+            
+        ################################################
+        # Creating and using solar mask
+        ################################################
+        fits_mask = msname.split(".ms")[0] + "_solar-mask.fits"
+        if not os.path.exists(fits_mask):
+            logger.info(f"Creating solar mask of size: {mask_radius} arcmin.\n")
+            fits_mask = create_circular_mask(
+                msname, cellsize, imsize, mask_radius=mask_radius
+            )
+        if fits_mask is not None and os.path.exists(fits_mask):
+            wsclean_args.append(f"-fits-mask {fits_mask}")
 
         #########################################
         # Multi-scale parameters
@@ -1285,8 +1346,11 @@ def selfcal_round(
         #####################################
         wsclean_args.append(f"-name {prefix}")
         pollist = list(pol)
-        if use_previous_model and do_polcal is False:
-            previous_models = glob.glob(f"{prefix}*model.fits")
+        if use_previous_model:
+            previous_models = []
+            for p in pollist:
+                models = glob.glob(f"{prefix}*-{p}-model.fits")
+                previous_models+=models
             total_models_expected = nintervals * nchans * len(pollist)
             if len(previous_models) == total_models_expected:
                 wsclean_args.append("-continue")
@@ -1370,6 +1434,7 @@ def selfcal_round(
                         leakagecor=leakagecor,
                         pbuncor=pbuncor,
                         leakage_info_polynomial=leakage_info_polynomial,
+                        threshold=leakage_threshold,
                         ncpu=ncpu,
                     )
                 )
@@ -1381,6 +1446,8 @@ def selfcal_round(
                 ##########################################################
                 logger.info("Re-predicting corrected models.\n")
                 delmod(vis=msname, otf=True, scr=True)
+                if "-continue" in wsclean_args:
+                    wsclean_args.remove("-continue")
                 wsclean_cmd = (
                     "wsclean " + " ".join(wsclean_args) + " -predict " + msname
                 )
@@ -1419,10 +1486,10 @@ def selfcal_round(
         #######################################################################
         # Final frequency averaged images for backup or calculating dynamic ranges
         #######################################################################
-        if do_polcal:
+        '''if do_polcal:
             keep_wsclean_images = False
         else:
-            keep_wsclean_images = True
+            keep_wsclean_images = True'''
         final_image = (
             prefix.replace("present", f"{round_number}") + f"_{pol}_image.fits"
         )
@@ -1440,13 +1507,13 @@ def selfcal_round(
             os.system(f"cp -r {wsclean_images[0]} {final_image}")
         else:
             final_image = make_timeavg_image(
-                wsclean_images, final_image, keep_wsclean_images=keep_wsclean_images
+                wsclean_images, final_image, keep_wsclean_images=True
             )
         if len(wsclean_models) == 1:
             os.system(f"cp -r {wsclean_models[0]} {final_model}")
         else:
             final_model = make_timeavg_image(
-                wsclean_models, final_model, keep_wsclean_images=keep_wsclean_images
+                wsclean_models, final_model, keep_wsclean_images=True
             )
         if len(wsclean_residuals) == 1:
             os.system(f"cp -r {wsclean_residuals[0]} {final_residual}")
@@ -1454,7 +1521,7 @@ def selfcal_round(
             final_residual = make_timeavg_image(
                 wsclean_residuals,
                 final_residual,
-                keep_wsclean_images=keep_wsclean_images,
+                keep_wsclean_images=True,
             )
         os.system("rm -rf *psf.fits")
 
@@ -1793,7 +1860,7 @@ def selfcal_round(
                 quartical_args.append(f"D.freq_interval={freqres}kHz")
             else:
                 quartical_args.append("D.freq_interval=1")
-            if solve_array_leakage:
+            if solve_over_array:
                 quartical_args.append("D.solve_per=array")
             quartical_cmd = " ".join(quartical_args)
             logger.info(f"{quartical_cmd}\n")

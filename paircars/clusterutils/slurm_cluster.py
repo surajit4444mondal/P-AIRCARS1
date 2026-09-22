@@ -68,7 +68,7 @@ def get_available_nodes(partition=None):
     available = []
     if partition:
         cmd.extend(["-p", partition])
-            result = subprocess.run(
+        result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,

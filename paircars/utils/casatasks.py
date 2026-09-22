@@ -96,6 +96,23 @@ def reset_weights_and_flags(
     return
 
 
+def transfer_cor_to_data(msname):
+    """
+    Replace data column with corrected data
+    
+    Parameters
+    ----------
+    msname : str
+        Measurement set name
+    """
+    tb=table()
+    tb.open(msname,nomodify=False)
+    cor_data=tb.getcol("CORRECTED_DATA")
+    tb.putcol("DATA",cor_data)
+    tb.flush()
+    tb.close()
+    
+
 def single_mstransform(
     msname="",
     outputms="",

@@ -16,7 +16,7 @@ warnings.simplefilter("ignore", category=FITSFixedWarning)
 ##########################
 # Image analysis related
 ##########################
-def create_circular_mask(msname, cellsize, imsize, mask_radius=96):
+def create_circular_mask(msname, cellsize, imsize, mask_radius=50):
     """
     Create fits solar mask
 
@@ -29,7 +29,7 @@ def create_circular_mask(msname, cellsize, imsize, mask_radius=96):
     imsize : int
         Imsize in number of pixels
     mask_radius : float
-        Mask radius in arcmin (default: 4 solr radii)
+        Mask radius in arcmin (default: 50)
 
     Returns
     -------

@@ -589,7 +589,7 @@ def pbcor_all_images(
                     outfile = f"{gifdir}/freq_{png_freq}.gif"
                     gif_file = make_gif_movie(sub_list, outfile)
                     if os.path.exists(gif_file):
-                        logger.debug(f"GIF for frequency: {png_freq} is {gif_file}.\n")
+                        logger.debug(f"GIF for frequency: {png_freq} is {gif_file}\n")
                     else:
                         logger.warning(f"GIF for frequency: {png_freq} is failed.\n")
 
@@ -664,7 +664,7 @@ def pbcor_all_images(
                     outfile = f"{gifdir}/freq_{png_freq}.gif"
                     gif_file = make_gif_movie(sub_list, outfile)
                     if os.path.exists(gif_file):
-                        logger.debug(f"GIF for frequency: {png_freq} is {gif_file}.\n")
+                        logger.debug(f"GIF for frequency: {png_freq} is {gif_file}\n")
                     else:
                         logger.warning(f"GIF for frequency: {png_freq} is failed.\n")
 
