@@ -637,7 +637,7 @@ def calc_dynamic_spectrum(msname, metafits, outdir, n_threads=-1):
         timestamps[0].split("T")[-1].split(".")[0].split(":")
     )
     msmd.close()
-    flags = np.where(T_sun <= 0)
+    flags = T_sun <= 0
 
     save_file = f"freq_{mid_freq}MHz_time_{t_string}"
     np.save(
@@ -649,7 +649,7 @@ def calc_dynamic_spectrum(msname, metafits, outdir, n_threads=-1):
                 timestamps[quack_timestamp:-quack_timestamp],
                 T_sun[:, quack_timestamp:-quack_timestamp],
                 S_sun[:, quack_timestamp:-quack_timestamp],
-                flags,
+                flags[:, quack_timestamp:-quack_timestamp],
             ],
             dtype="object",
         ),

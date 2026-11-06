@@ -2211,6 +2211,8 @@ def make_mwa_overlay(
 
     mwatime = mwamap.meta["date-obs"].split(".")[0]
     euvtime = euv_map.meta["date-obs"].split(".")[0]
+    plot_file_list = []
+    
     try:
         if plot_mwa_colormap and len(contour_levels) > 0:
             matplotlib.rcParams.update({"font.size": 18})
@@ -2322,7 +2324,6 @@ def make_mwa_overlay(
             wspace=0.27,  # horizontal space between panels
             hspace=0.05,  # vertical space between panels
         )
-        plot_file_list = []
         for i in range(len(extensions)):
             ext = extensions[i]
             try:
@@ -2514,7 +2515,9 @@ def rename_mwasolar_image(
 
 def make_gif_movie(images, outfile, per_frame_dur=0.15):
     """
-    Make GIF movie
+    Make GIF movie from PNG images of potentially different sizes.
+
+    Images are centered on a common canvas without resizing.
 
     Parameters
     ----------
@@ -2527,21 +2530,43 @@ def make_gif_movie(images, outfile, per_frame_dur=0.15):
 
     Returns
     -------
-    str
-        Output GIF file
+    str or None
+        Output GIF file, or None on failure.
     """
     try:
         frames = [imageio.imread(f) for f in images]
+        # Convert all frames to RGB
+        frames = [frame[:, :, :3] for frame in frames]
+        # Find maximum dimensions
+        max_height = max(frame.shape[0] for frame in frames)
+        max_width = max(frame.shape[1] for frame in frames)
+        padded_frames = []
+        for frame in frames:
+            height, width = frame.shape[:2]
+            # White background
+            canvas = np.full(
+                (max_height, max_width, 3),
+                255,
+                dtype=np.uint8,
+            )
+            # Center the image
+            y_offset = (max_height - height) // 2
+            x_offset = (max_width - width) // 2
+            canvas[
+                y_offset : y_offset + height,
+                x_offset : x_offset + width,
+            ] = frame
+            padded_frames.append(canvas)
         imageio.mimsave(
             outfile,
-            frames,
-            duration=per_frame_dur * 1000,  # milliseconds per frame
+            padded_frames,
+            duration=per_frame_dur,
             loop=0,
         )
         return outfile
     except Exception:
         traceback.print_exc()
-        return
+        return None
 
 
 def make_ds_plot(dsfiles, plot_file=None, plot_quantity="flux", showgui=False):
@@ -2570,53 +2595,121 @@ def make_ds_plot(dsfiles, plot_file=None, plot_quantity="flux", showgui=False):
     if isinstance(dsfiles, str):
         dsfiles = [dsfiles]
     dsfiles = np.array(dsfiles)
-    start_freqs = []
+    ############################################################
+    # Assemble DS files into one global (frequency, time) array
+    ############################################################
+    datasets = []
     for dsfile in dsfiles:
-        freqs, _, _, _, _, _ = np.load(dsfile, allow_pickle=True)
-        start_freqs.append(freqs[0])
-    pos = np.argsort(start_freqs)
-    dsfiles = dsfiles[pos].tolist()
-    for i, dsfile in enumerate(dsfiles):
-        freqs_i, times_i, timestamps_i, T_data_i, S_data_i, flags = np.load(
-            dsfile, allow_pickle=True
+        (
+            freqs_i,
+            times_i,
+            timestamps_i,
+            T_data_i,
+            S_data_i,
+            flags_i,
+        ) = np.load(dsfile, allow_pickle=True)
+        freqs_i = np.asarray(freqs_i, dtype=float)
+        timestamps_i = np.asarray(timestamps_i)
+
+        # Select quantity
+        data_i = (
+            np.asarray(
+                T_data_i,
+                dtype=float,
+            )
+            / 1e6
+            if plot_quantity == "TB"
+            else np.asarray(S_data_i, dtype=float)
         )
-        data_i = T_data_i / 1e6 if plot_quantity == "TB" else S_data_i
-        data_i[flags] = np.nan
-        # interpolate along freq axis
+        data_i = data_i.copy()
+
+        # Apply flags
+        flags_i = np.asarray(flags_i, dtype=bool)
+        if flags_i.shape == data_i.shape:
+            data_i[flags_i] = np.nan
+
+        # Interpolate along frequency
         for t in range(data_i.shape[1]):
             t_data = data_i[:, t]
             t_data_interp = interpolate_nans(t_data)
             t_data_interp[t_data_interp == 0] = np.nan
             data_i[:, t] = t_data_interp
-        if i == 0:
-            freqs = freqs_i
-            timestamps = timestamps_i
-            data = data_i
-        else:
-            df = np.nanmedian(np.diff(freqs))
-            gapsize = int(np.round((np.nanmin(freqs_i) - np.nanmax(freqs)) / df))
-            gapsize = 1
+        datasets.append(
+            {
+                "freqs": freqs_i,
+                "timestamps": timestamps_i,
+                "data": data_i,
+            }
+        )
 
-            if 0 < gapsize < 5:
-                last_med = np.nanmedian(data[-1, :])
-                new_med = np.nanmedian(data_i[0, :])
-                if np.isfinite(new_med) and new_med != 0:
-                    data_i = (data_i / new_med) * last_med
-            if gapsize > 0:
-                gap = np.full((gapsize, data.shape[1]), np.nan)
-                data = np.concatenate([data, gap, data_i], axis=0)
-                freqs = np.append(freqs, np.full(gapsize, np.nan))
-            else:
-                data = np.concatenate([data, data_i], axis=0)
-            freqs = np.append(freqs, freqs_i)
-    # --------------------------------------------------
-    # Trim invalid freq rows
-    # --------------------------------------------------
-    median_bandshape = np.nanmedian(data, axis=-1)
-    pos = np.where(~np.isnan(median_bandshape))[0]
-    if len(pos) > 0:
-        data = data[min(pos) : max(pos), :]
-        freqs = freqs[min(pos) : max(pos)]
+    # Global frequency axis
+    freq_precision = 3
+    all_freqs = np.concatenate([np.round(d["freqs"], freq_precision) for d in datasets])
+    global_freqs = np.unique(all_freqs)
+    global_freqs.sort()
+
+    # Global time axis
+    all_timestamps = np.concatenate([d["timestamps"] for d in datasets])
+    global_timestamps = np.unique(all_timestamps)
+    global_timestamps.sort()
+
+    # Global data array
+    data = np.full((len(global_freqs), len(global_timestamps)), np.nan, dtype=float)
+
+    # Lookup tables
+    freq_index = {
+        np.round(freq, freq_precision): i for i, freq in enumerate(global_freqs)
+    }
+    time_index = {timestamp: i for i, timestamp in enumerate(global_timestamps)}
+
+    # Place every file into global array
+    for d in datasets:
+        freqs_i = d["freqs"]
+        timestamps_i = d["timestamps"]
+        data_i = d["data"]
+        fidx = np.array(
+            [freq_index[np.round(f, freq_precision)] for f in freqs_i], dtype=int
+        )
+        tidx = np.array([time_index[t] for t in timestamps_i], dtype=int)
+        for i in range(len(freqs_i)):
+            fi = fidx[i]
+            for j in range(len(timestamps_i)):
+                ti = tidx[j]
+                value = data_i[i, j]
+                if not np.isfinite(value):
+                    continue
+                # ------------------------------------------------
+                # If already populated, don't overwrite with NaN.
+                # If two files overlap, average the valid values.
+                # ------------------------------------------------
+                if np.isfinite(data[fi, ti]):
+                    data[fi, ti] = (data[fi, ti] + value) / 2.0
+                else:
+                    data[fi, ti] = value
+
+    # Add ONE NaN row between genuinely separated frequency bands
+    freqs = global_freqs.copy()
+    timestamps = global_timestamps.copy()
+    if len(freqs) > 1:
+        df = np.nanmedian(np.diff(freqs))
+        if np.isfinite(df) and df > 0:
+            new_freqs = []
+            new_data = []
+            for i in range(len(freqs)):
+                new_freqs.append(freqs[i])
+                new_data.append(data[i, :])
+                # ------------------------------------------------
+                # Check gap to next frequency
+                # ------------------------------------------------
+                if i < len(freqs) - 1:
+                    frequency_gap = freqs[i + 1] - freqs[i]
+                    # A gap means there is more than approximately one normal channel spacing.
+                    if frequency_gap > 1.5 * df:
+                        new_freqs.append(np.nan)
+                        new_data.append(np.full(len(timestamps), np.nan))
+            freqs = np.asarray(new_freqs)
+            data = np.asarray(new_data)
+
     # --------------------------------------------------
     # Convert timestamps → datetime (MASTER AXIS)
     # --------------------------------------------------
@@ -2683,9 +2776,11 @@ def make_ds_plot(dsfiles, plot_file=None, plot_quantity="flux", showgui=False):
         ax_spec.set_xticklabels([])
         # Frequency ticks
         freqs_arr = np.array(freqs)
-        valid = ~np.isnan(freqs_arr)
-        idx = np.where(valid)[0]
-        idx = idx[:: max(1, len(idx) // 12)]
+        freqs_coarse_center = np.array(
+            [(f / 1.28 - f // 1.28) for f in freqs_arr], dtype="float32"
+        )
+        min_sep = np.nanmin(freqs_coarse_center)
+        idx = np.where(freqs_coarse_center == min_sep)[0]
         ax_spec.set_yticks(idx)
         ax_spec.set_yticklabels([f"{freqs_arr[i]:.1f}" for i in idx])
         # --------------------------------------------------

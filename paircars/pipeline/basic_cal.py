@@ -915,7 +915,7 @@ def main(
         if dask_client is None:
             logger.critical("Error occured in creating local cluster.")
             return 1, succeed, failed
-        scale_worker_and_wait(dask_cluster, dask_client, nworker+1)
+        scale_worker_and_wait(dask_cluster, dask_client, nworker + 1)
 
     try:
         for banner in print_banner(

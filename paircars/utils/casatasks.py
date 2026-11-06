@@ -96,7 +96,7 @@ def reset_weights_and_flags(
     return
 
 
-def transfer_cor_to_data(msname):
+def transfer_cor_to_data(msname,mem_limit=-1):
     """
     Replace data column with corrected data
     
@@ -104,14 +104,32 @@ def transfer_cor_to_data(msname):
     ----------
     msname : str
         Measurement set name
+    mem_limit : float, optional
+        Memory limit
     """
+    msmd = msmetadata()
+    msmd.open(msname)
+    nchan = msmd.nchan(0)
+    npol= msmd.ncorrforpol()[0]
+    msmd.close()
     tb=table()
     tb.open(msname,nomodify=False)
-    cor_data=tb.getcol("CORRECTED_DATA")
-    tb.putcol("DATA",cor_data)
-    tb.flush()
+    nrow = tb.nrows()
+    if mem_limit<0:
+        cor_data=tb.getcol("CORRECTED_DATA")
+        tb.putcol("DATA",cor_data)
+        tb.flush()
+    else:
+        per_row_mem_gb = (nchan * npol * 16)/1024**3
+        row_per_chunk = max(1,int(mem_limit//per_row_mem_gb))
+        for i in range(0,nrow,row_per_chunk):
+            start_row = i
+            end_row = max(nrow,i+row_per_chunk)
+            cor_data = tb.getcol("CORRECTED_DATA",startrow=start_row,nrow=end_row-start_row)
+            tb.putcol("DATA",cor_data,startrow=start_row,nrow=end_row-start_row)
+            tb.flush()
     tb.close()
-    
+
 
 def single_mstransform(
     msname="",

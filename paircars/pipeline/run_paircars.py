@@ -197,6 +197,23 @@ def cli():
         help="Make overlay plot on EUV images for all images (default is to make overlays only one image per coarse channels at 10s intervals)",
     )
     advanced_image.add_argument(
+        "--make_TB",
+        action="store_true",
+        help="Make brightness temperature maps or not",
+    )
+    advanced_image.add_argument(
+        "--no_save_hpc",
+        action="store_false",
+        dest="save_hpc",
+        help="Do not save helioprojective fits",
+    )
+    advanced_image.add_argument(
+        "--no_make_plots",
+        action="store_false",
+        dest="make_plots",
+        help="Do not make PNG and GIF plots",
+    )
+    advanced_image.add_argument(
         "--compress_image",
         action="store_true",
         help="Compress final images",

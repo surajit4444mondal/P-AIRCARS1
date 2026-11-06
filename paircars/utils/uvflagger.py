@@ -284,22 +284,26 @@ def flagger(
     tb.open(msname)
     colnames = tb.colnames()
     tb.close()
-    if datacolumn=="corrected" or datacolumn=="corrected_data" and "CORRECTED_DATA" in colnames:
-        datacolumn="corrected_data"
-    elif datacolumn=="residual" or datacolumn=="residual_data":
+    if (
+        datacolumn == "corrected"
+        or datacolumn == "corrected_data"
+        and "CORRECTED_DATA" in colnames
+    ):
+        datacolumn = "corrected_data"
+    elif datacolumn == "residual" or datacolumn == "residual_data":
         if "MODEL_DATA" in colnames:
             if "CORRECTED_DATA" in colnames:
-                datacolumn="residual_data"
+                datacolumn = "residual_data"
             else:
-                datacolumn="obs_residual_data"
+                datacolumn = "obs_residual_data"
         else:
             if "CORRECTED_DATA" in colnames:
-                datacolumn="corrected_data"
+                datacolumn = "corrected_data"
             else:
-                datacolumn="data"
+                datacolumn = "data"
     else:
-        datacolumn="data"
-        
+        datacolumn = "data"
+
     msmd = msmetadata()
     msmd.open(msname)
     npol = msmd.ncorrforpol()[0]
@@ -310,69 +314,77 @@ def flagger(
     mstool = casamstool()
     mstool.open(msname)
     uvw = mstool.getdata("UVW")["uvw"]
-    uv = np.sqrt(uvw[0,...]**2+uvw[1,...]**2)
+    uv = np.sqrt(uvw[0, ...] ** 2 + uvw[1, ...] ** 2)
     del uvw
     timecol = mstool.getdata("TIME")["time"]
     mstool.close()
     os.system(f"rm -rf {msname}/flag.dat")
-    mm_flag = np.memmap(f"{msname}/flag.dat",dtype=np.bool_,mode="w+",shape=(npol,nchan,nrows))
+    mm_flag = np.memmap(
+        f"{msname}/flag.dat", dtype=np.bool_, mode="w+", shape=(npol, nchan, nrows)
+    )
     mm_flag.flush()
     os.system(f"rm -rf {msname}/uv.dat")
-    mm_uv = np.memmap(f"{msname}/uv.dat",dtype=uv.dtype,mode="w+",shape=uv.shape)
+    mm_uv = np.memmap(f"{msname}/uv.dat", dtype=uv.dtype, mode="w+", shape=uv.shape)
     mm_uv[:] = uv
     mm_uv.flush()
     del uv
     os.system(f"rm -rf {msname}/time.dat")
-    mm_time = np.memmap(f"{msname}/time.dat",dtype=timecol.dtype,mode="w+",shape=timecol.shape)
+    mm_time = np.memmap(
+        f"{msname}/time.dat", dtype=timecol.dtype, mode="w+", shape=timecol.shape
+    )
     mm_time[:] = timecol
     mm_time.flush()
     unique_times = np.unique(timecol)
     del timecol
-    
+
     try:
         mstool.open(msname)
         pol_chunk = npol
         chan_chunk = nchan
-        if absmem>0:    
+        if absmem > 0:
             process = psutil.Process(os.getpid())
-            used_mem=process.memory_info().rss/GB
-            absmem-=used_mem
-            all_row_datasize = (nrows*16)/GB
-            all_row_flagsize = nrows/GB
-            all_row_uvsize = (nrows*8)/GB
-            total_row_size = 4*(all_row_datasize + all_row_flagsize + all_row_uvsize) 
-            if absmem<total_row_size:
+            used_mem = process.memory_info().rss / GB
+            absmem -= used_mem
+            all_row_datasize = (nrows * 16) / GB
+            all_row_flagsize = nrows / GB
+            all_row_uvsize = (nrows * 8) / GB
+            total_row_size = 4 * (all_row_datasize + all_row_flagsize + all_row_uvsize)
+            if absmem < total_row_size:
                 print("Not enough memory allocated to process.")
                 return 1, None, None
-            nchunk = math.ceil(absmem/total_row_size)
+            nchunk = math.ceil(absmem / total_row_size)
             pol_chunk = min(npol, nchunk)
             remaining = math.ceil(nchunk / pol_chunk)
             chan_chunk = min(nchan, remaining)
         if verbose:
-            print(f"Total chunk: {nchunk}, Polarization chunk: {pol_chunk}, channel chunk: {chan_chunk}.")
-        
+            print(
+                f"Total chunk: {nchunk}, Polarization chunk: {pol_chunk}, channel chunk: {chan_chunk}."
+            )
+
         soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
-        njobs = min(int(0.5*soft),nchunk)
+        njobs = min(int(0.5 * soft), nchunk)
         old_flag = 0
-        
-        for p in range(0,npol,pol_chunk):
+
+        for p in range(0, npol, pol_chunk):
             start_pol_index = p
-            end_pol_index = min(npol,start_pol_index+pol_chunk)
-            for c in range(0,nchan,chan_chunk):
+            end_pol_index = min(npol, start_pol_index + pol_chunk)
+            for c in range(0, nchan, chan_chunk):
                 start_chan = c
-                end_chan = min(nchan,start_chan+chan_chunk)
+                end_chan = min(nchan, start_chan + chan_chunk)
                 if verbose:
-                    print(f"Reading data -- Polarization index range: {start_pol_index}~{end_pol_index}, "
-                    f"Channel range: {start_chan}~{end_chan}")
-                mstool.selectinit(datadescid=0,reset=True)
+                    print(
+                        f"Reading data -- Polarization index range: {start_pol_index}~{end_pol_index}, "
+                        f"Channel range: {start_chan}~{end_chan}"
+                    )
+                mstool.selectinit(datadescid=0, reset=True)
                 mstool.selectpolarization(pol_list[start_pol_index:end_pol_index])
-                mstool.selectchannel(start=start_chan,nchan=end_chan-start_chan)
+                mstool.selectchannel(start=start_chan, nchan=end_chan - start_chan)
                 data = mstool.getdata(datacolumn)[datacolumn]
                 flag = mstool.getdata("FLAG")["flag"]
                 data = data.T
                 flag = flag.T
-                
-                old_flag+=np.sum(flag)  # Initial number of flags
+
+                old_flag += np.sum(flag)  # Initial number of flags
                 data_actual_shape = data.shape
                 if len(data_actual_shape) == 3:
                     n_rows, n_chan, n_pol = data_actual_shape
@@ -381,14 +393,18 @@ def flagger(
                         f"Unexpected data dimensions in column '{datacolumn}'. "
                         f"Expected 3 (rows, chans, pols), got {len(data_actual_shape)} with shape {data_actual_shape}."
                     )
-                
+
                 # Calculate UV distances in wavelengths
                 uv_distances = mm_uv.T
                 # Get indices that would sort the time column
-                sorted_indices = np.argsort(mm_time, kind="stable")  # Stable sort preserves original order for ties
+                sorted_indices = np.argsort(
+                    mm_time, kind="stable"
+                )  # Stable sort preserves original order for ties
                 # Get the sorted times and the locations where the time changes
                 sorted_times = mm_time[sorted_indices]
-                unique_times_sorted, split_points = np.unique(sorted_times, return_index=True)
+                unique_times_sorted, split_points = np.unique(
+                    sorted_times, return_index=True
+                )
                 # Split the sorted_indices array at these change points
                 # This gives lists of original indices, grouped by timestamp
                 indices_split_by_time = np.split(sorted_indices, split_points[1:])
@@ -399,8 +415,10 @@ def flagger(
                     print(
                         "Warning: Unique times from initial scan and sorting differ. Using sorted unique times."
                     )
-                    unique_times = unique_times_sorted  # Use the times derived from sorting
-                    
+                    unique_times = (
+                        unique_times_sorted  # Use the times derived from sorting
+                    )
+
                 job_args = []
                 # Prepare arguments for each parallel job
                 job_args = [
@@ -416,10 +434,11 @@ def flagger(
                         binning_type,
                     )
                     for timestamp in unique_times
-                    if len(time_indices_map[timestamp]) >= 10  # Filter small timestamps here
+                    if len(time_indices_map[timestamp])
+                    >= 10  # Filter small timestamps here
                 ]
 
-                if len(job_args)>0:  # Only run if there are jobs
+                if len(job_args) > 0:  # Only run if there are jobs
                     if verbose:
                         print(f"Starting {njobs} parallel flagging jobs.")
                     results = Parallel(n_jobs=njobs, backend="threading")(
@@ -441,12 +460,14 @@ def flagger(
                             )
                             print(
                                 f"Expected shape: {flag[time_indices, :, :].shape}, Got shape: {timestamp_flags.shape}"
-                            ) 
-                mm_flag[start_pol_index:end_pol_index,start_chan:end_chan,...] |= flag.T 
-                del flag, data                        
-                      
-        mstool.done()                    
-        mstool.close() 
+                            )
+                mm_flag[
+                    start_pol_index:end_pol_index, start_chan:end_chan, ...
+                ] |= flag.T
+                del flag, data
+
+        mstool.done()
+        mstool.close()
         # Number of additional flagged data points
         n_final_flagged = np.sum(mm_flag)
         n_additional_flagged = n_final_flagged - old_flag
@@ -454,28 +475,32 @@ def flagger(
         ################################
         # Putting flags
         ################################
-        tb=table()
-        tb.open(msname,nomodify=False)
+        tb = table()
+        tb.open(msname, nomodify=False)
         nrows = tb.nrows()
-        mm_flag = mm_flag.reshape(npol,nchan,-1)
-        if absmem>0:
-            per_row_size = (npol*nchan)/GB
-            writing_chunk = math.ceil(absmem/per_row_size)
-            for i in range(0,nrows,writing_chunk):
+        mm_flag = mm_flag.reshape(npol, nchan, -1)
+        if absmem > 0:
+            per_row_size = (npol * nchan) / GB
+            writing_chunk = math.ceil(absmem / per_row_size)
+            for i in range(0, nrows, writing_chunk):
                 start_row = i
-                end_row = min(nrows,i+writing_chunk)
+                end_row = min(nrows, i + writing_chunk)
                 if verbose:
                     print(f"Writing final flag rows: {start_row}:{end_row}")
-                tb.putcol("FLAG",mm_flag[...,start_row:end_row],startrow=start_row,nrow=end_row-start_row)
+                tb.putcol(
+                    "FLAG",
+                    mm_flag[..., start_row:end_row],
+                    startrow=start_row,
+                    nrow=end_row - start_row,
+                )
                 tb.flush()
         else:
             if verbose:
                 print("Writing final flags.")
-            tb.putcol("FLAG",mm_flag[:])
+            tb.putcol("FLAG", mm_flag[:])
             tb.flush()
         tb.close()
         return 0, n_final_flagged, n_additional_flagged
     except Exception:
         traceback.print_exc()
         return 1, None, None
-    

@@ -41,6 +41,7 @@ from paircars.pipeline.tasks import (
     run_apply_pbcor,
     run_make_overlay,
     run_image_compression,
+    run_imaging_products,
     send_task_notification,
 )
 from prefect.context import get_run_context
@@ -1867,6 +1868,7 @@ def imaging_subflow(
     make_overlay,
     make_TB,
     save_hpc,
+    make_plots,
     # Imaging
     image_freqres,
     image_timeres,
@@ -2087,8 +2089,6 @@ def imaging_subflow(
                 workdir,
                 leakage_dir=selfcaldir,
                 keep_raw_images=True,
-                make_TB=make_TB,
-                save_hpc=save_hpc,
                 jobid=jobid,
                 cpu_frac=round(cpu_frac, 2),
                 mem_frac=round(mem_frac, 2),
@@ -2146,6 +2146,59 @@ def imaging_subflow(
                     flow_name=f"subflow {flow_name}",
                 )
         else:
+            #################################################################
+            # Making final imaging products requested by user
+            #################################################################
+            if save_hpc or make_plots or make_TB:
+                try:
+                    pbcor_dir = f"{imagedir}/pbcor_images"
+                    future_make_products = run_imaging_products.with_options(
+                        task_run_name=f"make_imaging_products_{target_obsid}"
+                    ).submit(
+                        pbcor_dir,
+                        workdir,
+                        save_hpc=save_hpc,
+                        make_plots=make_plots,
+                        make_TB=make_TB,
+                        jobid=jobid,
+                        cpu_frac=round(cpu_frac, 2),
+                        mem_frac=round(mem_frac, 2),
+                        remote_log=remote_logger,
+                        obsid=target_obsid,
+                        verbose=verbose,
+                    )
+                    msg = future_make_products.result()
+                    if emails != "":
+                        email_msg = (
+                            f"[{target_obsid}] Making final imaging products are done."
+                        )
+                        send_task_notification(
+                            emails,
+                            email_msg,
+                            jobid,
+                            target_obsid,
+                            timestamp,
+                            flow_name=f"subflow {flow_name}",
+                        )
+                    print_banner(
+                        "Finished task: Making final imaging products are done."
+                    )
+                except Exception:
+                    print_banner(
+                        "!!!! WARNING: Making final imaging products of the final images are not successful. !!!!"
+                    )
+                    traceback.print_exc()
+                    if emails != "":
+                        email_msg = f"[{target_obsid}] Error occured in making final imaging products."
+                        send_task_notification(
+                            emails,
+                            email_msg,
+                            jobid,
+                            target_obsid,
+                            timestamp,
+                            flow_name=f"subflow {flow_name}",
+                        )
+
             #################################################################
             # Filtering only coarse channel images for default overlay mode
             #################################################################

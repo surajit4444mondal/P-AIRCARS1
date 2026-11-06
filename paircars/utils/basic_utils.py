@@ -277,6 +277,26 @@ def split_into_chunks(lst, target_chunk_size):
     return chunks
 
 
+def split_equal_chunks(lst, n):
+    """
+    Split a list into number of chunks with nearly equal elements
+
+    Parameters
+    -----------
+    lst : list
+        List
+    n : int
+        Number of chunks
+
+    Returns
+    -------
+    list
+        Chunked list
+    """
+    q, r = divmod(len(lst), n)
+    return [lst[i * q + min(i, r) : (i + 1) * q + min(i + 1, r)] for i in range(n)]
+
+
 def interpolate_nans(data):
     """Linearly interpolate NaNs in 1D array."""
     from scipy.interpolate import interp1d

@@ -136,6 +136,7 @@ def master_control(
     make_overlay=False,
     make_TB=False,
     save_hpc=True,
+    make_plots=True,
     make_msplot=False,
     # Compress image
     compress_image=False,
@@ -240,6 +241,8 @@ def master_control(
         Make brightness temperature maps or not
     save_hpc : bool, optional
         Save helioprojective fits or not
+    make_plots : bool, optional
+        Make PNG anf GIF plots
     compress_image : bool, optional
         Save compressed image or not
     keep_original : bool, optional
@@ -1317,6 +1320,7 @@ def master_control(
                 make_overlay=make_overlay,
                 make_TB=make_TB,
                 save_hpc=save_hpc,
+                make_plots=make_plots,
                 image_freqres=image_freqres,
                 image_timeres=image_timeres,
                 pol=pol,
@@ -1773,6 +1777,12 @@ def cli():
         help="Do not save helioprojective fits",
     )
     advanced_image.add_argument(
+        "--no_make_plots",
+        action="store_false",
+        dest="make_plots",
+        help="Do not make PNG and GIF plots",
+    )
+    advanced_image.add_argument(
         "--compress_image",
         action="store_true",
         help="Compress final images",
@@ -2183,6 +2193,7 @@ def cli():
             make_overlay=args.make_overlay,
             make_TB=args.make_TB,
             save_hpc=args.save_hpc,
+            make_plots=args.make_plots,
             make_msplot=args.make_msplot,
             # Compress image
             compress_image=args.compress_image,

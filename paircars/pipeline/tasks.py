@@ -26,6 +26,7 @@ from paircars.pipeline import (
     do_apply_selfcal,
     do_imaging,
     mwa_pbcor,
+    make_data_products,
     make_mwa_overlay,
     make_ms_plot,
     do_compression,
@@ -1546,8 +1547,6 @@ def run_apply_pbcor(
     leakage_dir="",
     phaseshift_solint=30.0,
     keep_raw_images=False,
-    make_TB=False,
-    save_hpc=True,
     jobid=0,
     cpu_frac=0.8,
     mem_frac=0.8,
@@ -1572,10 +1571,6 @@ def run_apply_pbcor(
         Calculate phase shift at this interval in seconds
     keep_raw_images : bool, optional
         Keep raw images or not
-    make_TB : bool, optional
-        Make brightness temperature maps or not
-    save_hpc : bool, optional
-        Save helioprojective images
     cpu_frac : float, optional
         CPU fraction to use
     mem_frac : float, optional
@@ -1633,8 +1628,6 @@ def run_apply_pbcor(
                 workdir=workdir,
                 phaseshift_solint=phaseshift_solint,
                 keep_raw_images=keep_raw_images,
-                make_TB=make_TB,
-                save_hpc=save_hpc,
                 cpu_frac=float(cpu_frac),
                 mem_frac=float(mem_frac),
                 logfile=logfile,
@@ -1669,6 +1662,126 @@ def run_apply_pbcor(
         raise RuntimeError("Primary beam correction is failed.")
     else:
         return msg, succeed, failed
+
+
+@task(
+    name="make_imaging_products",
+    log_prints=True,
+)
+def run_imaging_products(
+    imagedir,
+    workdir,
+    save_hpc=True,
+    make_plots=True,
+    make_TB=False,
+    jobid=0,
+    cpu_frac=0.8,
+    mem_frac=0.8,
+    remote_log=False,
+    obsid=0,
+    verbose=False,
+):
+    """
+    Make final imaging data products of all primary beam corrected images
+
+    Parameters
+    ----------
+    imagedir: str
+        Image directory name
+    workdir : str
+        Work directory
+    save_hpc : bool, optional
+        Save fits in helioprojective coordinates
+    make_plots : bool, optional
+        Make image plots in PNGs
+    make_TB : bool, optional
+        Make brightness temperature maps
+    cpu_frac : float, optional
+        CPU fraction to use
+    mem_frac : float, optional
+        Memory fraction to use
+    remote_log: bool, optional
+        Start remote logger
+    obsid : int, optional
+        Observation ID
+    verbose : bool, optional
+        Verbose logs
+
+    Returns
+    -------
+    int
+        Success message
+    """
+    os.makedirs(workdir, exist_ok=True)
+    os.chdir(workdir)
+    image_products_basename = "make_imaging_products"
+    logdir = f"{workdir}/logs"
+    os.makedirs(logdir, exist_ok=True)
+    logfile = f"{logdir}/{image_products_basename}_{obsid}.log"
+    if os.path.exists(logfile):
+        os.remove(logfile)
+    ctx = get_run_context()
+    task_id = str(ctx.task_run.id)
+    task_name = ctx.task_run.name
+    stop_event = Event()
+    log_thread_dataprod = start_log_task_saver(
+        task_id, task_name, logfile, poll_interval=3, stop_event=stop_event
+    )
+    try:
+        #####################
+        # Making final imaging data products from PB corrected images
+        #####################
+        with get_dask_client() as dask_client:
+            client_info = dask_client.scheduler_info()["workers"]
+            njobs = len(client_info)
+            n_threads = os.environ.get("OMP_NUM_THREADS")
+            if n_threads is not None:
+                n_threads = int(n_threads)
+            else:
+                n_threads = 1
+            n_threads = n_threads * max(1, njobs - 1)
+            start_cpu = dask_client.run(get_worker_cpu_time)
+            start_time = time.time()
+            msg = make_data_products.main(
+                imagedir,
+                workdir=workdir,
+                save_hpc=save_hpc,
+                make_plots=make_plots,
+                make_TB=make_TB,
+                cpu_frac=float(cpu_frac),
+                mem_frac=float(mem_frac),
+                logfile=logfile,
+                jobid=jobid,
+                start_remote_log=remote_log,
+                dask_client=dask_client,
+                verbose=verbose,
+            )
+            end_time = time.time()
+            run_time = round(end_time - start_time, 2)
+            end_cpu = dask_client.run(get_worker_cpu_time)
+            actual_cpu_seconds = sum(
+                end_cpu[worker] - start_cpu.get(worker, 0.0) for worker in end_cpu
+            )
+            allocated_cpu_seconds = n_threads * run_time
+            with open(f"{workdir}/benchmarking_task.txt", "a") as b:
+                print("Task: make imaging products", file=b)
+                print(f"Run time: {round(run_time,2)}s", file=b)
+                print(f"Allocated CPU threads: {n_threads}", file=b)
+                print(
+                    f"Allocated CPU seconds: {round(allocated_cpu_seconds,1)}", file=b
+                )
+                print(f"Actual CPU seconds: {round(actual_cpu_seconds,1)}", file=b)
+                print(
+                    f"Utilization: {round((actual_cpu_seconds/allocated_cpu_seconds)*100,2)}%\n",
+                    file=b,
+                )
+    finally:
+        stop_event.set()
+        log_thread_dataprod.join(timeout=5)
+    if msg != 0:
+        raise RuntimeError("Making final imaging products is failed.")
+    else:
+        return msg
 
 
 @task(

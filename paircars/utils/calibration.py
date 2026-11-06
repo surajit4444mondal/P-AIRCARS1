@@ -354,10 +354,10 @@ def interpolate_quartical(caltables, overwrite=False):
     return outlist
 
 
-def multiply_quartical_tables(caltable1,caltable2,output="multiplied.qcal"):
+def multiply_quartical_tables(caltable1, caltable2, output="multiplied.qcal"):
     """
     Multiply Jones of two same type of quartical caltables, J = J1 x J2
-    
+
     Parameters
     ----------
     caltable1 : str
@@ -366,7 +366,7 @@ def multiply_quartical_tables(caltable1,caltable2,output="multiplied.qcal"):
         Second caltable
     output : str, optional
         Output caltable name
-        
+
     Returns
     -------
     str
@@ -376,20 +376,28 @@ def multiply_quartical_tables(caltable1,caltable2,output="multiplied.qcal"):
     soltypes1 = get_quartical_soltype(caltable1)
     caltable2 = caltable2.rstrip("/")
     soltypes2 = get_quartical_soltype(caltable2)
-    if len(soltypes1) == 0 and len(soltypes2)==0:
-        print(f"No solution is present in {caltable1} and {caltable2}. Not performing multiplication.")
-        return 
-    elif len(soltypes1)==0:
-        print(f"No solution is present in {caltable1}. Returning {caltable2} without multiplication.")
+    if len(soltypes1) == 0 and len(soltypes2) == 0:
+        print(
+            f"No solution is present in {caltable1} and {caltable2}. Not performing multiplication."
+        )
+        return
+    elif len(soltypes1) == 0:
+        print(
+            f"No solution is present in {caltable1}. Returning {caltable2} without multiplication."
+        )
         return caltable2
-    elif len(soltypes2)==0:
-        print(f"No solution is present in {caltable2}. Returning {caltable1} without multiplication.")
+    elif len(soltypes2) == 0:
+        print(
+            f"No solution is present in {caltable2}. Returning {caltable1} without multiplication."
+        )
         return caltable1
     else:
         soltype1 = soltypes1[0]
         soltype2 = soltypes2[0]
-        if soltype1!=soltype2:
-            print("Caltables are of different types, {soltype1} and {soltype2}. Not multiplying.")
+        if soltype1 != soltype2:
+            print(
+                "Caltables are of different types, {soltype1} and {soltype2}. Not multiplying."
+            )
             return
         gains1 = xds_from_zarr(f"{caltable1}::{soltype1}")
         gains2 = xds_from_zarr(f"{caltable2}::{soltype2}")
@@ -397,30 +405,33 @@ def multiply_quartical_tables(caltable1,caltable2,output="multiplied.qcal"):
         gain2_data = gains2[0].gains.to_numpy()
         shape1 = gain1_data.shape
         shape2 = gain2_data.shape
-        if shape1!=shape2:
+        if shape1 != shape2:
             print(f"Gain shape mismatch. Shape 1: {shape1}, shape 2: {shape2}.")
             return
-        final_gain = np.matmul(gain1_data.reshape(*gain1_data.shape[:-1], 2, 2),gain2_data.reshape(*gain2_data.shape[:-1], 2, 2))
+        final_gain = np.matmul(
+            gain1_data.reshape(*gain1_data.shape[:-1], 2, 2),
+            gain2_data.reshape(*gain2_data.shape[:-1], 2, 2),
+        )
         final_gain = final_gain.reshape(*final_gain.shape[:-2], 4)
         gains1[0].update(
-                {
-                    "gains": (
-                        [
-                            "gain_time",
-                            "gain_freq",
-                            "antenna",
-                            "direction",
-                            "correlation",
-                        ],
-                        final_gain,
-                    )
-                }
-            )
+            {
+                "gains": (
+                    [
+                        "gain_time",
+                        "gain_freq",
+                        "antenna",
+                        "direction",
+                        "correlation",
+                    ],
+                    final_gain,
+                )
+            }
+        )
         write_xds_list = xds_to_zarr(gains1, f"{output}::{soltype1}")
         dask.compute(write_xds_list, scheduler="single-threaded")
         return output
 
-                      
+
 def make_interpolated_quartical_table(caltables, target_freqs, output_name):
     """
     Interpolate one or more QuartiCal calibration tables onto a new frequency grid.

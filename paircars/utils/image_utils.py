@@ -165,8 +165,8 @@ def check_valid_image(imagename):
         return False
     else:
         return True
-        
-        
+
+
 def calc_solar_image_stat(imagename, modelname="", disc_radius=50):
     """
     Calculate solar image dynamic range

@@ -219,11 +219,16 @@ def perform_imaging(
             for f in freq_list:
                 start_freq = float(f.split("~")[0])
                 end_freq = float(f.split("~")[-1])
-                if start_freq >= np.nanmin(freqs) and end_freq <= np.nanmax(freqs):
+                if start_freq >= np.nanmin(freqs):
                     start_chan = np.argmin(np.abs(start_freq - freqs))
+                else:
+                    start_chan = 0
+                if end_freq <= np.nanmax(freqs):
                     end_chan = np.argmin(np.abs(end_freq - freqs))
-                    start_chans.append(start_chan)
-                    end_chans.append(end_chan)
+                else:
+                    end_chan = len(freqs)
+                start_chans.append(start_chan)
+                end_chans.append(end_chan)
         else:
             start_chans = [0]
             end_chans = [len(freqs)]
@@ -482,7 +487,7 @@ def perform_imaging(
                             if saveres:
                                 reslist = sorted(reslist)
                                 valid_residuals = []
-                       
+
                             for i in range(len(imagelist)):
                                 image = imagelist[i]
                                 if savemodel:
@@ -507,11 +512,11 @@ def perform_imaging(
                                 modellist = sorted(valid_models)
                             if saveres:
                                 reslist = sorted(valid_residuals)
-                            
+
                             img_logger.info(
                                 f"Total {len(imagelist)} valid images are made.\n"
                             )
-                            
+
                             img_logger.info("Renaming and making plots.\n")
                             os.makedirs(imagedir + "/images", exist_ok=True)
                             final_image_list = []

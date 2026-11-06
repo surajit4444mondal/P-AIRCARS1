@@ -359,7 +359,7 @@ def cal_apparent_solarcenter(imagename, sigma=10, use_gaussian=False):
 
             max_pos = np.where(data2d == np.nanmax(data2d))
             center_x, center_y = max_pos[1][0], max_pos[0][0]
-            sun_rad_pix = 2 * sun_dia * 60 / cellsize  # 2 solar radii
+            sun_rad_pix = 4 * sun_dia * 60 / cellsize  # 4 solar radii
             masked_array = create_circular_mask_array(
                 data2d, sun_rad_pix, center_x=center_x, center_y=center_y
             )

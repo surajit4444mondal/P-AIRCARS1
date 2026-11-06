@@ -27,9 +27,10 @@ from paircars.utils.udocker_utils import (
     initialize_hyperdrive_container,
     initialize_hyperbeam_container,
     initialize_postgres_container,
+    initialize_breizorro_container,
 )
 from paircars.utils.killjob_utils import kill_port
-from paircars.pipeline.beam_interpolate import do_beam_interpolate
+
 
 logging.getLogger("distributed").setLevel(logging.ERROR)
 logging.getLogger("tornado.application").setLevel(logging.CRITICAL)
@@ -42,7 +43,15 @@ all_filenames = [
     "MWA_sweet_spots.npy",
     "Ref_mean_bandpass_final.npy",
     "postgres_credentials.npy",
+]
+
+all_beam_files = [
     "mwa_full_embedded_element_pattern.h5",
+    "mwa_full_embedded_element_pattern_40.h5",
+    "mwa_full_embedded_element_pattern_80.h5",
+    "mwa_full_embedded_element_pattern_160.h5",
+    "mwa_full_embedded_element_pattern_320.h5",
+    "mwa_full_embedded_element_pattern_640.h5",
 ]
 
 
@@ -51,23 +60,19 @@ def get_zenodo_file_urls(record_id):
     response = requests.get(url)
     response.raise_for_status()
     data = response.json()
-    return [(f["links"]["self"], f["key"]) for f in data.get("files", [])]
+    return [(f"https://zenodo.org/records/{record_id}/files/{f['key']}", f["key"]) for f in data.get("files", [])]
 
 
-def download_with_parfive(record_id, update=False, output_dir="zenodo_download"):
+def download_with_parfive(record_id, all_filenames, update=False, output_dir="zenodo_download"):
     print("####################################")
     print("Downloading P-AIRCARS data files ...")
     print("####################################")
     urls = get_zenodo_file_urls(record_id)
-    urls.append(
-        (
-            "http://ws.mwatelescope.org/static/mwa_full_embedded_element_pattern.h5",
-            "mwa_full_embedded_element_pattern.h5",
-        )
-    )
     os.makedirs(output_dir, exist_ok=True)
     total_cpu = psutil.cpu_count()
-    dl = Downloader(max_conn=min(total_cpu, len(all_filenames) + 1))
+    total_connection = max(1,min(total_cpu, len(all_filenames) + 1))
+    print(f"Total parallel download: {total_connection}")
+    dl = Downloader(max_conn=total_connection)
     for file_url, filename in urls:
         if filename in all_filenames:
             if not os.path.exists(f"{output_dir}/{filename}") or update:
@@ -140,22 +145,19 @@ def init_paircars_data(
 
     if unavailable_files or update:
         record_id = "18640418"
-        download_with_parfive(record_id, update=update, output_dir=datadir)
+        download_with_parfive(record_id, all_filenames, update=update, output_dir=datadir)
         timestr = dt.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         print(f"P-AIRCARS data are updated in: {datadir} at time: {timestr}")
-
-    freqres_list = [40, 80, 160, 320, 640]
-    file_size_list = [6520103392, 3223921432, 1575254952, 750739184, 338476000]
-    mwapb_file = f"{datadir}/mwa_full_embedded_element_pattern.h5"
-    for i in range(len(freqres_list)):
-        freqres = freqres_list[i]
-        file_size = file_size_list[i]
-        outfile = mwapb_file.split(".h5")[0] + f"_{freqres}.h5"
-        if os.path.exists(outfile) is False or update:
-            print(f"Making interpolated beam at frequency resolution: {freqres} kHz")
-            do_beam_interpolate(
-                mwapb_file, new_freq_res=int(freqres), expected_file_size=file_size
-            )
+        
+    unavailable_beam_files = [
+        f for f in all_beam_files if not os.path.exists(f"{datadir}/{f}")
+    ]
+    
+    if unavailable_beam_files or update:
+        beam_record_id = "23974674"
+        download_with_parfive(beam_record_id, all_beam_files, update=update, output_dir=datadir)
+        timestr = dt.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"MWA beam files are updated in: {datadir} at time: {timestr}")
 
 
 def main(
@@ -366,6 +368,26 @@ def main(
                 trial += 1
                 if trial == 2:
                     print("Shadems container is not initialized.")
+                    print("Check you internet connectivity.")
+
+        ##############################
+        # Breizorro
+        ##############################
+        trial = 0
+        while trial < 2:
+            breizorro_container_name = initialize_breizorro_container(
+                update=update, verbose=True
+            )
+            if (
+                breizorro_container_name is not None
+                and breizorro_container_name == "paircarsbreizorro"
+            ):
+                print("Breizorro container is initialized")
+                break
+            else:
+                trial += 1
+                if trial == 2:
+                    print("Breizorro container is not initialized.")
                     print("Check you internet connectivity.")
 
         #########################################

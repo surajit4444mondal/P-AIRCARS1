@@ -5,6 +5,7 @@ import subprocess
 import numpy as np
 import socket
 import getpass
+from pathlib import Path
 from .basic_utils import get_datadir, wait_for_port
 from .killjob_utils import terminate_process_and_children, kill_port
 from .resource_utils import limit_threads
@@ -342,6 +343,177 @@ def initialize_postgres_container(name="paircarspostgres", update=False, verbose
     image_name = "postgres"
     msg = initialize_container(image_name, name, update=update, verbose=verbose)
     return msg
+
+
+def initialize_breizorro_container(
+    name="paircarsbreizorro", update=False, verbose=False
+):
+    """
+    Initialize breizorro container
+
+    Parameters
+    ----------
+    name : str, optional
+        Name of the container
+    update : bool, optional
+        Update container
+    verbose : bool, optional
+        Verbose output
+
+    Returns
+    -------
+    bool
+        Whether initialized successfully or not
+    """
+    print("Initializing breizorro container.")
+    image_name = "devojyoti96/breizorro:latest"
+    msg = initialize_container(image_name, name, update=update, verbose=verbose)
+    return msg
+
+
+def build_breizorro_udocker_command(breizorro_cmd, image):
+    """
+    Build an udocker command for running breizorro while automatically mounting all host paths used by file-related breizorro options.
+
+    Parameters
+    ----------
+    breizorro_args : list
+        Arguments passed to breizorro
+    image : str
+        udocker image name.
+
+    Returns
+    -------
+    list
+        Complete udocker command.
+    """
+    PATH_OPTIONS = {
+        "-r",
+        "--restored-image",
+        "-m",
+        "--mask-image",
+        "-o",
+        "--outfile",
+        "--outcatalog",
+        "--outregion",
+        "--merge",
+        "--subtract",
+    }
+    breizorro_args = breizorro_cmd.split(" ")
+    container_root = "/breizorro_udocker_" + next(tempfile._get_candidate_names())
+    mounts = {}
+    rewritten_args = []
+    i = 0
+    while i < len(breizorro_args):
+        arg = breizorro_args[i]
+        # ------------------------------------------------------------
+        # Options which take a filepath/list of filepaths
+        # ------------------------------------------------------------
+        if arg in PATH_OPTIONS:
+            rewritten_args.append(arg)
+            if i + 1 >= len(breizorro_args):
+                raise ValueError(f"Missing value for {arg}")
+            value = breizorro_args[i + 1]
+            # --merge and --subtract can contain multiple files
+            if arg in {"--merge", "--subtract"}:
+                files = value.split(",")
+                container_files = []
+                for filename in files:
+                    filename = filename.strip()
+                    host_path = Path(filename).expanduser().resolve()
+                    parent = host_path.parent
+                    if parent not in mounts:
+                        container_path = Path(container_root) / parent.name
+                        mounts[parent] = container_path
+                    else:
+                        container_path = mounts[parent]
+                    container_file = container_path / host_path.name
+                    container_files.append(str(container_file))
+                rewritten_args.append(",".join(container_files))
+            else:
+                host_path = Path(value).expanduser().resolve()
+                parent = host_path.parent
+                if parent not in mounts:
+                    container_path = Path(container_root) / parent.name
+                    mounts[parent] = container_path
+                else:
+                    container_path = mounts[parent]
+                container_file = container_path / host_path.name
+                rewritten_args.append(str(container_file))
+            i += 2
+            continue
+        # ------------------------------------------------------------
+        # Normal argument
+        # ------------------------------------------------------------
+        rewritten_args.append(arg)
+        i += 1
+    # ------------------------------------------------------------
+    # Construct udocker command
+    # ------------------------------------------------------------
+    cmd = ["udocker", "run", "--nobanner"]
+    for host_dir, container_dir in mounts.items():
+        cmd.append(f"--volume={host_dir}:{container_dir}")
+    cmd.append(image)
+    cmd.extend(rewritten_args)
+    return cmd
+
+
+def run_breizorro(
+    breizorro_cmd,
+    container_name="paircarsbreizorro",
+    check_container=False,
+    verbose=False,
+):
+    """
+    Run breizorro inside a udocker container (no root permission required).
+
+    Parameters
+    ----------
+    breizorro_cmd : str
+        Full breizorro command as a string.
+    container_name : str, optional
+        Container name
+    check_container : bool, optional
+        Check container presence or not
+    verbose : bool, optional
+        Verbose output or not
+
+    Returns
+    -------
+    int
+        Success message
+    """
+    init_udocker()
+    if check_container:
+        container_present = check_udocker_container(container_name)
+        if not container_present:
+            print(f"Initializing {container_name}...")
+            container_name = initialize_wsclean_container(
+                name=container_name, verbose=True
+            )
+            if container_name is None:
+                print(
+                    f"Container {container_name} is not initiated. First initiate container and then run."
+                )
+                return 1
+    try:
+        full_command = build_breizorro_udocker_command(breizorro_cmd, container_name)
+        if verbose:
+            print(f"{breizorro_cmd}\n")
+            result = subprocess.run(
+                full_command,
+            )
+        else:
+            result = subprocess.run(
+                full_command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        exit_code = result.returncode
+        return 0 if exit_code == 0 else 1
+    except Exception:
+        traceback.print_exc()
+        return 1
 
 
 def run_wsclean(

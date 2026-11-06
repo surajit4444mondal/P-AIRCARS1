@@ -9,17 +9,21 @@ import logging
 import shlex
 import re
 import numpy as np
+import getpass
 from dotenv import load_dotenv
 from dask.distributed import Client
 from dask_jobqueue import SLURMCluster
 from pyfiglet import Figlet
 from collections import deque
-from paircars.utils.basic_utils import get_cachedir
+from itertools import cycle
+from paircars.utils.basic_utils import get_datadir
 from paircars.utils.proc_manage_utils import (
     get_scheduler_name,
     detect_best_interface,
     get_jobid,
     get_total_nodes,
+    CPUAccountingPlugin,
+    colorize_log,
 )
 
 
@@ -181,8 +185,7 @@ def get_max_walltime(partition):
         raise ValueError(f"Partition {partition} not found.")
     max_time = partitions[partition]
     return max_time, slurm_time_to_seconds(max_time)
-
-
+    
 def get_slurm_dask_cluster(
     dask_dir,
     jobid=None,
@@ -312,6 +315,7 @@ def get_slurm_dask_cluster(
             f"export TEMP={dask_dir_tmp}",
             f"export DASK_TEMPORARY_DIRECTORY={dask_dir_tmp}",
             "export PYTHONWARNINGS=ignore::UserWarning:contextlib",
+            "export DASK_DISTRIBUTED__WORKER__DAEMON=false",
         ]
 
         job_extra = [
@@ -352,6 +356,7 @@ def get_slurm_dask_cluster(
             )
             client = Client(cluster, heartbeat_interval="5s")
             client.run_on_scheduler(gc.collect)
+            client.register_plugin(CPUAccountingPlugin(interval=1.0))
             print("Using interface: auto-detected")
         except Exception:
             cluster = SLURMCluster(
@@ -374,6 +379,7 @@ def get_slurm_dask_cluster(
             )
             client = Client(cluster, heartbeat_interval="5s")
             client.run_on_scheduler(gc.collect)
+            client.register_plugin(CPUAccountingPlugin(interval=1.0))
             print(f"Using interface: {interface}")
 
         if verbose:
@@ -418,11 +424,6 @@ def submit_slurm_master_flow(args, jobid):
         args_list.remove("--log2term")
     cli_cmd = "run-mwa-masterflow " + " ".join(args_list) + f" --jobid {jobid}"
 
-    if hasattr(args, "log2term"):
-        log2term = args.log2term
-    else:
-        log2term = False
-
     if hasattr(args, "partition") and args.partition is not None:
         max_time, max_time_second = get_max_walltime(args.partition)
     else:
@@ -433,9 +434,9 @@ def submit_slurm_master_flow(args, jobid):
     else:
         print("Please provide a work directory.")
         return 1
-
-    cachedir = f"{get_cachedir()}/prefect_{scheduler_name}"
-    config_file = f"{cachedir}/prefect.config.npy"
+    username = getpass.getuser()
+    datadir = f"{get_datadir()}/{username}/prefect_{scheduler_name}"
+    config_file = f"{datadir}/prefect.config.npy"
     config = np.load(config_file, allow_pickle=True).all()
     if os.path.exists(config_file) is False:
         print(
@@ -517,66 +518,75 @@ def submit_slurm_master_flow(args, jobid):
         print(f"Batch script: {script_path} is ready for submission.")
         print(f"Main logger: {log_file}")
         print("######################################################")
-        result = subprocess.run(["sbatch", script_path], stderr=subprocess.DEVNULL)
-        exit_code = result.returncode
-        if exit_code == 0:
-            print(f"P-AIRCARS job with Job ID: {jobid} is submitted successfully.")
-            if not log2term:
-                return exit_code
-            else:
-                print("Streaming logs to terminal...\n")
-                last_lines = deque(maxlen=500)
-                only_run_print = False
-                printing_traceback = False
-                traceback_waittime = None
-                last_write_time = time.time()
-                with open(log_file, "r") as log:
-                    log.seek(0, os.SEEK_END)
-                    while True:
-                        line = log.readline()
-                        wait_time = time.time() - last_write_time
-                        if (
-                            traceback_waittime is not None
-                            and wait_time > traceback_waittime
-                        ):
-                            return 1
-                        if not line:
-                            time.sleep(0.5)
-                            continue
-                        last_lines.append(line)
-                        lower = line.lower()
-                        upper = line.upper()
-                        if (
-                            "task run" in lower or "flow run" in lower
-                        ) and "p-aircars execution is finished" not in lower:
-                            only_run_print = True
-                        if (
-                            "killed" in lower
-                            or (
-                                "ERROR" in upper
-                                and "flow run" in lower
-                                and f"paircars_{jobid}" in lower
-                            )
-                        ) and not printing_traceback:
-                            printing_traceback = True
-                            traceback_waittime = 300
-                        if (
-                            printing_traceback
-                            or not only_run_print
-                            or ("task run" in lower or "flow run" in lower)
-                            or "p-aircars execution is finished" in lower
-                        ):
-                            sys.stdout.write(line)
-                            sys.stdout.flush()
-                            last_write_time = time.time()
-                        if (
-                            "p-aircars execution is finished" in lower
-                            or "cluster closed" in lower
-                        ):
-                            return 0
-        else:
-            print(f"P-AIRCARS job with Job ID: {jobid} could not be submitted.")
-        return 0 if exit_code == 0 else 1
+        try:
+            # Always run job in background
+            with open(log_file, "a", buffering=1) as log:
+                proc = subprocess.Popen(
+                    ["sbatch", script_path],
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                    bufsize=1,
+                )
+            print("Master flow started in background")
+            print(f"Main log: {log_file}")
+            if not args.log2term:
+                return 0
+            print("Streaming logs to terminal...\n")
+            last_lines = deque(maxlen=500)
+            only_run_print = False
+            printing_traceback = False
+            traceback_waittime = None
+            last_write_time = time.time()
+            with open(log_file, "r") as log:
+                log.seek(0, os.SEEK_END)
+                while True:
+                    exit_code = proc.poll()
+                    line = log.readline()
+                    wait_time = time.time() - last_write_time
+                    if exit_code is not None and (
+                        traceback_waittime is not None
+                        and wait_time > traceback_waittime
+                    ):
+                        return 1
+                    if not line:
+                        time.sleep(0.5)
+                        continue
+                    last_lines.append(line)
+                    lower = line.lower()
+                    upper = line.upper()
+                    if (
+                        "task run" in lower or "flow run" in lower
+                    ) and "p-aircars execution is finished" not in lower:
+                        only_run_print = True
+                    if (
+                        "killed" in lower
+                        or (
+                            "ERROR" in upper
+                            and "flow run" in lower
+                            and f"paircars_{jobid}" in lower
+                        )
+                    ) and not printing_traceback:
+                        printing_traceback = True
+                        traceback_waittime = 300
+                    if (
+                        printing_traceback
+                        or not only_run_print
+                        or ("task run" in lower or "flow run" in lower)
+                        or "p-aircars execution is finished" in lower
+                    ):
+                        sys.stdout.write(colorize_log(line))
+                        sys.stdout.flush()
+                        last_write_time = time.time()
+                    if (
+                        "p-aircars execution is finished" in lower
+                        or "cluster closed" in lower
+                    ):
+                        return 0
+        except Exception:
+            traceback.print_exc()
+            return 1
     except Exception:
         traceback.print_exc()
         return 1
+       

@@ -2,7 +2,7 @@ import psutil
 import numpy as np
 import os
 from casatools import msmetadata, ms as casamstool, table, measures
-from .basic_utils import timestamp_to_mjdsec, mjdsec_to_timestamp
+from .basic_utils import timestamp_to_mjdsec, mjdsec_to_timestamp, split_equal_chunks
 from .resource_utils import limit_threads
 
 ##########################
@@ -93,79 +93,86 @@ def get_timeranges(
     """
     msmd = msmetadata()
     msmd.open(msname)
-    all_times = msmd.timesforspws(0)
+    all_times = msmd.timesforspws(0).tolist()
     msmd.close()
     msmd.done()
     time_ranges = []
     if len(all_times) == 1:
-        time_ranges.append([mjdsec_to_timestamp(all_times[0], str_format=1)])
+        time_ranges.append(mjdsec_to_timestamp(all_times[0], str_format=1))
         return time_ranges
     if (
         quack_timestamps > 0 and len(all_times) > 2 * quack_timestamps + 3
     ):  # At least 3 timestamps remain after quack flagging
         quack_timestamps += 1
         all_times = all_times[quack_timestamps:-quack_timestamps]
+        if len(all_times) == 1:
+            time_ranges.append(mjdsec_to_timestamp(all_times[0], str_format=1))
+            return time_ranges
 
-    start_time = min(all_times)
-    end_time = max(all_times)
-    if time_interval < 0 or time_window < 0 or time_interval <= time_window:
-        if max_time_chunk <= 0 or (end_time - start_time) <= max_time_chunk:
-            t = (
-                mjdsec_to_timestamp(start_time, str_format=1)
-                + "~"
-                + mjdsec_to_timestamp(end_time, str_format=1)
-            )
-            time_ranges.append([t])
-        else:
-            while True:
-                s = start_time
-                e = s + max_time_chunk
-                t = (
-                    mjdsec_to_timestamp(s, str_format=1)
-                    + "~"
-                    + mjdsec_to_timestamp(min(end_time, e), str_format=1)
-                )
-                time_ranges.append([t])
-                if e > end_time:
-                    break
-                start_time = e
-        return time_ranges
-
-    timeres = all_times[1] - all_times[0]
-    ntime_chunk = max(1, int(time_interval / timeres))
-    ntime = int(time_window / timeres)
     if max_time_chunk > 0:
-        n_time_chunk = int(max_time_chunk / timeres)
+        total_time = max(all_times) - min(all_times)
+        nchunk = max(1, int(total_time // max_time_chunk))
     else:
-        n_time_chunk = len(all_times)
-    for j in range(0, len(all_times), n_time_chunk):
-        times = all_times[j : j + n_time_chunk]
-        sub_list = []
-        for i in range(0, len(times), ntime_chunk):
-            try:
-                start_time = times[i]
-            except Exception:
-                if ntime > 0:
-                    start_time = times[-ntime]
-                else:
-                    start_time = times[-1]
-            if start_time not in times:
-                nearpos = np.argmin(abs(start_time - times))
-                start_time = times[nearpos]
-            try:
-                end_time = times[i + ntime]
-            except Exception:
-                end_time = times[-1]
-            if end_time not in times:
-                nearpos = np.argmin(abs(end_time - times))
-                end_time = times[nearpos]
-            if end_time > start_time + timeres:
-                sub_list.append(
-                    f"{mjdsec_to_timestamp(start_time, str_format=1)}~{mjdsec_to_timestamp(end_time-timeres, str_format=1)}"
+        nchunk = 1
+    all_time_chunks = split_equal_chunks(all_times, nchunk)
+
+    for all_times in all_time_chunks:
+        sub_time_ranges = []
+        start_time = min(all_times)
+        end_time = max(all_times)
+        if time_interval < 0 or time_window < 0 or time_interval <= time_window:
+            if max_time_chunk <= 0 or (end_time - start_time) <= max_time_chunk:
+                t = (
+                    mjdsec_to_timestamp(start_time, str_format=1)
+                    + "~"
+                    + mjdsec_to_timestamp(end_time, str_format=1)
                 )
+                sub_time_ranges.append(t)
             else:
-                sub_list.append(f"{mjdsec_to_timestamp(start_time, str_format=1)}")
-        time_ranges.append(sub_list)
+                while True:
+                    s = start_time
+                    e = s + max_time_chunk
+                    t = (
+                        mjdsec_to_timestamp(s, str_format=1)
+                        + "~"
+                        + mjdsec_to_timestamp(min(end_time, e), str_format=1)
+                    )
+                    sub_time_ranges.append(t)
+                    if e > end_time:
+                        break
+                    start_time = e
+        else:
+            timeres = all_times[1] - all_times[0]
+            ntime_chunk = max(1, int(time_interval / timeres))
+            ntime = int(time_window / timeres)
+            for j in range(0, len(all_times)):
+                for i in range(0, len(all_times), ntime_chunk):
+                    try:
+                        start_time = all_times[i]
+                    except Exception:
+                        if ntime > 0:
+                            start_time = all_times[-ntime]
+                        else:
+                            start_time = all_times[-1]
+                    if start_time not in all_times:
+                        nearpos = np.argmin(abs(start_time - all_times))
+                        start_time = all_times[nearpos]
+                    try:
+                        end_time = all_times[i + ntime]
+                    except Exception:
+                        end_time = all_times[-1]
+                    if end_time not in all_times:
+                        nearpos = np.argmin(abs(end_time - all_times))
+                        end_time = all_times[nearpos]
+                    if end_time > start_time + timeres:
+                        sub_time_ranges.append(
+                            f"{mjdsec_to_timestamp(start_time, str_format=1)}~{mjdsec_to_timestamp(end_time-timeres, str_format=1)}"
+                        )
+                    else:
+                        sub_time_ranges.append(
+                            f"{mjdsec_to_timestamp(start_time, str_format=1)}"
+                        )
+        time_ranges.append(sub_time_ranges)
     return time_ranges
 
 
